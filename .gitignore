@@ -1,0 +1,17 @@
+# Rust
+/target
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# LSP
+.claude/
+
+# Submodule, fix for JJ
+tree-sitter-wasm/
