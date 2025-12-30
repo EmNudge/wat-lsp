@@ -88,3 +88,50 @@ jobs:
           asset_path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
           asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/octet-stream
+
+      - name: Upload binary artifact for extension
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+  publish-vscode-extension:
+    name: Publish VS Code Extension
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Download all server binaries
+        uses: actions/download-artifact@v6
+        with:
+          path: server-binaries
+
+      - name: Organize server binaries
+        run: |
+          mkdir -p vscode-extension/server
+          cp server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust vscode-extension/server/wat-lsp-rust-linux-x64
+          cp server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust.exe vscode-extension/server/wat-lsp-rust-win32-x64.exe
+          cp server-binaries/server-x86_64-apple-darwin/wat-lsp-rust vscode-extension/server/wat-lsp-rust-darwin-x64
+          cp server-binaries/server-aarch64-apple-darwin/wat-lsp-rust vscode-extension/server/wat-lsp-rust-darwin-arm64
+          chmod +x vscode-extension/server/wat-lsp-rust-*
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm install
+
+      - name: Package extension
+        working-directory: vscode-extension
+        run: npx vsce package
+
+      - name: Publish to Open VSX
+        working-directory: vscode-extension
+        run: |
+          npm install -g ovsx
+          ovsx publish *.vsix -p ${{ secrets.OPENVSX_TOKEN }}
