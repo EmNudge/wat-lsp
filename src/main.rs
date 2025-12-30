@@ -8,11 +8,15 @@ mod symbols;
 mod utils;
 
 use dashmap::DashMap;
+use tokio::sync::watch;
+use tokio::time::{sleep, Duration};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::Tree;
 use wat_lsp_rust::tree_sitter_bindings;
+
+const DEBOUNCE_DURATION_MS: u64 = 500;
 
 #[derive(Debug)]
 struct Backend {
@@ -20,6 +24,7 @@ struct Backend {
     document_map: DashMap<String, String>,
     symbol_map: DashMap<String, symbols::SymbolTable>,
     tree_map: DashMap<String, Tree>,
+    validation_cancellation: DashMap<String, watch::Sender<bool>>,
 }
 
 impl Backend {
@@ -29,6 +34,7 @@ impl Backend {
             document_map: DashMap::new(),
             symbol_map: DashMap::new(),
             tree_map: DashMap::new(),
+            validation_cancellation: DashMap::new(),
         }
     }
 
@@ -36,25 +42,94 @@ impl Backend {
         // Parse with tree-sitter and cache the tree
         let mut parser = tree_sitter_bindings::create_parser();
         if let Some(tree) = parser.parse(&text, None) {
-            // Generate diagnostics for syntax errors
-            let diagnostics = diagnostics::provide_diagnostics(&tree, &text);
+            // Generate IMMEDIATE syntax diagnostics only
+            let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, &text);
 
-            // Publish diagnostics to the client
+            // Extract symbols from the document (needed for semantic diagnostics)
+            let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(&text) {
+                self.symbol_map.insert(uri.clone(), symbol_table.clone());
+                diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table)
+            } else {
+                vec![]
+            };
+
+            // Merge syntax and semantic diagnostics
+            let mut combined = syntax_diagnostics;
+            combined.extend(semantic_diagnostics);
+
+            // Publish immediate diagnostics
             if let Ok(lsp_uri) = uri.parse() {
                 self.client
-                    .publish_diagnostics(lsp_uri, diagnostics, None)
+                    .publish_diagnostics(lsp_uri, combined, None)
                     .await;
             }
 
             // Cache the parsed tree
             self.tree_map.insert(uri.clone(), tree);
-
-            // Extract symbols from the document
-            if let Ok(symbol_table) = parser::parse_document(&text) {
-                self.symbol_map.insert(uri.clone(), symbol_table);
-            }
         }
-        self.document_map.insert(uri, text);
+        self.document_map.insert(uri.clone(), text.clone());
+
+        // Schedule debounced wast validation
+        self.schedule_wast_validation(uri, text).await;
+    }
+
+    async fn schedule_wast_validation(&self, uri: String, text: String) {
+        // Cancel any existing validation task for this document
+        if let Some(entry) = self.validation_cancellation.get(&uri) {
+            let _ = entry.send(true); // Signal cancellation
+        }
+
+        // Create new cancellation channel
+        let (tx, mut rx) = watch::channel(false);
+        self.validation_cancellation.insert(uri.clone(), tx);
+
+        // Clone what we need for the async task
+        let client = self.client.clone();
+        let tree_map = self.tree_map.clone();
+
+        // Spawn background task
+        tokio::spawn(async move {
+            // Wait for debounce period or cancellation
+            tokio::select! {
+                _ = sleep(Duration::from_millis(DEBOUNCE_DURATION_MS)) => {
+                    // Debounce period elapsed, run validation
+                }
+                _ = rx.changed() => {
+                    // Cancelled by new edit
+                    return;
+                }
+            }
+
+            // Get tree-sitter diagnostics (from cached tree)
+            let tree_diags = if let Some(tree) = tree_map.get(&uri) {
+                diagnostics::provide_tree_sitter_diagnostics(&tree, &text)
+            } else {
+                vec![]
+            };
+
+            // Get semantic diagnostics (undefined label references)
+            let semantic_diags = if let Some(tree) = tree_map.get(&uri) {
+                if let Ok(symbols) = parser::parse_document(&text) {
+                    diagnostics::provide_semantic_diagnostics(&tree, &text, &symbols)
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            };
+
+            // Run wast validation
+            let wast_diags = diagnostics::validate_wat(&text);
+
+            // Merge all diagnostics
+            let combined =
+                diagnostics::merge_all_diagnostics(tree_diags, semantic_diags, wast_diags);
+
+            // Publish combined diagnostics
+            if let Ok(lsp_uri) = uri.parse() {
+                client.publish_diagnostics(lsp_uri, combined, None).await;
+            }
+        });
     }
 }
 
@@ -171,27 +246,37 @@ impl LanguageServer for Backend {
         // Reparse with the edited tree for better performance
         let mut parser = tree_sitter_bindings::create_parser();
         if let Some(tree) = parser.parse(&text, old_tree.as_ref()) {
-            // Generate diagnostics
-            let diagnostics = diagnostics::provide_diagnostics(&tree, &text);
+            // Generate IMMEDIATE syntax diagnostics
+            let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, &text);
 
-            // Publish diagnostics
+            // Extract symbols and generate semantic diagnostics
+            let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(&text) {
+                self.symbol_map.insert(uri.clone(), symbol_table.clone());
+                diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table)
+            } else {
+                vec![]
+            };
+
+            // Merge syntax and semantic diagnostics
+            let mut combined = syntax_diagnostics;
+            combined.extend(semantic_diagnostics);
+
+            // Publish immediate diagnostics
             if let Ok(lsp_uri) = uri.parse() {
                 self.client
-                    .publish_diagnostics(lsp_uri, diagnostics, None)
+                    .publish_diagnostics(lsp_uri, combined, None)
                     .await;
             }
 
             // Cache the new tree
             self.tree_map.insert(uri.clone(), tree);
-
-            // Re-extract symbols
-            if let Ok(symbol_table) = parser::parse_document(&text) {
-                self.symbol_map.insert(uri.clone(), symbol_table);
-            }
         }
 
         // Update document text
-        self.document_map.insert(uri, text);
+        self.document_map.insert(uri.clone(), text.clone());
+
+        // Schedule debounced wast validation
+        self.schedule_wast_validation(uri, text).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -206,6 +291,9 @@ impl LanguageServer for Backend {
         self.document_map.remove(&uri);
         self.symbol_map.remove(&uri);
         self.tree_map.remove(&uri);
+
+        // Cancel any pending validation
+        self.validation_cancellation.remove(&uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

@@ -2,7 +2,7 @@ use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
 
 /// Provide diagnostics for syntax errors in the document
-pub fn provide_diagnostics(tree: &Tree, source: &str) -> Vec<Diagnostic> {
+pub fn provide_tree_sitter_diagnostics(tree: &Tree, source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     walk_tree_for_errors(tree.root_node(), source, &mut diagnostics);
     diagnostics
@@ -97,7 +97,7 @@ mod tests {
         let mut parser = create_parser();
         let tree = parser.parse(document, None).unwrap();
 
-        let diagnostics = provide_diagnostics(&tree, document);
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
         assert_eq!(
             diagnostics.len(),
             0,
@@ -111,7 +111,7 @@ mod tests {
         let mut parser = create_parser();
         let tree = parser.parse(document, None).unwrap();
 
-        let diagnostics = provide_diagnostics(&tree, document);
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
         assert!(
             !diagnostics.is_empty(),
             "Invalid code should have diagnostics"
@@ -132,7 +132,7 @@ mod tests {
         let mut parser = create_parser();
         let tree = parser.parse(document, None).unwrap();
 
-        let diagnostics = provide_diagnostics(&tree, document);
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
         // Incomplete code may or may not produce errors depending on grammar
         // Just ensure we don't crash
         let _ = diagnostics;
@@ -144,7 +144,7 @@ mod tests {
         let mut parser = create_parser();
         let tree = parser.parse(document, None).unwrap();
 
-        let diagnostics = provide_diagnostics(&tree, document);
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
         assert!(!diagnostics.is_empty());
 
         // Verify that diagnostics have valid ranges
