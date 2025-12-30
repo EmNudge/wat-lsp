@@ -56,6 +56,19 @@ Shows parameter information during function calls:
 
 ## Building
 
+### Prerequisites
+
+This project requires `tree-sitter-cli` to be installed for generating the WAT parser at build time.
+
+Install it with:
+```bash
+npm install -g tree-sitter-cli
+# or
+cargo install tree-sitter-cli
+```
+
+### Build
+
 ```bash
 cargo build --release
 ```

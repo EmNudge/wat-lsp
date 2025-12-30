@@ -5,7 +5,9 @@ use tree_sitter::Tree;
 
 fn create_test_tree(document: &str) -> Tree {
     let mut parser = create_parser();
-    parser.parse(document, None).expect("Failed to parse test document")
+    parser
+        .parse(document, None)
+        .expect("Failed to parse test document")
 }
 
 fn create_test_symbols() -> SymbolTable {
@@ -65,7 +67,11 @@ fn test_number_constant_completion() {
     assert!(!completions.is_empty());
 
     let completion = &completions[0];
-    assert!(completion.insert_text.as_ref().unwrap().contains("i32.const 5"));
+    assert!(completion
+        .insert_text
+        .as_ref()
+        .unwrap()
+        .contains("i32.const 5"));
 }
 
 #[test]
@@ -78,7 +84,11 @@ fn test_float_constant_completion() {
     assert!(!completions.is_empty());
 
     let completion = &completions[0];
-    assert!(completion.insert_text.as_ref().unwrap().contains("f64.const 3.14"));
+    assert!(completion
+        .insert_text
+        .as_ref()
+        .unwrap()
+        .contains("f64.const 3.14"));
 }
 
 #[test]
@@ -143,7 +153,9 @@ fn test_global_set_emmet() {
     // Should only suggest mutable globals
     assert!(completions.iter().any(|c| c.label.contains("counter")));
     assert!(completions.iter().any(|c| {
-        c.insert_text.as_ref().is_some_and(|t| t.contains("global.set"))
+        c.insert_text
+            .as_ref()
+            .is_some_and(|t| t.contains("global.set"))
     }));
 }
 
@@ -267,9 +279,11 @@ fn test_dollar_sign_local_completion() {
     let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
 
     // Should suggest local parameters
-    assert!(completions.iter().any(|c| c.label.contains("x")),
+    assert!(
+        completions.iter().any(|c| c.label.contains("x")),
         "Expected completion with 'x' but got: {:?}",
-        completions.iter().map(|c| &c.label).collect::<Vec<_>>());
+        completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -327,5 +341,7 @@ fn test_completion_item_kinds() {
 
     let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
     // Type completions should have KEYWORD kind
-    assert!(completions.iter().all(|c| c.kind == Some(CompletionItemKind::KEYWORD)));
+    assert!(completions
+        .iter()
+        .all(|c| c.kind == Some(CompletionItemKind::KEYWORD)));
 }

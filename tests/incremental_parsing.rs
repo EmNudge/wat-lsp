@@ -167,9 +167,17 @@ fn test_multiple_incremental_edits() {
 
     // Apply multiple edits
     let edits = vec![
-        (Position::new(1, 0), Position::new(1, 0), "  (param $x i32)\n"),
+        (
+            Position::new(1, 0),
+            Position::new(1, 0),
+            "  (param $x i32)\n",
+        ),
         (Position::new(2, 0), Position::new(2, 0), "  (result i32)\n"),
-        (Position::new(3, 0), Position::new(3, 0), "  (local.get $x)\n"),
+        (
+            Position::new(3, 0),
+            Position::new(3, 0),
+            "  (local.get $x)\n",
+        ),
     ];
 
     for (start, end, text) in edits {

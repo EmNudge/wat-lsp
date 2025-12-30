@@ -1,9 +1,9 @@
-mod parser;
-mod symbols;
 mod completion;
-mod hover;
-mod signature;
 mod diagnostics;
+mod hover;
+mod parser;
+mod signature;
+mod symbols;
 mod utils;
 
 use dashmap::DashMap;
@@ -132,12 +132,8 @@ impl LanguageServer for Backend {
                 let old_end_byte = utils::position_to_byte(&text, range.end);
 
                 // Apply the text edit and get new end position
-                let new_end = utils::apply_text_edit(
-                    &mut text,
-                    range.start,
-                    range.end,
-                    &change.text,
-                );
+                let new_end =
+                    utils::apply_text_edit(&mut text, range.start, range.end, &change.text);
                 let new_end_byte = start_byte + change.text.len();
 
                 // Apply the edit to the tree if we have one
@@ -211,7 +207,11 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let position = params.text_document_position_params.position;
 
         let document = self.document_map.get(&uri);
@@ -243,7 +243,11 @@ impl LanguageServer for Backend {
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
-        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let position = params.text_document_position_params.position;
 
         let document = self.document_map.get(&uri);

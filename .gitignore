@@ -1,6 +1,5 @@
 # Rust
 /target
-Cargo.lock
 
 # IDE
 .vscode/
@@ -13,5 +12,10 @@ Cargo.lock
 # LSP
 .claude/
 
-# Submodule, fix for JJ
-tree-sitter-wasm/
+# Tree-sitter generated files
+tree-sitter-wasm/src/
+tree-sitter-wasm/binding.gyp
+tree-sitter-wasm/bindings/
+tree-sitter-wasm/*.wasm
+tree-sitter-wasm/package.json
+tree-sitter-wasm/node_modules/

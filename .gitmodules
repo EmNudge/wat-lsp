@@ -1,3 +1,0 @@
-[submodule "tree-sitter-wasm"]
-	path = tree-sitter-wasm
-	url = https://github.com/wasm-lsp/tree-sitter-wasm.git

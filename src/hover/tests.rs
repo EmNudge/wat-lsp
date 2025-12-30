@@ -1,11 +1,13 @@
 use super::*;
-use crate::utils::get_line_at_position;
 use crate::tree_sitter_bindings::create_parser;
+use crate::utils::get_line_at_position;
 use tree_sitter::Tree;
 
 fn create_test_tree(document: &str) -> Tree {
     let mut parser = create_parser();
-    parser.parse(document, None).expect("Failed to parse test document")
+    parser
+        .parse(document, None)
+        .expect("Failed to parse test document")
 }
 
 fn create_test_symbols() -> SymbolTable {
