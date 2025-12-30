@@ -101,7 +101,7 @@ fn test_15k_line_initial_parse_performance() {
     // Test diagnostics generation
     println!("\n=== Testing Diagnostics ===");
     let start = Instant::now();
-    let diagnostics = diagnostics::provide_diagnostics(&tree, &document);
+    let diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, &document);
     let diag_time = start.elapsed();
 
     println!("Diagnostics time: {:?}", diag_time);
