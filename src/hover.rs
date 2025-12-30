@@ -1,5 +1,7 @@
 use crate::symbols::*;
-use crate::utils::{find_containing_function, get_line_at_position, node_at_position};
+use crate::utils::{
+    find_containing_function, get_line_at_position, get_word_at_position, node_at_position,
+};
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
 
@@ -430,41 +432,6 @@ fn format_function_signature(func: &Function) -> String {
 
     sig.push(')');
     sig
-}
-
-fn get_word_at_position(document: &str, position: Position) -> Option<String> {
-    let line = get_line_at_position(document, position.line as usize)?;
-    let col = position.character as usize;
-
-    if col > line.len() {
-        return None;
-    }
-
-    // Find word boundaries
-    let mut start = col;
-    let mut end = col;
-
-    let chars: Vec<char> = line.chars().collect();
-
-    // Move back to start of word
-    while start > 0 && is_word_char(chars.get(start - 1).copied()?) {
-        start -= 1;
-    }
-
-    // Move forward to end of word
-    while end < chars.len() && is_word_char(chars.get(end).copied()?) {
-        end += 1;
-    }
-
-    if start < end {
-        Some(chars[start..end].iter().collect())
-    } else {
-        None
-    }
-}
-
-fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '$' || c == '.' || c == '-'
 }
 
 fn get_instruction_doc(word: &str) -> Option<String> {

@@ -1,4 +1,5 @@
 mod completion;
+mod definition;
 mod diagnostics;
 mod hover;
 mod parser;
@@ -85,6 +86,7 @@ impl LanguageServer for Backend {
                     retrigger_characters: None,
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -256,6 +258,31 @@ impl LanguageServer for Backend {
 
         if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
             return Ok(signature::provide_signature_help(&doc, &syms, &t, position));
+        }
+
+        Ok(None)
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        let document = self.document_map.get(&uri);
+        let symbols = self.symbol_map.get(&uri);
+        let tree = self.tree_map.get(&uri);
+
+        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
+            if let Some(location) = definition::provide_definition(&doc, &syms, &t, position, &uri)
+            {
+                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+            }
         }
 
         Ok(None)

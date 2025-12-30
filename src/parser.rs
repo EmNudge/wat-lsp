@@ -1,5 +1,6 @@
 use crate::symbols::*;
 use crate::tree_sitter_bindings::create_parser;
+use tower_lsp::lsp_types::{Position, Range};
 use tree_sitter::{Node, Tree};
 
 #[cfg(test)]
@@ -28,6 +29,34 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     extract_functions(&root, source, &mut symbol_table);
 
     Ok(symbol_table)
+}
+
+/// Convert a tree-sitter node to an LSP Range
+fn node_to_range(node: &Node) -> Range {
+    let start_point = node.range().start_point;
+    let end_point = node.range().end_point;
+    Range {
+        start: Position {
+            line: start_point.row as u32,
+            character: start_point.column as u32,
+        },
+        end: Position {
+            line: end_point.row as u32,
+            character: end_point.column as u32,
+        },
+    }
+}
+
+/// Find identifier child node (returns the node itself, not just text)
+fn find_identifier_node<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
+    let mut cursor = node.walk();
+    #[allow(clippy::manual_find)]
+    for child in node.children(&mut cursor) {
+        if child.kind() == "identifier" {
+            return Some(child);
+        }
+    }
+    None
 }
 
 /// Extract function symbols using tree-sitter AST traversal
@@ -72,8 +101,15 @@ fn extract_functions(root: &Node, source: &str, symbol_table: &mut SymbolTable) 
 fn extract_function(func_node: &Node, source: &str, index: usize) -> Option<Function> {
     let range = func_node.range();
 
-    // Try to find function name
-    let name = find_identifier_child(func_node, source);
+    // Try to find function name and its range
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(func_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
 
     // Extract parameters, results, locals, and blocks
     let parameters = extract_parameters(func_node, source);
@@ -92,18 +128,8 @@ fn extract_function(func_node: &Node, source: &str, index: usize) -> Option<Func
         end_line: range.end_point.row as u32,
         start_byte: func_node.start_byte(),
         end_byte: func_node.end_byte(),
+        range: name_range,
     })
-}
-
-/// Find identifier child of a node (for named functions, globals, etc.)
-fn find_identifier_child(node: &Node, source: &str) -> Option<String> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "identifier" {
-            return Some(node_text(&child, source));
-        }
-    }
-    None
 }
 
 /// Extract parameters from a function node
@@ -122,11 +148,13 @@ fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
                     // Named parameter: (param $name type)
                     let mut name_opt = None;
                     let mut type_opt = None;
+                    let mut range_opt = None;
 
                     let mut one_cursor = param_child.walk();
                     for one_child in param_child.children(&mut one_cursor) {
                         if one_child.kind() == "identifier" {
                             name_opt = Some(node_text(&one_child, source));
+                            range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
                             type_opt = Some(extract_value_type(&one_child, source));
                         }
@@ -137,6 +165,7 @@ fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
                             name: name_opt,
                             param_type,
                             index: param_index,
+                            range: range_opt,
                         });
                         param_index += 1;
                     }
@@ -149,6 +178,7 @@ fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
                                 name: None,
                                 param_type: extract_value_type(&many_child, source),
                                 index: param_index,
+                                range: None,
                             });
                             param_index += 1;
                         }
@@ -196,11 +226,13 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                     // Named local: (local $name type)
                     let mut name_opt = None;
                     let mut type_opt = None;
+                    let mut range_opt = None;
 
                     let mut one_cursor = locals_child.walk();
                     for one_child in locals_child.children(&mut one_cursor) {
                         if one_child.kind() == "identifier" {
                             name_opt = Some(node_text(&one_child, source));
+                            range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
                             type_opt = Some(extract_value_type(&one_child, source));
                         }
@@ -213,6 +245,7 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                             is_mutable: true,
                             initial_value: None,
                             index: local_index,
+                            range: range_opt,
                         });
                         local_index += 1;
                     }
@@ -227,6 +260,7 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                                 is_mutable: true,
                                 initial_value: None,
                                 index: local_index,
+                                range: None,
                             });
                             local_index += 1;
                         }
@@ -262,7 +296,8 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
         || kind == "expr1_if"
     {
         // Check if it has a label
-        if let Some(label) = find_identifier_child(node, source) {
+        if let Some(id_node) = find_identifier_node(node) {
+            let label = node_text(&id_node, source);
             let block_type = match kind {
                 "block_block" | "expr1_block" => "block",
                 "block_loop" | "expr1_loop" => "loop",
@@ -275,6 +310,7 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
                 label,
                 block_type,
                 line: node.range().start_point.row as u32,
+                range: Some(node_to_range(&id_node)),
             });
         }
     }
@@ -324,7 +360,15 @@ fn extract_globals(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
 
 /// Extract a single global from a global node
 fn extract_global(global_node: &Node, source: &str, index: usize) -> Option<Global> {
-    let name = find_identifier_child(global_node, source);
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(global_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
     let mut is_mutable = false;
     let mut var_type = ValueType::Unknown;
 
@@ -357,6 +401,7 @@ fn extract_global(global_node: &Node, source: &str, index: usize) -> Option<Glob
         is_mutable,
         initial_value: None,
         line: global_node.range().start_point.row as u32,
+        range: name_range,
     })
 }
 
@@ -397,7 +442,15 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
 
 /// Extract a single type definition from a type node
 fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef> {
-    let name = find_identifier_child(type_node, source);
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(type_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
     let mut parameters = Vec::new();
     let mut results = Vec::new();
 
@@ -428,6 +481,7 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         parameters,
         results,
         line: type_node.range().start_point.row as u32,
+        range: name_range,
     })
 }
 
@@ -468,7 +522,15 @@ fn extract_tables(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
 
 /// Extract a single table from a table node
 fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table> {
-    let name = find_identifier_child(table_node, source);
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(table_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
     let mut ref_type = ValueType::Funcref;
     let mut min_limit = 0;
     let mut max_limit = None;
@@ -538,6 +600,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
         ref_type,
         limits: (min_limit, max_limit),
         line: table_node.range().start_point.row as u32,
+        range: name_range,
     })
 }
 
