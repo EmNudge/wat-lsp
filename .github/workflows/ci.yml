@@ -30,7 +30,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -80,7 +80,7 @@ jobs:
           components: clippy
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -135,7 +135,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -169,7 +169,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
