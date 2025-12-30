@@ -1,6 +1,6 @@
-# WAT LSP Server (Rust Implementation)
+# WAT LSP Server
 
-A Language Server Protocol (LSP) implementation for WebAssembly Text Format (`.wat` files) written in Rust. This project provides the same feature set as the [wati](https://github.com/NateLevin1/wati) VSCode extension, but as a standalone LSP server that can be used with any editor that supports LSP.
+A Language Server Protocol (LSP) implementation for WebAssembly Text Format (`.wat` files) written in Rust. Works with any editor that supports LSP.
 
 ## Features
 
@@ -88,123 +88,18 @@ To add or modify instruction documentation, edit `docs/instructions.md` and rebu
 
 ## Usage
 
-### VS Code
-
-Create a `.vscode/settings.json` with:
-
-```json
-{
-  "wat.server.path": "/path/to/wat-lsp-rust"
-}
-```
-
-Or install a VS Code extension that uses this LSP server.
-
-### Neovim
-
-Using nvim-lspconfig:
-
-```lua
-local lspconfig = require('lspconfig')
-local configs = require('lspconfig.configs')
-
--- Define the WAT LSP server
-if not configs.wat_lsp then
-  configs.wat_lsp = {
-    default_config = {
-      cmd = { '/path/to/wat-lsp-rust' },
-      filetypes = { 'wat' },
-      root_dir = lspconfig.util.root_pattern('.git'),
-      settings = {},
-    },
-  }
-end
-
--- Enable it
-lspconfig.wat_lsp.setup{}
-```
-
-### Helix
-
-Add to your `languages.toml`:
-
-```toml
-[[language]]
-name = "wat"
-language-servers = ["wat-lsp"]
-
-[language-server.wat-lsp]
-command = "/path/to/wat-lsp-rust"
-```
-
-### Emacs (eglot)
-
-```elisp
-(add-to-list 'eglot-server-programs
-             '(wat-mode . ("/path/to/wat-lsp-rust")))
-```
-
-## Architecture
-
-### Components
-
-- **Parser** (`src/parser.rs`): Regex-based parser that extracts symbols from WAT files
-- **Symbols** (`src/symbols.rs`): Data structures for functions, globals, locals, types, and tables
-- **Hover** (`src/hover.rs`): Provides hover information with instruction documentation
-- **Completion** (`src/completion.rs`): Context-aware completion with emmet-like expansions
-- **Signature** (`src/signature.rs`): Function signature help during calls
-- **Build Script** (`build.rs`): Parses `docs/instructions.md` at compile time
-- **Documentation** (`docs/instructions.md`): Comprehensive WebAssembly instruction reference with examples
-
-### Parsing Strategy
-
-The server uses a regex-based parser that efficiently extracts:
-- Function declarations with parameters, results, and locals
-- Global variable declarations
-- Table definitions
-- Type definitions
-- Block labels within functions
-
-Results are cached per file for fast response times.
-
-## Comparison with wati
-
-This Rust implementation provides the same core features as wati:
-
-| Feature | wati (TypeScript) | wat-lsp-rust |
-|---------|------------------|--------------|
-| Hover Information | ✅ | ✅ |
-| Code Completion | ✅ | ✅ |
-| Signature Help | ✅ | ✅ |
-| Emmet Expansions | ✅ | ✅ |
-| Parser | Tree-sitter + Regex | Regex-based |
-| LSP Support | VS Code only | Any LSP client |
-| Performance | Good | Excellent |
-| Memory Usage | Higher | Lower |
+The server can be integrated with any LSP-compatible editor (VS Code, Neovim, Helix, Emacs, etc.). Configure your editor to launch the `wat-lsp-rust` binary for `.wat` files. See your editor's LSP documentation for specific setup instructions.
 
 ## Future Enhancements
 
-- [ ] Add tree-sitter parser for more accurate AST analysis
-- [ ] Implement diagnostics (syntax errors, type checking)
-- [ ] Add "Go to Definition" support
-- [ ] Add "Find References" support
-- [ ] Implement symbol renaming
-- [ ] Add document symbols for outline view
-- [ ] Support code formatting
-- [ ] Add inlay hints for types
-
-## Contributing
-
-Contributions are welcome! Areas for improvement:
-- Tree-sitter integration for better parsing
-- Additional instruction documentation
-- Performance optimizations
-- More comprehensive testing
+- [ ] Diagnostics (syntax errors, type checking)
+- [ ] Go to Definition
+- [ ] Find References
+- [ ] Symbol renaming
+- [ ] Document symbols for outline view
+- [ ] Code formatting
+- [ ] Inlay hints for types
 
 ## License
 
 MIT
-
-## Acknowledgments
-
-Based on the feature set of [wati](https://github.com/NateLevin1/wati) by Nate Levin.
