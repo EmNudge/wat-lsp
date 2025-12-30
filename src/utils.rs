@@ -20,6 +20,44 @@ pub fn get_line_at_position(document: &str, line_num: usize) -> Option<&str> {
     document.lines().nth(line_num)
 }
 
+/// Get the word at the specified position in a document.
+/// A word includes alphanumerics, underscores, dollar signs, dots, and hyphens.
+pub fn get_word_at_position(document: &str, position: Position) -> Option<String> {
+    let line = get_line_at_position(document, position.line as usize)?;
+    let col = position.character as usize;
+
+    if col > line.len() {
+        return None;
+    }
+
+    // Find word boundaries
+    let mut start = col;
+    let mut end = col;
+
+    let chars: Vec<char> = line.chars().collect();
+
+    // Move back to start of word
+    while start > 0 && is_word_char(chars.get(start - 1).copied()?) {
+        start -= 1;
+    }
+
+    // Move forward to end of word
+    while end < chars.len() && is_word_char(chars.get(end).copied()?) {
+        end += 1;
+    }
+
+    if start < end {
+        Some(chars[start..end].iter().collect())
+    } else {
+        None
+    }
+}
+
+/// Check if a character is part of a word in WAT (alphanumeric, _, $, ., -)
+pub fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$' || c == '.' || c == '-'
+}
+
 /// Convert an LSP Position to a byte offset in the source text
 pub fn position_to_byte(source: &str, position: Position) -> usize {
     let mut byte_offset = 0;

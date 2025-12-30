@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use tower_lsp::lsp_types::Range;
 
 #[cfg(test)]
 mod tests;
@@ -51,6 +52,8 @@ pub struct Variable {
     pub initial_value: Option<String>,
     #[allow(dead_code)] // Useful for go-to-definition
     pub index: usize,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +62,8 @@ pub struct Parameter {
     pub param_type: ValueType,
     #[allow(dead_code)] // Useful for signature help with parameter positions
     pub index: usize,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +71,8 @@ pub struct BlockLabel {
     pub label: String,
     pub block_type: String, // "block", "loop", "if"
     pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +91,8 @@ pub struct Function {
     pub start_byte: usize, // Byte offset where function starts
     #[allow(dead_code)] // Useful for precise AST navigation
     pub end_byte: usize, // Byte offset where function ends
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +105,8 @@ pub struct Global {
     pub initial_value: Option<String>,
     #[allow(dead_code)] // Useful for go-to-definition
     pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +118,8 @@ pub struct Table {
     pub limits: (u32, Option<u32>), // (min, max)
     #[allow(dead_code)] // Useful for go-to-definition
     pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +131,8 @@ pub struct TypeDef {
     pub results: Vec<ValueType>,
     #[allow(dead_code)] // Useful for go-to-definition
     pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone, Default)]

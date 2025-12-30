@@ -1,6 +1,6 @@
 use super::*;
 use crate::tree_sitter_bindings::create_parser;
-use crate::utils::get_line_at_position;
+use crate::utils::{get_line_at_position, is_word_char};
 use tree_sitter::Tree;
 
 fn create_test_tree(document: &str) -> Tree {
@@ -22,11 +22,13 @@ fn create_test_symbols() -> SymbolTable {
                 name: Some("$a".to_string()),
                 param_type: ValueType::I32,
                 index: 0,
+                range: None,
             },
             Parameter {
                 name: Some("$b".to_string()),
                 param_type: ValueType::I32,
                 index: 1,
+                range: None,
             },
         ],
         results: vec![ValueType::I32],
@@ -36,16 +38,19 @@ fn create_test_symbols() -> SymbolTable {
             is_mutable: true,
             initial_value: None,
             index: 0,
+            range: None,
         }],
         blocks: vec![BlockLabel {
             label: "$exit".to_string(),
             block_type: "block".to_string(),
             line: 5,
+            range: None,
         }],
         line: 0,
         end_line: 10,
         start_byte: 0,
         end_byte: 300,
+        range: None,
     };
     table.add_function(func);
 
@@ -57,6 +62,7 @@ fn create_test_symbols() -> SymbolTable {
         is_mutable: true,
         initial_value: Some("0".to_string()),
         line: 0,
+        range: None,
     };
     table.add_global(global);
 
@@ -67,6 +73,7 @@ fn create_test_symbols() -> SymbolTable {
         ref_type: ValueType::Funcref,
         limits: (10, None),
         line: 0,
+        range: None,
     };
     table.add_table(tbl);
 
@@ -77,6 +84,7 @@ fn create_test_symbols() -> SymbolTable {
         parameters: vec![ValueType::I32, ValueType::I32],
         results: vec![ValueType::I32],
         line: 0,
+        range: None,
     };
     table.add_type(type_def);
 
@@ -296,11 +304,13 @@ fn test_format_function_signature() {
                 name: Some("$x".to_string()),
                 param_type: ValueType::I32,
                 index: 0,
+                range: None,
             },
             Parameter {
                 name: None,
                 param_type: ValueType::I64,
                 index: 1,
+                range: None,
             },
         ],
         results: vec![ValueType::F32],
@@ -310,6 +320,7 @@ fn test_format_function_signature() {
         end_line: 5,
         start_byte: 0,
         end_byte: 150,
+        range: None,
     };
 
     let sig = format_function_signature(&func);

@@ -24,6 +24,7 @@ fn test_add_function() {
         end_line: 5,
         start_byte: 0,
         end_byte: 100,
+        range: None,
     };
 
     table.add_function(func);
@@ -47,6 +48,7 @@ fn test_add_global() {
         is_mutable: true,
         initial_value: Some("0".to_string()),
         line: 0,
+        range: None,
     };
 
     table.add_global(global);
@@ -69,6 +71,7 @@ fn test_add_table() {
         ref_type: ValueType::Funcref,
         limits: (10, Some(100)),
         line: 0,
+        range: None,
     };
 
     table.add_table(tbl);
@@ -92,6 +95,7 @@ fn test_add_type() {
         parameters: vec![ValueType::I32, ValueType::I32],
         results: vec![ValueType::I32],
         line: 0,
+        range: None,
     };
 
     table.add_type(type_def);
@@ -120,6 +124,7 @@ fn test_get_function_by_index() {
             end_line: i as u32 + 5,
             start_byte: 0,
             end_byte: 100,
+            range: None,
         };
         table.add_function(func);
     }
@@ -144,6 +149,7 @@ fn test_get_global_by_index() {
             is_mutable: false,
             initial_value: None,
             line: i as u32,
+            range: None,
         };
         table.add_global(global);
     }
@@ -168,6 +174,7 @@ fn test_unnamed_symbols() {
         end_line: 5,
         start_byte: 0,
         end_byte: 100,
+        range: None,
     };
     table.add_function(func);
 
@@ -193,6 +200,7 @@ fn test_multiple_symbols_same_type() {
             end_line: 5,
             start_byte: 0,
             end_byte: 100,
+            range: None,
         };
         table.add_function(func);
     }
@@ -213,6 +221,7 @@ fn test_parameter_creation() {
         name: Some("$x".to_string()),
         param_type: ValueType::I32,
         index: 0,
+        range: None,
     };
 
     assert_eq!(param.name, Some("$x".to_string()));
@@ -228,6 +237,7 @@ fn test_variable_creation() {
         is_mutable: true,
         initial_value: Some("3.14".to_string()),
         index: 0,
+        range: None,
     };
 
     assert_eq!(var.name, Some("$temp".to_string()));
@@ -241,6 +251,7 @@ fn test_block_label_creation() {
         label: "$exit".to_string(),
         block_type: "block".to_string(),
         line: 42,
+        range: None,
     };
 
     assert_eq!(block.label, "$exit");
@@ -265,11 +276,13 @@ fn test_complex_function() {
                 name: Some("$a".to_string()),
                 param_type: ValueType::I32,
                 index: 0,
+                range: None,
             },
             Parameter {
                 name: Some("$b".to_string()),
                 param_type: ValueType::I64,
                 index: 1,
+                range: None,
             },
         ],
         results: vec![ValueType::I32, ValueType::I64],
@@ -279,16 +292,19 @@ fn test_complex_function() {
             is_mutable: true,
             initial_value: None,
             index: 0,
+            range: None,
         }],
         blocks: vec![BlockLabel {
             label: "$exit".to_string(),
             block_type: "block".to_string(),
             line: 10,
+            range: None,
         }],
         line: 5,
         end_line: 20,
         start_byte: 0,
         end_byte: 500,
+        range: None,
     };
 
     assert_eq!(func.parameters.len(), 2);

@@ -20,11 +20,13 @@ fn create_test_symbols() -> SymbolTable {
                 name: Some("$a".to_string()),
                 param_type: ValueType::I32,
                 index: 0,
+                range: None,
             },
             Parameter {
                 name: Some("$b".to_string()),
                 param_type: ValueType::I32,
                 index: 1,
+                range: None,
             },
         ],
         results: vec![ValueType::I32],
@@ -34,6 +36,7 @@ fn create_test_symbols() -> SymbolTable {
         end_line: 5,
         start_byte: 0,
         end_byte: 200,
+        range: None,
     };
     table.add_function(func);
 
@@ -45,16 +48,19 @@ fn create_test_symbols() -> SymbolTable {
                 name: Some("$x".to_string()),
                 param_type: ValueType::I32,
                 index: 0,
+                range: None,
             },
             Parameter {
                 name: Some("$y".to_string()),
                 param_type: ValueType::I64,
                 index: 1,
+                range: None,
             },
             Parameter {
                 name: Some("$z".to_string()),
                 param_type: ValueType::F32,
                 index: 2,
+                range: None,
             },
         ],
         results: vec![ValueType::F64],
@@ -64,6 +70,7 @@ fn create_test_symbols() -> SymbolTable {
         end_line: 8,
         start_byte: 0,
         end_byte: 300,
+        range: None,
     };
     table.add_function(multi_param_func);
 
@@ -228,6 +235,7 @@ fn test_format_function_signature_simple() {
         end_line: 5,
         start_byte: 0,
         end_byte: 100,
+        range: None,
     };
 
     let sig = format_function_signature(&func);
@@ -243,6 +251,7 @@ fn test_format_function_signature_with_params() {
             name: Some("$x".to_string()),
             param_type: ValueType::I32,
             index: 0,
+            range: None,
         }],
         results: vec![],
         locals: vec![],
@@ -251,6 +260,7 @@ fn test_format_function_signature_with_params() {
         end_line: 5,
         start_byte: 0,
         end_byte: 100,
+        range: None,
     };
 
     let sig = format_function_signature(&func);
@@ -272,6 +282,7 @@ fn test_format_function_signature_with_results() {
         end_line: 5,
         start_byte: 0,
         end_byte: 100,
+        range: None,
     };
 
     let sig = format_function_signature(&func);
@@ -289,6 +300,7 @@ fn test_format_function_signature_unnamed_params() {
             name: None,
             param_type: ValueType::I32,
             index: 0,
+            range: None,
         }],
         results: vec![],
         locals: vec![],
@@ -297,6 +309,7 @@ fn test_format_function_signature_unnamed_params() {
         end_line: 5,
         start_byte: 0,
         end_byte: 100,
+        range: None,
     };
 
     let sig = format_function_signature(&func);
