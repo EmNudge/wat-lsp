@@ -1,8 +1,8 @@
 use crate::symbols::*;
 use crate::utils::{find_containing_function, get_line_at_position, node_at_position};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use tower_lsp::lsp_types::*;
-use once_cell::sync::Lazy;
 use tree_sitter::Tree;
 
 #[cfg(test)]
@@ -173,21 +173,49 @@ pub fn provide_completion(
 
     // Instruction prefix completions
     if line_prefix.ends_with("local.") {
-        completions.push(make_completion("get", "local.get", "Get local variable value"));
-        completions.push(make_completion("set", "local.set", "Set local variable value"));
-        completions.push(make_completion("tee", "local.tee", "Set local and return value"));
+        completions.push(make_completion(
+            "get",
+            "local.get",
+            "Get local variable value",
+        ));
+        completions.push(make_completion(
+            "set",
+            "local.set",
+            "Set local variable value",
+        ));
+        completions.push(make_completion(
+            "tee",
+            "local.tee",
+            "Set local and return value",
+        ));
         return completions;
     }
 
     if line_prefix.ends_with("global.") {
-        completions.push(make_completion("get", "global.get", "Get global variable value"));
-        completions.push(make_completion("set", "global.set", "Set global variable value"));
+        completions.push(make_completion(
+            "get",
+            "global.get",
+            "Get global variable value",
+        ));
+        completions.push(make_completion(
+            "set",
+            "global.set",
+            "Set global variable value",
+        ));
         return completions;
     }
 
     if line_prefix.ends_with("memory.") {
-        completions.push(make_completion("size", "memory.size", "Get memory size in pages"));
-        completions.push(make_completion("grow", "memory.grow", "Grow memory by delta pages"));
+        completions.push(make_completion(
+            "size",
+            "memory.size",
+            "Get memory size in pages",
+        ));
+        completions.push(make_completion(
+            "grow",
+            "memory.grow",
+            "Grow memory by delta pages",
+        ));
         completions.push(make_completion("fill", "memory.fill", "Fill memory region"));
         completions.push(make_completion("copy", "memory.copy", "Copy memory region"));
         return completions;
@@ -242,8 +270,16 @@ pub fn provide_completion(
                             kind: Some(CompletionItemKind::FUNCTION),
                             detail: Some(format!(
                                 "({}) -> ({})",
-                                if params_str.is_empty() { "no params" } else { &params_str },
-                                if results_str.is_empty() { "no result" } else { &results_str }
+                                if params_str.is_empty() {
+                                    "no params"
+                                } else {
+                                    &params_str
+                                },
+                                if results_str.is_empty() {
+                                    "no result"
+                                } else {
+                                    &results_str
+                                }
                             )),
                             ..Default::default()
                         });
@@ -299,7 +335,11 @@ pub fn provide_completion(
                         completions.push(CompletionItem {
                             label: block.label[1..].to_string(), // Remove $ prefix
                             kind: Some(CompletionItemKind::CONSTANT),
-                            detail: Some(format!("{} at line {}", block.block_type, block.line + 1)),
+                            detail: Some(format!(
+                                "{} at line {}",
+                                block.block_type,
+                                block.line + 1
+                            )),
                             ..Default::default()
                         });
                     }
@@ -334,9 +374,17 @@ pub fn provide_completion(
 
     // JSDoc tag completions
     if line_prefix.ends_with("@") {
-        completions.push(make_completion("param", "@param", "Parameter documentation"));
+        completions.push(make_completion(
+            "param",
+            "@param",
+            "Parameter documentation",
+        ));
         completions.push(make_completion("result", "@result", "Result documentation"));
-        completions.push(make_completion("function", "@function", "Function documentation"));
+        completions.push(make_completion(
+            "function",
+            "@function",
+            "Function documentation",
+        ));
         completions.push(make_completion("todo", "@todo", "TODO marker"));
         return completions;
     }
@@ -443,9 +491,8 @@ fn make_completion(label: &str, insert_text: &str, detail: &str) -> CompletionIt
     }
 }
 
-static NUMBER_CONST_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap()
-});
+static NUMBER_CONST_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap());
 
 /// Context for dollar sign completions
 #[derive(Debug, PartialEq)]

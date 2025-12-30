@@ -30,7 +30,10 @@ fn test_add_function() {
 
     assert_eq!(table.functions.len(), 1);
     assert!(table.function_map.contains_key("$test"));
-    assert_eq!(table.get_function_by_name("$test").unwrap().name, Some("$test".to_string()));
+    assert_eq!(
+        table.get_function_by_name("$test").unwrap().name,
+        Some("$test".to_string())
+    );
 }
 
 #[test]
@@ -270,22 +273,18 @@ fn test_complex_function() {
             },
         ],
         results: vec![ValueType::I32, ValueType::I64],
-        locals: vec![
-            Variable {
-                name: Some("$temp".to_string()),
-                var_type: ValueType::F32,
-                is_mutable: true,
-                initial_value: None,
-                index: 0,
-            },
-        ],
-        blocks: vec![
-            BlockLabel {
-                label: "$exit".to_string(),
-                block_type: "block".to_string(),
-                line: 10,
-            },
-        ],
+        locals: vec![Variable {
+            name: Some("$temp".to_string()),
+            var_type: ValueType::F32,
+            is_mutable: true,
+            initial_value: None,
+            index: 0,
+        }],
+        blocks: vec![BlockLabel {
+            label: "$exit".to_string(),
+            block_type: "block".to_string(),
+            line: 10,
+        }],
         line: 5,
         end_line: 20,
         start_byte: 0,

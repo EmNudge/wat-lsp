@@ -98,7 +98,11 @@ mod tests {
         let tree = parser.parse(document, None).unwrap();
 
         let diagnostics = provide_diagnostics(&tree, document);
-        assert_eq!(diagnostics.len(), 0, "Valid code should have no diagnostics");
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Valid code should have no diagnostics"
+        );
     }
 
     #[test]
@@ -108,11 +112,16 @@ mod tests {
         let tree = parser.parse(document, None).unwrap();
 
         let diagnostics = provide_diagnostics(&tree, document);
-        assert!(!diagnostics.is_empty(), "Invalid code should have diagnostics");
+        assert!(
+            !diagnostics.is_empty(),
+            "Invalid code should have diagnostics"
+        );
 
         // Check that at least one diagnostic is an error
         assert!(
-            diagnostics.iter().any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+            diagnostics
+                .iter()
+                .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
             "Should have at least one error diagnostic"
         );
     }

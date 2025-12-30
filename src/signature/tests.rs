@@ -4,7 +4,9 @@ use tree_sitter::Tree;
 
 fn create_test_tree(document: &str) -> Tree {
     let mut parser = create_parser();
-    parser.parse(document, None).expect("Failed to parse test document")
+    parser
+        .parse(document, None)
+        .expect("Failed to parse test document")
 }
 
 fn create_test_symbols() -> SymbolTable {
@@ -74,7 +76,8 @@ fn test_signature_help_simple_call() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 10); // After opening paren
 
-    let sig_help = provide_signature_help(document, &symbols, &create_test_tree(document), position);
+    let sig_help =
+        provide_signature_help(document, &symbols, &create_test_tree(document), position);
     assert!(sig_help.is_some());
 
     let help = sig_help.unwrap();
@@ -94,7 +97,8 @@ fn test_signature_help_with_first_arg() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 12); // After first comma
 
-    let sig_help = provide_signature_help(document, &symbols, &create_test_tree(document), position);
+    let sig_help =
+        provide_signature_help(document, &symbols, &create_test_tree(document), position);
     assert!(sig_help.is_some());
 
     let help = sig_help.unwrap();
@@ -108,7 +112,8 @@ fn test_signature_help_multi_param() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 16);
 
-    let sig_help = provide_signature_help(document, &symbols, &create_test_tree(document), position);
+    let sig_help =
+        provide_signature_help(document, &symbols, &create_test_tree(document), position);
     assert!(sig_help.is_some());
 
     let help = sig_help.unwrap();
@@ -125,7 +130,8 @@ fn test_signature_help_third_param() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 19);
 
-    let sig_help = provide_signature_help(document, &symbols, &create_test_tree(document), position);
+    let sig_help =
+        provide_signature_help(document, &symbols, &create_test_tree(document), position);
     assert!(sig_help.is_some());
 
     let help = sig_help.unwrap();
@@ -138,7 +144,8 @@ fn test_signature_help_nonexistent_function() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 18);
 
-    let sig_help = provide_signature_help(document, &symbols, &create_test_tree(document), position);
+    let sig_help =
+        provide_signature_help(document, &symbols, &create_test_tree(document), position);
     // Should return None for nonexistent function
     assert!(sig_help.is_none());
 }
@@ -149,7 +156,8 @@ fn test_signature_help_by_index() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 7);
 
-    let sig_help = provide_signature_help(document, &symbols, &create_test_tree(document), position);
+    let sig_help =
+        provide_signature_help(document, &symbols, &create_test_tree(document), position);
     assert!(sig_help.is_some());
 
     let help = sig_help.unwrap();
@@ -231,13 +239,11 @@ fn test_format_function_signature_with_params() {
     let func = Function {
         name: Some("$test".to_string()),
         index: 0,
-        parameters: vec![
-            Parameter {
-                name: Some("$x".to_string()),
-                param_type: ValueType::I32,
-                index: 0,
-            },
-        ],
+        parameters: vec![Parameter {
+            name: Some("$x".to_string()),
+            param_type: ValueType::I32,
+            index: 0,
+        }],
         results: vec![],
         locals: vec![],
         blocks: vec![],
@@ -279,13 +285,11 @@ fn test_format_function_signature_unnamed_params() {
     let func = Function {
         name: Some("$test".to_string()),
         index: 0,
-        parameters: vec![
-            Parameter {
-                name: None,
-                param_type: ValueType::I32,
-                index: 0,
-            },
-        ],
+        parameters: vec![Parameter {
+            name: None,
+            param_type: ValueType::I32,
+            index: 0,
+        }],
         results: vec![],
         locals: vec![],
         blocks: vec![],
@@ -309,7 +313,8 @@ fn test_signature_help_parameter_info() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 10);
 
-    let sig_help = provide_signature_help(document, &symbols, &create_test_tree(document), position);
+    let sig_help =
+        provide_signature_help(document, &symbols, &create_test_tree(document), position);
     let help = sig_help.unwrap();
     let params = help.signatures[0].parameters.as_ref().unwrap();
 

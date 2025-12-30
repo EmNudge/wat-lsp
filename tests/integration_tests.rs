@@ -4,7 +4,9 @@ use wat_lsp_rust::{parser, symbols::SymbolTable, tree_sitter_bindings::create_pa
 
 fn create_test_tree(document: &str) -> Tree {
     let mut parser = create_parser();
-    parser.parse(document, None).expect("Failed to parse test document")
+    parser
+        .parse(document, None)
+        .expect("Failed to parse test document")
 }
 
 mod hover_integration {
@@ -70,7 +72,8 @@ mod completion_integration {
         let symbols = parser::parse_document(wat).unwrap();
         let position = Position::new(2, 13); // After "$"
 
-        let completions = completion::provide_completion(wat, &symbols, &create_test_tree(wat), position);
+        let completions =
+            completion::provide_completion(wat, &symbols, &create_test_tree(wat), position);
 
         // Should suggest local parameters
         assert!(completions.iter().any(|c| c.label.contains("x")));
@@ -84,7 +87,8 @@ mod completion_integration {
         let symbols = SymbolTable::new();
         let position = Position::new(0, 4);
 
-        let completions = completion::provide_completion(wat, &symbols, &create_test_tree(wat), position);
+        let completions =
+            completion::provide_completion(wat, &symbols, &create_test_tree(wat), position);
         assert!(!completions.is_empty());
 
         let first = &completions[0];
@@ -109,7 +113,8 @@ mod signature_integration {
         let symbols = parser::parse_document(wat).unwrap();
         let position = Position::new(5, 13); // After "("
 
-        let sig_help = signature::provide_signature_help(wat, &symbols, &create_test_tree(wat), position);
+        let sig_help =
+            signature::provide_signature_help(wat, &symbols, &create_test_tree(wat), position);
         assert!(sig_help.is_some());
 
         let help = sig_help.unwrap();
@@ -221,7 +226,10 @@ mod parser_integration {
         // Verify locals
         assert!(fib.locals.iter().any(|l| l.name.as_deref() == Some("$a")));
         assert!(fib.locals.iter().any(|l| l.name.as_deref() == Some("$b")));
-        assert!(fib.locals.iter().any(|l| l.name.as_deref() == Some("$temp")));
+        assert!(fib
+            .locals
+            .iter()
+            .any(|l| l.name.as_deref() == Some("$temp")));
         assert!(fib.locals.iter().any(|l| l.name.as_deref() == Some("$i")));
 
         // Verify blocks
@@ -258,13 +266,23 @@ mod end_to_end {
         // Step 3: Provide completions after "i32."
         let completion_doc = "i32.";
         let completion_pos = Position::new(0, 4);
-        let completions = completion::provide_completion(completion_doc, &symbols, &create_test_tree(completion_doc), completion_pos);
+        let completions = completion::provide_completion(
+            completion_doc,
+            &symbols,
+            &create_test_tree(completion_doc),
+            completion_pos,
+        );
         assert!(completions.iter().any(|c| c.label == "add"));
 
         // Step 4: Provide signature help in function call
         let sig_doc = "call $add(";
         let sig_pos = Position::new(0, 10);
-        let sig_help = signature::provide_signature_help(sig_doc, &symbols, &create_test_tree(sig_doc), sig_pos);
+        let sig_help = signature::provide_signature_help(
+            sig_doc,
+            &symbols,
+            &create_test_tree(sig_doc),
+            sig_pos,
+        );
         assert!(sig_help.is_some());
     }
 
@@ -277,9 +295,12 @@ mod end_to_end {
         wat.push_str("5i32");
         let symbols = parser::parse_document(&wat).unwrap();
         let pos = Position::new(2, 8);
-        let completions = completion::provide_completion(&wat, &symbols, &create_test_tree(&wat), pos);
+        let completions =
+            completion::provide_completion(&wat, &symbols, &create_test_tree(&wat), pos);
         assert!(completions.iter().any(|c| {
-            c.insert_text.as_ref().is_some_and(|t| t.contains("i32.const 5"))
+            c.insert_text
+                .as_ref()
+                .is_some_and(|t| t.contains("i32.const 5"))
         }));
 
         // User expands to full instruction

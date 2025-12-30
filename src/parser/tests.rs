@@ -57,9 +57,18 @@ fn test_parse_function_with_blocks() {
     let func = &symbols.functions[0];
 
     assert_eq!(func.blocks.len(), 3);
-    assert!(func.blocks.iter().any(|b| b.label == "$exit" && b.block_type == "block"));
-    assert!(func.blocks.iter().any(|b| b.label == "$continue" && b.block_type == "loop"));
-    assert!(func.blocks.iter().any(|b| b.label == "$check" && b.block_type == "if"));
+    assert!(func
+        .blocks
+        .iter()
+        .any(|b| b.label == "$exit" && b.block_type == "block"));
+    assert!(func
+        .blocks
+        .iter()
+        .any(|b| b.label == "$continue" && b.block_type == "loop"));
+    assert!(func
+        .blocks
+        .iter()
+        .any(|b| b.label == "$check" && b.block_type == "if"));
 }
 
 #[test]

@@ -79,11 +79,11 @@ pub struct Function {
     pub blocks: Vec<BlockLabel>,
     pub line: u32,
     #[allow(dead_code)] // Useful for go-to-definition and range queries
-    pub end_line: u32,      // Line where function ends
+    pub end_line: u32, // Line where function ends
     #[allow(dead_code)] // Useful for precise AST navigation
-    pub start_byte: usize,  // Byte offset where function starts
+    pub start_byte: usize, // Byte offset where function starts
     #[allow(dead_code)] // Useful for precise AST navigation
-    pub end_byte: usize,    // Byte offset where function ends
+    pub end_byte: usize, // Byte offset where function ends
 }
 
 #[derive(Debug, Clone)]
@@ -172,7 +172,9 @@ impl SymbolTable {
     }
 
     pub fn get_function_by_name(&self, name: &str) -> Option<&Function> {
-        self.function_map.get(name).and_then(|&idx| self.functions.get(idx))
+        self.function_map
+            .get(name)
+            .and_then(|&idx| self.functions.get(idx))
     }
 
     pub fn get_function_by_index(&self, index: usize) -> Option<&Function> {
@@ -180,7 +182,9 @@ impl SymbolTable {
     }
 
     pub fn get_global_by_name(&self, name: &str) -> Option<&Global> {
-        self.global_map.get(name).and_then(|&idx| self.globals.get(idx))
+        self.global_map
+            .get(name)
+            .and_then(|&idx| self.globals.get(idx))
     }
 
     pub fn get_global_by_index(&self, index: usize) -> Option<&Global> {
@@ -188,7 +192,9 @@ impl SymbolTable {
     }
 
     pub fn get_table_by_name(&self, name: &str) -> Option<&Table> {
-        self.table_map.get(name).and_then(|&idx| self.tables.get(idx))
+        self.table_map
+            .get(name)
+            .and_then(|&idx| self.tables.get(idx))
     }
 
     pub fn get_type_by_name(&self, name: &str) -> Option<&TypeDef> {

@@ -254,8 +254,13 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
     let kind = node.kind();
 
     // Check both statement form (block_block) and expression form (expr1_block)
-    if kind == "block_block" || kind == "block_loop" || kind == "block_if"
-        || kind == "expr1_block" || kind == "expr1_loop" || kind == "expr1_if" {
+    if kind == "block_block"
+        || kind == "block_loop"
+        || kind == "block_if"
+        || kind == "expr1_block"
+        || kind == "expr1_loop"
+        || kind == "expr1_if"
+    {
         // Check if it has a label
         if let Some(label) = find_identifier_child(node, source) {
             let block_type = match kind {
@@ -294,7 +299,8 @@ fn extract_globals(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
                         if field_child.kind() == "module_field_global" {
-                            if let Some(global) = extract_global(&field_child, source, global_index) {
+                            if let Some(global) = extract_global(&field_child, source, global_index)
+                            {
                                 symbol_table.add_global(global);
                                 global_index += 1;
                             }
@@ -585,6 +591,5 @@ fn extract_ref_type(ref_type_node: &Node, _source: &str) -> ValueType {
             _ => {}
         }
     }
-    ValueType::Funcref  // Default to funcref
+    ValueType::Funcref // Default to funcref
 }
-

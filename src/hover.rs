@@ -8,15 +8,15 @@ mod tests;
 
 #[derive(Debug, PartialEq)]
 enum HoverContext {
-    Call,       // Inside call instruction
-    Global,     // Inside global.get/set
-    Local,      // Inside local.get/set/tee
-    Branch,     // Inside br/br_if
-    Block,      // Inside block/loop
-    Table,      // Inside table operation
-    Type,       // Inside type definition/use
-    Function,   // Inside function definition
-    General,    // General context
+    Call,     // Inside call instruction
+    Global,   // Inside global.get/set
+    Local,    // Inside local.get/set/tee
+    Branch,   // Inside br/br_if
+    Block,    // Inside block/loop
+    Table,    // Inside table operation
+    Type,     // Inside type definition/use
+    Function, // Inside function definition
+    General,  // General context
 }
 
 /// Determine hover context from AST node
@@ -93,7 +93,12 @@ fn determine_context_from_line(line: &str) -> HoverContext {
     }
 }
 
-pub fn provide_hover(document: &str, symbols: &SymbolTable, tree: &Tree, position: Position) -> Option<Hover> {
+pub fn provide_hover(
+    document: &str,
+    symbols: &SymbolTable,
+    tree: &Tree,
+    position: Position,
+) -> Option<Hover> {
     let word = get_word_at_position(document, position)?;
 
     // Check if it's an instruction
@@ -235,7 +240,9 @@ fn provide_symbol_hover(
                             kind: MarkupKind::Markdown,
                             value: format!(
                                 "```wat\n({} {})\n```\nDefined at line {}",
-                                block.block_type, block.label, block.line + 1
+                                block.block_type,
+                                block.label,
+                                block.line + 1
                             ),
                         }),
                         range: None,

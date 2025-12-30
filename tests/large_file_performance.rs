@@ -2,7 +2,7 @@ use std::time::Instant;
 use tower_lsp::lsp_types::Position;
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
 use wat_lsp_rust::utils::apply_text_edit;
-use wat_lsp_rust::{parser, diagnostics};
+use wat_lsp_rust::{diagnostics, parser};
 
 /// Generate a large WAT document (approximately 15k lines)
 fn generate_large_wat_15k() -> String {
@@ -10,7 +10,10 @@ fn generate_large_wat_15k() -> String {
 
     // Add 10 globals (10 lines)
     for i in 0..10 {
-        wat.push_str(&format!("  (global $global{} (mut i32) (i32.const {}))\n", i, i));
+        wat.push_str(&format!(
+            "  (global $global{} (mut i32) (i32.const {}))\n",
+            i, i
+        ));
     }
 
     // Add 5 tables (5 lines)
@@ -20,13 +23,17 @@ fn generate_large_wat_15k() -> String {
 
     // Add 10 type definitions (30 lines)
     for i in 0..10 {
-        wat.push_str(&format!("  (type $type{} (func (param i32 i32) (result i32)))\n", i));
+        wat.push_str(&format!(
+            "  (type $type{} (func (param i32 i32) (result i32)))\n",
+            i
+        ));
     }
 
     // Add 1000 functions with ~15 lines each = ~15,000 lines
     for i in 0..1000 {
         wat.push_str(&format!(
-            "  (func $func{} (param $x i32) (param $y i32) (result i32)\n", i
+            "  (func $func{} (param $x i32) (param $y i32) (result i32)\n",
+            i
         ));
         wat.push_str("    (local $temp i32)\n");
         wat.push_str("    (local $result i32)\n");
@@ -40,7 +47,10 @@ fn generate_large_wat_15k() -> String {
         wat.push_str("      (i32.mul (local.get $temp) (i32.const 2)))\n");
         wat.push_str("    ;; Add global value\n");
         wat.push_str("    (local.set $result\n");
-        wat.push_str(&format!("      (i32.add (local.get $result) (global.get $global{})))\n", i % 10));
+        wat.push_str(&format!(
+            "      (i32.add (local.get $result) (global.get $global{})))\n",
+            i % 10
+        ));
         wat.push_str("    (local.get $result))\n");
     }
 
@@ -69,7 +79,10 @@ fn test_15k_line_initial_parse_performance() {
     let parse_time = start.elapsed();
 
     println!("Initial parse time: {:?}", parse_time);
-    println!("Parse rate: {:.2} lines/ms", line_count as f64 / parse_time.as_millis() as f64);
+    println!(
+        "Parse rate: {:.2} lines/ms",
+        line_count as f64 / parse_time.as_millis() as f64
+    );
 
     // Verify tree is valid
     assert!(!tree.root_node().has_error(), "Tree should not have errors");
@@ -100,8 +113,14 @@ fn test_15k_line_initial_parse_performance() {
     println!("Parse + Symbols + Diagnostics: {:?}", total_time);
 
     // Performance assertions
-    assert!(parse_time.as_millis() < 1000, "Initial parse should be under 1 second for 15k lines");
-    assert!(total_time.as_millis() < 2000, "Total processing should be under 2 seconds");
+    assert!(
+        parse_time.as_millis() < 1000,
+        "Initial parse should be under 1 second for 15k lines"
+    );
+    assert!(
+        total_time.as_millis() < 2000,
+        "Total processing should be under 2 seconds"
+    );
 }
 
 #[test]
@@ -152,7 +171,9 @@ fn test_15k_line_incremental_edit_performance() {
     tree_for_edit.edit(&tree_edit);
 
     let start = Instant::now();
-    let _new_tree = parser.parse(&modified_doc, Some(&tree_for_edit)).expect("Incremental parse failed");
+    let _new_tree = parser
+        .parse(&modified_doc, Some(&tree_for_edit))
+        .expect("Incremental parse failed");
     let incremental_time = start.elapsed();
 
     println!("Incremental parse (beginning): {:?}", incremental_time);
@@ -191,7 +212,9 @@ fn test_15k_line_incremental_edit_performance() {
     tree_for_edit.edit(&tree_edit);
 
     let start = Instant::now();
-    let _new_tree = parser.parse(&modified_doc, Some(&tree_for_edit)).expect("Incremental parse failed");
+    let _new_tree = parser
+        .parse(&modified_doc, Some(&tree_for_edit))
+        .expect("Incremental parse failed");
     let middle_time = start.elapsed();
 
     println!("Incremental parse (middle): {:?}", middle_time);
@@ -231,7 +254,9 @@ fn test_15k_line_incremental_edit_performance() {
     tree_for_edit.edit(&tree_edit);
 
     let start = Instant::now();
-    let _new_tree = parser.parse(&modified_doc, Some(&tree_for_edit)).expect("Incremental parse failed");
+    let _new_tree = parser
+        .parse(&modified_doc, Some(&tree_for_edit))
+        .expect("Incremental parse failed");
     let end_time = start.elapsed();
 
     println!("Incremental parse (end): {:?}", end_time);
@@ -239,18 +264,32 @@ fn test_15k_line_incremental_edit_performance() {
     // Compare with full reparse
     println!("\n=== Comparison with Full Reparse ===");
     let start = Instant::now();
-    let _full_tree = parser.parse(&modified_doc, None).expect("Full parse failed");
+    let _full_tree = parser
+        .parse(&modified_doc, None)
+        .expect("Full parse failed");
     let full_time = start.elapsed();
 
     println!("Full reparse: {:?}", full_time);
-    println!("Incremental (avg): {:?}", (incremental_time + middle_time + end_time) / 3);
-    println!("Speedup: {:.2}x",
-        full_time.as_nanos() as f64 / ((incremental_time.as_nanos() + middle_time.as_nanos() + end_time.as_nanos()) / 3) as f64
+    println!(
+        "Incremental (avg): {:?}",
+        (incremental_time + middle_time + end_time) / 3
+    );
+    println!(
+        "Speedup: {:.2}x",
+        full_time.as_nanos() as f64
+            / ((incremental_time.as_nanos() + middle_time.as_nanos() + end_time.as_nanos()) / 3)
+                as f64
     );
 
     // Performance assertions
-    assert!(incremental_time.as_millis() < 50, "Incremental parse should be under 50ms");
-    assert!(middle_time.as_millis() < 50, "Middle edit should be under 50ms");
+    assert!(
+        incremental_time.as_millis() < 50,
+        "Incremental parse should be under 50ms"
+    );
+    assert!(
+        middle_time.as_millis() < 50,
+        "Middle edit should be under 50ms"
+    );
     assert!(end_time.as_millis() < 50, "End edit should be under 50ms");
 }
 
@@ -272,21 +311,24 @@ fn test_15k_line_completion_latency() {
     // Position 1: Early in document (line 50)
     let pos1 = Position::new(50, 10);
     let start = Instant::now();
-    let _completions1 = wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos1);
+    let _completions1 =
+        wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos1);
     let time1 = start.elapsed();
     println!("Completion at line 50: {:?}", time1);
 
     // Position 2: Middle of document (line 7500)
     let pos2 = Position::new(7500, 10);
     let start = Instant::now();
-    let _completions2 = wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos2);
+    let _completions2 =
+        wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos2);
     let time2 = start.elapsed();
     println!("Completion at line 7500: {:?}", time2);
 
     // Position 3: Near end (line 14500)
     let pos3 = Position::new(14500, 10);
     let start = Instant::now();
-    let _completions3 = wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos3);
+    let _completions3 =
+        wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos3);
     let time3 = start.elapsed();
     println!("Completion at line 14500: {:?}", time3);
 
