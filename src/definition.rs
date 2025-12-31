@@ -15,6 +15,7 @@ enum DefinitionContext {
     Local,    // Inside local.get/set/tee
     Branch,   // Inside br/br_if
     Table,    // Inside table operation
+    Memory,   // Inside memory operation
     Type,     // Inside type definition/use
     Function, // Inside function definition
     General,  // General context
@@ -42,6 +43,8 @@ fn determine_definition_context(node: tree_sitter::Node, document: &str) -> Defi
                 return DefinitionContext::Branch;
             } else if instr_text.contains("table.") {
                 return DefinitionContext::Table;
+            } else if instr_text.contains("memory.") {
+                return DefinitionContext::Memory;
             }
         }
 
@@ -73,6 +76,8 @@ fn determine_context_from_line(line: &str) -> DefinitionContext {
         DefinitionContext::Branch
     } else if line.contains("table") {
         DefinitionContext::Table
+    } else if line.contains("memory") {
+        DefinitionContext::Memory
     } else if line.contains("type") {
         DefinitionContext::Type
     } else if line.contains("func") {
@@ -94,13 +99,139 @@ pub fn provide_definition(
 
     // Check if it's a symbol reference (starts with $)
     if word.starts_with('$') {
-        return provide_symbol_definition(&word, symbols, document, tree, position, uri);
+        let result = provide_symbol_definition(&word, symbols, document, tree, position, uri);
+
+        // If we didn't find a definition (might be because we're ON the definition),
+        // try to return the definition location itself
+        if result.is_none() {
+            return provide_definition_at_cursor(&word, symbols, position, uri);
+        }
+
+        return result;
     }
 
     // Check for numeric indices
     if word.chars().all(|c| c.is_ascii_digit()) {
         if let Ok(index) = word.parse::<usize>() {
             return provide_index_definition(index, symbols, document, tree, position, uri);
+        }
+    }
+
+    None
+}
+
+/// Check if cursor is on a definition and return that location
+fn provide_definition_at_cursor(
+    word: &str,
+    symbols: &SymbolTable,
+    position: Position,
+    uri: &str,
+) -> Option<Location> {
+    let lsp_uri = Url::parse(uri).ok()?;
+
+    // Check if we're on a function definition
+    if let Some(func) = symbols.get_function_by_name(word) {
+        if let Some(range) = func.range.as_ref() {
+            // Check if the cursor position is within the definition range
+            if position.line == range.start.line {
+                return Some(Location {
+                    uri: lsp_uri,
+                    range: *range,
+                });
+            }
+        }
+    }
+
+    // Check if we're on a global definition
+    if let Some(global) = symbols.get_global_by_name(word) {
+        if let Some(range) = global.range.as_ref() {
+            if position.line == range.start.line {
+                return Some(Location {
+                    uri: lsp_uri,
+                    range: *range,
+                });
+            }
+        }
+    }
+
+    // Check if we're on a local/parameter definition
+    if let Some(func) = find_containing_function(symbols, position) {
+        // Check parameters
+        for param in &func.parameters {
+            if param.name.as_ref() == Some(&word.to_string()) {
+                if let Some(range) = param.range.as_ref() {
+                    if position.line == range.start.line {
+                        return Some(Location {
+                            uri: lsp_uri,
+                            range: *range,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Check locals
+        for local in &func.locals {
+            if local.name.as_ref() == Some(&word.to_string()) {
+                if let Some(range) = local.range.as_ref() {
+                    if position.line == range.start.line {
+                        return Some(Location {
+                            uri: lsp_uri,
+                            range: *range,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Check block labels
+        for block in &func.blocks {
+            if block.label == word {
+                if let Some(range) = block.range.as_ref() {
+                    if position.line == range.start.line {
+                        return Some(Location {
+                            uri: lsp_uri,
+                            range: *range,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Check tables
+    if let Some(table) = symbols.get_table_by_name(word) {
+        if let Some(range) = table.range.as_ref() {
+            if position.line == range.start.line {
+                return Some(Location {
+                    uri: lsp_uri,
+                    range: *range,
+                });
+            }
+        }
+    }
+
+    // Check memories
+    if let Some(memory) = symbols.get_memory_by_name(word) {
+        if let Some(range) = memory.range.as_ref() {
+            if position.line == range.start.line {
+                return Some(Location {
+                    uri: lsp_uri,
+                    range: *range,
+                });
+            }
+        }
+    }
+
+    // Check types
+    if let Some(type_def) = symbols.get_type_by_name(word) {
+        if let Some(range) = type_def.range.as_ref() {
+            if position.line == range.start.line {
+                return Some(Location {
+                    uri: lsp_uri,
+                    range: *range,
+                });
+            }
         }
     }
 
@@ -205,6 +336,15 @@ fn provide_symbol_definition(
                 });
             }
         }
+        DefinitionContext::Memory => {
+            // Jump to memory definition
+            if let Some(memory) = symbols.get_memory_by_name(word) {
+                return memory.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: *range,
+                });
+            }
+        }
         DefinitionContext::Type => {
             // Jump to type definition
             if let Some(type_def) = symbols.get_type_by_name(word) {
@@ -242,6 +382,13 @@ fn provide_symbol_definition(
             // Try table
             if let Some(table) = symbols.get_table_by_name(word) {
                 return table.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: *range,
+                });
+            }
+            // Try memory
+            if let Some(memory) = symbols.get_memory_by_name(word) {
+                return memory.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
                     range: *range,
                 });

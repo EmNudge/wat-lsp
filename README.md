@@ -54,6 +54,21 @@ Shows parameter information during function calls:
 - Highlights current parameter position
 - Works with both named and indexed parameters
 
+### 🔍 Go to Definition
+Jump to symbol definitions:
+- Functions, globals, types, tables
+- Local variables and parameters
+- Block labels
+- Works with both named (`$symbol`) and numeric indices
+
+### 🔎 Find References
+Find all references to a symbol:
+- Functions, globals, locals, parameters
+- Block labels (including numeric depth like `br 0`)
+- Types and tables
+- Scope-aware for locals/parameters
+- Option to include/exclude declaration
+
 ## Building
 
 ### Prerequisites
@@ -92,13 +107,11 @@ The server can be integrated with any LSP-compatible editor (VS Code, Neovim, He
 
 ## Future Enhancements
 
-- [ ] Diagnostics (syntax errors, type checking)
-- [ ] Go to Definition
-- [ ] Find References
 - [ ] Symbol renaming
 - [ ] Document symbols for outline view
 - [ ] Code formatting
 - [ ] Inlay hints for types
+- [ ] Code actions and quick fixes
 
 ## License
 
