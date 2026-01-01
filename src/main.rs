@@ -3,6 +3,7 @@ mod definition;
 mod diagnostics;
 mod hover;
 mod parser;
+mod references;
 mod signature;
 mod symbols;
 mod utils;
@@ -162,6 +163,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -372,6 +374,52 @@ impl LanguageServer for Backend {
                 return Ok(Some(GotoDefinitionResponse::Scalar(location)));
             }
         }
+
+        Ok(None)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri.to_string();
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "References requested at {}:{}",
+                    position.line, position.character
+                ),
+            )
+            .await;
+
+        let document = self.document_map.get(&uri);
+        let symbols = self.symbol_map.get(&uri);
+        let tree = self.tree_map.get(&uri);
+
+        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
+            let refs = references::provide_references(
+                &doc,
+                &syms,
+                &t,
+                position,
+                &uri,
+                include_declaration,
+            );
+
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!("Found {} references", refs.len()),
+                )
+                .await;
+
+            return Ok(Some(refs));
+        }
+
+        self.client
+            .log_message(MessageType::WARNING, "No document/symbols/tree found")
+            .await;
 
         Ok(None)
     }

@@ -123,6 +123,19 @@ pub struct Table {
 }
 
 #[derive(Debug, Clone)]
+pub struct Memory {
+    pub name: Option<String>,
+    #[allow(dead_code)] // Useful for numeric memory references
+    pub index: usize,
+    #[allow(dead_code)] // Useful for memory operations and diagnostics
+    pub limits: (u32, Option<u32>), // (min, max)
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: Option<String>,
     #[allow(dead_code)] // Useful for numeric type references
@@ -140,12 +153,14 @@ pub struct SymbolTable {
     pub functions: Vec<Function>,
     pub globals: Vec<Global>,
     pub tables: Vec<Table>,
+    pub memories: Vec<Memory>,
     pub types: Vec<TypeDef>,
 
     // Maps for quick lookup by name
     pub function_map: HashMap<String, usize>,
     pub global_map: HashMap<String, usize>,
     pub table_map: HashMap<String, usize>,
+    pub memory_map: HashMap<String, usize>,
     pub type_map: HashMap<String, usize>,
 }
 
@@ -176,6 +191,14 @@ impl SymbolTable {
             self.table_map.insert(name.clone(), index);
         }
         self.tables.push(table);
+    }
+
+    pub fn add_memory(&mut self, memory: Memory) {
+        let index = self.memories.len();
+        if let Some(ref name) = memory.name {
+            self.memory_map.insert(name.clone(), index);
+        }
+        self.memories.push(memory);
     }
 
     pub fn add_type(&mut self, type_def: TypeDef) {
@@ -212,7 +235,25 @@ impl SymbolTable {
             .and_then(|&idx| self.tables.get(idx))
     }
 
+    pub fn get_table_by_index(&self, index: usize) -> Option<&Table> {
+        self.tables.get(index)
+    }
+
+    pub fn get_memory_by_name(&self, name: &str) -> Option<&Memory> {
+        self.memory_map
+            .get(name)
+            .and_then(|&idx| self.memories.get(idx))
+    }
+
+    pub fn get_memory_by_index(&self, index: usize) -> Option<&Memory> {
+        self.memories.get(index)
+    }
+
     pub fn get_type_by_name(&self, name: &str) -> Option<&TypeDef> {
         self.type_map.get(name).and_then(|&idx| self.types.get(idx))
+    }
+
+    pub fn get_type_by_index(&self, index: usize) -> Option<&TypeDef> {
+        self.types.get(index)
     }
 }

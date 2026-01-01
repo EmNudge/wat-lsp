@@ -21,11 +21,12 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     let mut symbol_table = SymbolTable::new();
     let root = tree.root_node();
 
-    // Extract in order: globals, types, tables, functions
+    // Extract in order: globals, types, tables, memories, functions
     // (Order matters for index assignment)
     extract_globals(&root, source, &mut symbol_table);
     extract_types(&root, source, &mut symbol_table);
     extract_tables(&root, source, &mut symbol_table);
+    extract_memories(&root, source, &mut symbol_table);
     extract_functions(&root, source, &mut symbol_table);
 
     Ok(symbol_table)
@@ -600,6 +601,118 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
         ref_type,
         limits: (min_limit, max_limit),
         line: table_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
+/// Extract memory definitions
+fn extract_memories(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+    let mut cursor = root.walk();
+    let mut memory_index = 0;
+
+    for child in root.children(&mut cursor) {
+        if child.kind() == "module" {
+            let mut module_cursor = child.walk();
+            for module_child in child.children(&mut module_cursor) {
+                if module_child.kind() == "module_field" {
+                    let mut field_cursor = module_child.walk();
+                    for field_child in module_child.children(&mut field_cursor) {
+                        if field_child.kind() == "module_field_memory" {
+                            if let Some(memory) = extract_memory(&field_child, source, memory_index)
+                            {
+                                symbol_table.add_memory(memory);
+                                memory_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if child.kind() == "module_field" {
+            let mut field_cursor = child.walk();
+            for field_child in child.children(&mut field_cursor) {
+                if field_child.kind() == "module_field_memory" {
+                    if let Some(memory) = extract_memory(&field_child, source, memory_index) {
+                        symbol_table.add_memory(memory);
+                        memory_index += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Extract a single memory from a memory node
+fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memory> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(memory_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut min_limit = 0;
+    let mut max_limit = None;
+
+    let mut cursor = memory_node.walk();
+    for child in memory_node.children(&mut cursor) {
+        if child.kind() == "memory_fields_type" {
+            let mut fields_cursor = child.walk();
+            for fields_child in child.children(&mut fields_cursor) {
+                if fields_child.kind() == "memory_type" {
+                    let mut type_cursor = fields_child.walk();
+                    for type_child in fields_child.children(&mut type_cursor) {
+                        if type_child.kind() == "limits" {
+                            let mut limits_cursor = type_child.walk();
+                            let mut nat_index = 0;
+                            for limit_child in type_child.children(&mut limits_cursor) {
+                                if limit_child.kind() == "nat" {
+                                    let text = node_text(&limit_child, source);
+                                    if let Ok(num) = text.parse::<u32>() {
+                                        if nat_index == 0 {
+                                            min_limit = num;
+                                        } else {
+                                            max_limit = Some(num);
+                                        }
+                                        nat_index += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if child.kind() == "memory_type" {
+            // Handle direct memory_type (without wrapper)
+            let mut type_cursor = child.walk();
+            for type_child in child.children(&mut type_cursor) {
+                if type_child.kind() == "limits" {
+                    let mut limits_cursor = type_child.walk();
+                    let mut nat_index = 0;
+                    for limit_child in type_child.children(&mut limits_cursor) {
+                        if limit_child.kind() == "nat" {
+                            let text = node_text(&limit_child, source);
+                            if let Ok(num) = text.parse::<u32>() {
+                                if nat_index == 0 {
+                                    min_limit = num;
+                                } else {
+                                    max_limit = Some(num);
+                                }
+                                nat_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Some(Memory {
+        name,
+        index,
+        limits: (min_limit, max_limit),
+        line: memory_node.range().start_point.row as u32,
         range: name_range,
     })
 }

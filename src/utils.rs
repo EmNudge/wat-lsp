@@ -89,15 +89,35 @@ pub fn node_at_position<'a>(tree: &'a Tree, source: &str, position: Position) ->
 
 /// Recursively find the deepest (most specific) node containing the byte offset
 fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
-    if !node.byte_range().contains(&byte_offset) {
+    let range = node.byte_range();
+    // Check if byte_offset is within the node (inclusive of start, exclusive of end)
+    // OR if it's at the end of the node (to handle cursor at end of word)
+    if !(range.start <= byte_offset && byte_offset <= range.end) {
         return None;
     }
 
     let mut cursor = node.walk();
+    let mut best_child = None;
     for child in node.children(&mut cursor) {
-        if let Some(found) = find_deepest_node(child, byte_offset) {
-            return Some(found);
+        let child_range = child.byte_range();
+        let contains_or_adjacent =
+            child_range.start <= byte_offset && byte_offset <= child_range.end;
+        if contains_or_adjacent {
+            if let Some(found) = find_deepest_node(child, byte_offset) {
+                // Prefer the child that properly contains the offset over one where offset is at the end
+                if byte_offset < child_range.end || best_child.is_none() {
+                    best_child = Some(found);
+                    if byte_offset < child_range.end {
+                        // If offset is properly inside, return immediately
+                        return Some(found);
+                    }
+                }
+            }
         }
+    }
+
+    if let Some(child) = best_child {
+        return Some(child);
     }
 
     Some(node)

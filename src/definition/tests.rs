@@ -394,3 +394,96 @@ fn test_goto_definition_nested_blocks() {
     // The definition should point to line 2 where $outer is defined
     assert_eq!(location.range.start.line, 2);
 }
+
+#[test]
+fn test_goto_definition_on_parameter_definition() {
+    let document = r#"(module
+  (func $test (param $n i32)
+    local.get $n
+    drop)
+)"#;
+
+    let symbols = parse_document(document).unwrap();
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position on "$n" in the parameter definition (line 1)
+    let position = Position::new(1, 21);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    // Should return the definition location (itself)
+    assert!(location.is_some());
+    let location = location.unwrap();
+    assert_eq!(location.range.start.line, 1);
+}
+
+#[test]
+fn test_goto_definition_on_local_definition() {
+    let document = r#"(module
+  (func $test (local $result i32)
+    i32.const 42
+    local.set $result
+    local.get $result)
+)"#;
+
+    let symbols = parse_document(document).unwrap();
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position on "$result" in the local definition (line 1)
+    let position = Position::new(1, 24);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    // Should return the definition location (itself)
+    assert!(location.is_some());
+    let location = location.unwrap();
+    assert_eq!(location.range.start.line, 1);
+}
+
+#[test]
+fn test_goto_definition_on_block_label_definition() {
+    let document = r#"(module
+  (func $test
+    (block $break
+      br $break))
+)"#;
+
+    let symbols = parse_document(document).unwrap();
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position on "$break" in the block definition (line 2)
+    let position = Position::new(2, 12);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    // Should return the definition location (itself)
+    assert!(location.is_some());
+    let location = location.unwrap();
+    assert_eq!(location.range.start.line, 2);
+}
+
+#[test]
+fn test_goto_definition_on_loop_label_definition() {
+    let document = r#"(module
+  (func $test
+    (loop $continue
+      br $continue))
+)"#;
+
+    let symbols = parse_document(document).unwrap();
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position on "$continue" in the loop definition (line 2)
+    let position = Position::new(2, 11);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    // Should return the definition location (itself)
+    assert!(location.is_some());
+    let location = location.unwrap();
+    assert_eq!(location.range.start.line, 2);
+}
