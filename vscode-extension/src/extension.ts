@@ -46,10 +46,12 @@ export function activate(context: ExtensionContext) {
   // Options for the language client
   const clientOptions: LanguageClientOptions = {
     // Register the server for WAT files
+    // Use pattern-based selectors to work regardless of which extension owns the language ID
     documentSelector: [
-      { scheme: 'file', language: 'wat' },
       { scheme: 'file', pattern: '**/*.wat' },
-      { scheme: 'file', pattern: '**/*.wast' }
+      { scheme: 'file', pattern: '**/*.wast' },
+      { scheme: 'file', language: 'wat' },  // In case we own it
+      { scheme: 'file', language: 'wasm' }, // In case vscode-wasm uses this ID
     ],
     synchronize: {
       // Notify the server about file changes to .wat and .wast files

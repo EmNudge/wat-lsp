@@ -2,7 +2,7 @@
   "name": "wat-lsp",
   "displayName": "WebAssembly Text Format (WAT) Language Support",
   "description": "Language Server Protocol support for WebAssembly Text Format (.wat files)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "EmNudge",
   "repository": {
     "type": "git",
@@ -23,7 +23,10 @@
     "language-server"
   ],
   "activationEvents": [
-    "onLanguage:wat"
+    "onStartupFinished"
+  ],
+  "extensionDependencies": [
+    "dtsvet.vscode-wasm"
   ],
   "main": "./out/extension.js",
   "contributes": {
