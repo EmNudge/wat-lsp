@@ -521,6 +521,7 @@ impl LanguageServer for Backend {
                     references::ReferenceTarget::Table { name, .. } => name.is_some(),
                     references::ReferenceTarget::Memory { name, .. } => name.is_some(),
                     references::ReferenceTarget::Type { name, .. } => name.is_some(),
+                    references::ReferenceTarget::Tag { name, .. } => name.is_some(),
                 };
 
                 if !has_name {

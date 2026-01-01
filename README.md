@@ -13,6 +13,7 @@ A Language Server Protocol (LSP) implementation for WebAssembly Text Format (`.w
 - **Block/Loop Labels**: Label type and line number
 - **Instructions**: Comprehensive WebAssembly instruction documentation
 - **Numeric Indices**: Resolution of indexed variable access
+- **Phase 5 Support**: WasmGC, Relaxed SIMD, Exception Handling, Reference Types
 
 ### ✨ Code Completion
 

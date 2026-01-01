@@ -32,8 +32,14 @@ module.exports = grammar({
     annotation_parens: $ => seq("(", repeat($.annotation_part), ")"),
 
     // proposal: annotations
+    // proposal: annotations
     annotation_part: $ =>
       choice($.comment_block_annot, $.comment_line_annot, $.annotation_parens, $.reserved, $.identifier, $.string),
+
+    custom_annotation: $ => seq(
+      /@[0-9A-Za-z!#$%&'*+-./:<=>?@\\^_'|~]+/,
+      optional(choice($.string, $.identifier, $.nat, $.float))
+    ),
 
     block_block: $ =>
       seq(
@@ -222,7 +228,7 @@ module.exports = grammar({
 
     instr: $ => choice($.instr_plain, $.instr_call, $.instr_block, $.expr),
 
-    instr_block: $ => choice($.block_block, $.block_loop, $.block_if),
+    instr_block: $ => choice($.block_block, $.block_loop, $.block_if, $.block_try, $.block_try_table),
 
     instr_call: $ =>
       seq("call_indirect", optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results), $.instr),
@@ -237,22 +243,105 @@ module.exports = grammar({
 
     instr_plain: $ =>
       choice(
+        $._instruction_mvp,
+        $._instruction_simd,
+        $._instruction_relaxed_simd,
+        $._instruction_gc,
+        $._instruction_atomic,
+        $._instruction_bulk,
+        $._instruction_ref,
+        $._instruction_exception,
+      ),
+
+    _instruction_mvp: $ =>
+      choice(
         $.op_nullary,
         seq($.op_index, $.index),
         seq($.op_index_opt, optional($.index)),
         seq("br_table", $.index, repeat($.index)),
-        seq("ref.extern", $.nat),
-        seq("ref.null", choice($.ref_kind, $.index)),
-        seq($.op_index_opt_offset_opt_align_opt, optional($.index), optional($.offset_value), optional($.align_value)),
-        seq($.op_simd_offset_opt_align_opt, optional($.offset_value), optional($.align_value)),
         $.op_const,
-        $.op_func_bind,
-        $.op_let,
         $.op_select,
+      ),
+
+    _instruction_simd: $ =>
+      choice(
+        seq($.op_simd_offset_opt_align_opt, optional($.offset_value), optional($.align_value)),
         $.op_simd_const,
         $.op_simd_lane,
+      ),
+
+    _instruction_relaxed_simd: $ =>
+      token(seq(
+        choice("i8x16", "i16x8", "i32x4", "i64x2", "f32x4", "f64x2"),
+        ".relaxed_",
+        /[0-9A-Za-z_]+/,
+      )),
+
+    _instruction_bulk: $ =>
+      choice(
         $.op_table_copy,
         $.op_table_init,
+        seq("memory.init", $.index, optional($.index)),
+        seq("memory.copy", optional($.index), optional($.index)),
+        seq("memory.fill", optional($.index)),
+        seq("data.drop", $.index),
+        seq("elem.drop", $.index),
+      ),
+
+    _instruction_ref: $ =>
+      choice(
+        seq("ref.null", choice($.ref_kind, $.index)),
+        seq("ref.func", $.index),
+        seq("ref.extern", $.nat),
+        $.op_func_bind,
+        $.op_let,
+        seq("table.get", $.index),
+        seq("table.set", $.index),
+        seq("table.size", $.index),
+        seq("table.grow", $.index),
+        seq("table.fill", $.index),
+      ),
+
+    _instruction_atomic: $ =>
+      "atomic.fence", // Note: Most atomics are currently in op_nullary or op_index_opt_...
+
+    _instruction_gc: $ =>
+      choice(
+        seq("struct.new", $.index),
+        seq("struct.new_default", $.index),
+        seq("struct.get", $.index, $.index),
+        seq("struct.get_s", $.index, $.index),
+        seq("struct.get_u", $.index, $.index),
+        seq("struct.set", $.index, $.index),
+        seq("array.new", $.index),
+        seq("array.new_default", $.index),
+        seq("array.new_fixed", $.index, $.nat),
+        seq("array.new_data", $.index, $.index),
+        seq("array.new_elem", $.index, $.index),
+        seq("array.get", $.index),
+        seq("array.get_s", $.index),
+        seq("array.get_u", $.index),
+        seq("array.set", $.index),
+        "array.len",
+        seq("array.fill", $.index),
+        seq("array.copy", $.index, $.index),
+        seq("array.init_data", $.index, $.index),
+        seq("array.init_elem", $.index, $.index),
+        seq("ref.test", choice($.ref_kind, $.index)),
+        seq("ref.cast", choice($.ref_kind, $.index)),
+        seq("ref.cast_null", choice($.ref_kind, $.index)),
+        "ref.i31",
+        "i31.get_s",
+        "i31.get_u",
+        seq("br_on_cast", $.index, choice($.ref_kind, $.index), choice($.ref_kind, $.index)),
+        seq("br_on_cast_fail", $.index, choice($.ref_kind, $.index), choice($.ref_kind, $.index)),
+      ),
+
+    _instruction_exception: $ =>
+      choice(
+        seq("throw", $.index),
+        "throw_ref",
+        seq("rethrow", $.index),
       ),
 
     op_nullary: $ =>
@@ -617,7 +706,10 @@ module.exports = grammar({
         $.module_field_data,
         $.module_field_start,
         $.module_field_import,
+        $.module_field_import,
         $.module_field_export,
+        $.module_field_rec,
+        $.module_field_tag,
       ),
 
     module_field_data: $ =>
@@ -687,6 +779,22 @@ module.exports = grammar({
         ")",
       ),
 
+    module_field_rec: $ =>
+      seq("(", "rec", repeat1(seq("(", "type", optional(field("identifier", $.identifier)), $.type_field, ")")), ")"),
+
+    module_field_tag: $ =>
+      seq(
+        "(",
+        "tag",
+        optional(field("identifier", $.identifier)),
+        repeat($.export),
+        optional($.import),
+        optional($.type_use),
+        repeat($.func_type_params),
+        repeat($.func_type_results),
+        ")",
+      ),
+
     module_field_start: $ => seq("(", "start", $.index, ")"),
 
     module_field_table: $ =>
@@ -734,10 +842,13 @@ module.exports = grammar({
     offset_value: $ => seq("offset", imm("="), $.align_offset_value),
 
     // proposal: reference-types
-    ref_kind: $ => /extern|func/,
+    ref_kind: $ => /extern|func|struct|array|i31|any|eq|null/,
 
     // proposal: reference-types
-    ref_type: $ => choice($.ref_type_externref, $.ref_type_funcref, $.ref_type_ref),
+    ref_type: $ => choice($.ref_type_externref, $.ref_type_funcref, $.ref_type_ref, "anyref", "eqref", "i31ref", "structref", "arrayref", "nullref", "nullfuncref", "nullexternref", "nullref"),
+
+    ref_type_concrete: $ =>
+      seq("(", "ref", optional("null"), $.index, ")"),
 
     // proposal: reference-types
     ref_type_externref: $ => "externref",
@@ -767,13 +878,51 @@ module.exports = grammar({
 
     table_use: $ => seq("(", "table", $.index, ")"),
 
-    type_field: $ => seq("(", "func", repeat($.func_type), ")"),
+    type_field: $ => choice(
+      seq("(", "func", repeat($.func_type), ")"),
+      $.struct_type,
+      $.array_type,
+    ),
+
+    struct_type: $ => seq("(", "struct", repeat($.field_type), ")"),
+
+    array_type: $ => seq("(", "array", $.field_type, ")"),
+
+    field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), $.value_type, optional(seq("(", "mut", $.value_type, ")")), ")"), // simplified, need better mut handling
+
+    // Exception handling blocks
+    block_try_table: $ =>
+      seq(
+        "try_table",
+        optional($.identifier),
+        seq(optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results)),
+        repeat($.catch_clause),
+        optional($.instr_list),
+        "end",
+        optional($.identifier),
+      ),
+
+    catch_clause: $ => seq("(", choice("catch", "catch_ref", "catch_all", "catch_all_ref"), $.index, $.index, ")"),
+
+    block_try: $ =>
+      seq(
+        "try",
+        optional($.identifier),
+        seq(optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results), optional($.instr_list)),
+        repeat(choice(
+          seq("catch", $.index, optional($.instr_list)),
+          seq("catch_all", optional($.instr_list)),
+        )),
+        optional(seq("delegate", $.index)),
+        "end",
+        optional($.identifier),
+      ),
 
     type_use: $ => seq("(", "type", $.index, ")"),
 
     value_type: $ => choice($.value_type_num_type, $.value_type_ref_type),
 
-    value_type_num_type: $ => choice($.num_type_f32, $.num_type_f64, $.num_type_i32, $.num_type_i64, $.num_type_v128),
+    value_type_num_type: $ => choice($.num_type_f32, $.num_type_f64, $.num_type_i32, $.num_type_i64, $.num_type_v128, "i8", "i16"),
 
     value_type_ref_type: $ => $.ref_type,
   },

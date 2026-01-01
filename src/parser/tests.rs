@@ -139,8 +139,12 @@ fn test_parse_types() {
     assert!(!symbols.types.is_empty());
 
     if let Some(binop) = symbols.get_type_by_name("$binop") {
-        assert!(!binop.parameters.is_empty());
-        assert!(!binop.results.is_empty());
+        if let TypeKind::Func { params, results } = &binop.kind {
+            assert!(!params.is_empty());
+            assert!(!results.is_empty());
+        } else {
+            panic!("Expected Func type");
+        }
     }
 }
 

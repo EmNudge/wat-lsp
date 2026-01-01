@@ -1410,3 +1410,335 @@ Example:
 (func $process (param $obj externref) ...)
 ```
 ---
+
+## struct.new
+Create a new structure on the heap.
+
+Signature: `(param field_types...) (result structref)`
+
+Example:
+```wat
+(struct.new $my_struct (i32.const 1) (f32.const 2.0))
+```
+---
+
+## struct.new_default
+Create a new structure with default values.
+
+Signature: `(result structref)`
+
+Example:
+```wat
+(struct.new_default $my_struct)
+```
+---
+
+## struct.get
+Get a field from a structure.
+
+Signature: `(param structref) (result field_type)`
+
+Example:
+```wat
+(struct.get $my_struct $field_name (local.get $s))
+```
+---
+
+## struct.get_s
+Get a signed field from a structure (sign-extending).
+
+Signature: `(param structref) (result field_type)`
+
+Example:
+```wat
+(struct.get_s $my_struct $field_index (local.get $s))
+```
+---
+
+## struct.get_u
+Get an unsigned field from a structure (zero-extending).
+
+Signature: `(param structref) (result field_type)`
+
+Example:
+```wat
+(struct.get_u $my_struct $field_index (local.get $s))
+```
+---
+
+## struct.set
+Set a field in a structure.
+
+Signature: `(param structref field_type)`
+
+Example:
+```wat
+(struct.set $my_struct $field_index (local.get $s) (i32.const 42))
+```
+---
+
+## array.new
+Create a new array on the heap.
+
+Signature: `(param field_type i32) (result arrayref)`
+
+Example:
+```wat
+(array.new $my_array (i32.const 0) (i32.const 10)) ;; Create size 10 array filled with 0
+```
+---
+
+## array.new_default
+Create a new array with default values.
+
+Signature: `(param i32) (result arrayref)`
+
+Example:
+```wat
+(array.new_default $my_array (i32.const 10))
+```
+---
+
+## array.new_fixed
+Create a new array from a fixed set of arguments.
+
+Signature: `(param field_type...) (result arrayref)`
+
+Example:
+```wat
+(array.new_fixed $my_array 3 (i32.const 1) (i32.const 2) (i32.const 3))
+```
+---
+
+## array.new_data
+Create a new array from a data segment.
+
+Signature: `(param i32 i32) (result arrayref)`
+
+Example:
+```wat
+(array.new_data $my_array $data_index (i32.const 0) (i32.const 10))
+```
+---
+
+## array.new_elem
+Create a new array from an element segment.
+
+Signature: `(param i32 i32) (result arrayref)`
+
+Example:
+```wat
+(array.new_elem $my_array $elem_index (i32.const 0) (i32.const 10))
+```
+---
+
+## array.get
+Get an element from an array.
+
+Signature: `(param arrayref i32) (result field_type)`
+
+Example:
+```wat
+(array.get $my_array (local.get $arr) (i32.const 5))
+```
+---
+
+## array.get_s
+Get a signed element from an array.
+
+Signature: `(param arrayref i32) (result field_type)`
+
+Example:
+```wat
+(array.get_s $my_array (local.get $arr) (i32.const 5))
+```
+---
+
+## array.get_u
+Get an unsigned element from an array.
+
+Signature: `(param arrayref i32) (result field_type)`
+
+Example:
+```wat
+(array.get_u $my_array (local.get $arr) (i32.const 5))
+```
+---
+
+## array.set
+Set an element in an array.
+
+Signature: `(param arrayref i32 field_type)`
+
+Example:
+```wat
+(array.set $my_array (local.get $arr) (i32.const 5) (i32.const 42))
+```
+---
+
+## array.len
+Get the length of an array.
+
+Signature: `(param arrayref) (result i32)`
+
+Example:
+```wat
+(array.len (local.get $arr))
+```
+---
+
+## array.fill
+Fill a range of an array with a value.
+
+Signature: `(param arrayref i32 field_type i32)`
+
+Example:
+```wat
+(array.fill (local.get $arr) (i32.const 0) (i32.const 42) (i32.const 10))
+```
+---
+
+## array.copy
+Copy a range from one array to another.
+
+Signature: `(param arrayref i32 arrayref i32 i32)`
+
+Example:
+```wat
+(array.copy $dst_type $src_type (local.get $dst) (i32.const 0) (local.get $src) (i32.const 0) (i32.const 10))
+```
+---
+
+## ref.i31
+Create a 31-bit integer reference from an i32.
+
+Signature: `(param i32) (result i31ref)`
+
+Example:
+```wat
+(ref.i31 (i32.const 42))
+```
+---
+
+## i31.get_s
+Get the signed i32 value from an i31 reference.
+
+Signature: `(param i31ref) (result i32)`
+
+Example:
+```wat
+(i31.get_s (local.get $i31))
+```
+---
+
+## i31.get_u
+Get the unsigned i32 value from an i31 reference.
+
+Signature: `(param i31ref) (result i32)`
+
+Example:
+```wat
+(i31.get_u (local.get $i31))
+```
+---
+
+## ref.test
+Test if a reference is null or of a specific type.
+
+Signature: `(param ref) (result i32)`
+
+Example:
+```wat
+(ref.test (ref null $type) (local.get $ref))
+```
+---
+
+## ref.cast
+Cast a reference to a specific type (traps on failure).
+
+Signature: `(param ref) (result ref)`
+
+Example:
+```wat
+(ref.cast (ref null $type) (local.get $ref))
+```
+---
+
+## ref.cast_null
+Cast a reference to a specific type (returns null on failure).
+
+Signature: `(param ref) (result ref)`
+
+Example:
+```wat
+(ref.cast_null (ref null $type) (local.get $ref))
+```
+---
+
+## br_on_cast
+Branch if a reference can be cast to a type.
+
+Signature: `(param ref) (result ref?)`
+
+Example:
+```wat
+(br_on_cast $label (ref null $target_type) (local.get $ref))
+```
+---
+
+## br_on_cast_fail
+Branch if a reference cannot be cast to a type.
+
+Signature: `(param ref) (result ref)`
+
+Example:
+```wat
+(br_on_cast_fail $label (ref null $target_type) (local.get $ref))
+```
+---
+
+## throw
+Throw an exception with a tag.
+
+Signature: `(param args...)`
+
+Example:
+```wat
+(throw $error_tag (i32.const 500))
+```
+---
+
+## throw_ref
+Throw an existing exception reference.
+
+Signature: `(param exnref)`
+
+Example:
+```wat
+(throw_ref (local.get $exn))
+```
+---
+
+## rethrow
+Rethrow an exception from a catch block.
+
+Signature: `(param i32)`
+
+Example:
+```wat
+(rethrow $label)
+```
+---
+
+## try_table
+Define a block that catches exceptions using a jump table.
+
+Signature: Varies
+
+Example:
+```wat
+(try_table (catch $tag $handler_label)
+  (throw $tag (i32.const 1))
+)
+```
+---

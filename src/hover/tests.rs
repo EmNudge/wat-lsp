@@ -81,8 +81,10 @@ fn create_test_symbols() -> SymbolTable {
     let type_def = TypeDef {
         name: Some("$binop".to_string()),
         index: 0,
-        parameters: vec![ValueType::I32, ValueType::I32],
-        results: vec![ValueType::I32],
+        kind: TypeKind::Func {
+            params: vec![ValueType::I32, ValueType::I32],
+            results: vec![ValueType::I32],
+        },
         line: 0,
         range: None,
     };

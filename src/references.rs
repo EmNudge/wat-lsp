@@ -46,9 +46,12 @@ pub enum ReferenceTarget {
         name: Option<String>,
         index: usize,
     },
+    Tag {
+        name: Option<String>,
+        index: usize,
+    },
 }
 
-/// Context for determining what type of reference we're looking at
 #[derive(Debug, PartialEq, Copy, Clone)]
 enum ReferenceContext {
     Call,     // Inside call instruction
@@ -57,16 +60,10 @@ enum ReferenceContext {
     Branch,   // Inside br/br_if/br_table
     Table,    // Inside table operation
     Memory,   // Inside memory operation
-    Type,     // Inside type definition/use
+    Type,     // Inside type definition/use or struct/array/cast constant
+    Tag,      // Inside throw/try
     Function, // Inside function definition
     General,  // General context
-}
-
-/// Block information for tracking nesting depth
-#[derive(Debug, Clone)]
-struct BlockInfo {
-    label: Option<String>,
-    line: u32,
 }
 
 /// Context for reference search operations
@@ -75,6 +72,93 @@ struct ReferenceSearchContext<'a> {
     symbols: &'a SymbolTable,
     uri: &'a str,
     results: &'a mut Vec<Location>,
+}
+
+/// Check if a line is within the same function as the target
+fn is_in_same_function_by_line(
+    line: u32,
+    target_function_start_byte: usize,
+    symbols: &SymbolTable,
+) -> bool {
+    // Find the function that contains this line
+    for func in &symbols.functions {
+        if line >= func.line && line <= func.end_line {
+            return func.start_byte == target_function_start_byte;
+        }
+    }
+    false
+}
+
+/// Determine reference context from AST node
+fn determine_reference_context(node: &tree_sitter::Node, document: &str) -> ReferenceContext {
+    let kind = node.kind();
+
+    // Check for instruction contexts
+    if kind == "instr_plain" || kind == "expr1_plain" {
+        // Get the text of the instruction to determine its type
+        let instr_text = &document[node.byte_range()];
+
+        if instr_text.contains("call") {
+            return ReferenceContext::Call;
+        } else if instr_text.contains("local.") {
+            return ReferenceContext::Local;
+        } else if instr_text.contains("global.") {
+            return ReferenceContext::Global;
+        } else if instr_text.starts_with("br") || instr_text.contains(" br") {
+            return ReferenceContext::Branch;
+        } else if instr_text.contains("table.") {
+            return ReferenceContext::Table;
+        } else if instr_text.contains("memory.") {
+            return ReferenceContext::Memory;
+        } else if instr_text.contains("struct.")
+            || instr_text.contains("array.")
+            || instr_text.contains("ref.cast")
+            || instr_text.contains("ref.test")
+        {
+            return ReferenceContext::Type;
+        } else if instr_text.contains("throw") || instr_text.contains("rethrow") {
+            return ReferenceContext::Tag;
+        }
+    }
+
+    // Check for type use (not definition)
+    if kind == "type_use" {
+        return ReferenceContext::Type;
+    }
+
+    // Check for tag use (not definition)
+    // Note: module_field_tag is a definition, not a use
+
+    ReferenceContext::General
+}
+
+/// Determine context from line text (fallback for incomplete code)
+fn determine_context_from_line(line: &str) -> ReferenceContext {
+    if line.contains("call") {
+        ReferenceContext::Call
+    } else if line.contains("global") {
+        ReferenceContext::Global
+    } else if line.contains("local") {
+        ReferenceContext::Local
+    } else if line.contains("br") {
+        ReferenceContext::Branch
+    } else if line.contains("table") {
+        ReferenceContext::Table
+    } else if line.contains("memory") {
+        ReferenceContext::Memory
+    } else if line.contains("type")
+        || line.contains("struct")
+        || line.contains("array")
+        || line.contains("ref.")
+    {
+        ReferenceContext::Type
+    } else if line.contains("func") {
+        ReferenceContext::Function
+    } else if line.contains("throw") || line.contains("tag") {
+        ReferenceContext::Tag
+    } else {
+        ReferenceContext::General
+    }
 }
 
 /// Main entry point for providing find-references
@@ -318,6 +402,13 @@ fn identify_named_symbol(
                     index: type_def.index,
                 });
             }
+            // Try tag
+            if let Some(tag) = symbols.get_tag_by_name(word) {
+                return Some(ReferenceTarget::Tag {
+                    name: Some(word.to_string()),
+                    index: tag.index,
+                });
+            }
         }
         ReferenceContext::Table => {
             if let Some(table) = symbols.get_table_by_name(word) {
@@ -340,6 +431,14 @@ fn identify_named_symbol(
                 return Some(ReferenceTarget::Type {
                     name: Some(word.to_string()),
                     index: type_def.index,
+                });
+            }
+        }
+        ReferenceContext::Tag => {
+            if let Some(tag) = symbols.get_tag_by_name(word) {
+                return Some(ReferenceTarget::Tag {
+                    name: Some(word.to_string()),
+                    index: tag.index,
                 });
             }
         }
@@ -398,6 +497,22 @@ fn identify_indexed_symbol(
                         });
                     }
                 }
+            }
+        }
+        ReferenceContext::Type => {
+            if let Some(type_def) = symbols.get_type_by_index(index) {
+                return Some(ReferenceTarget::Type {
+                    name: type_def.name.clone(),
+                    index,
+                });
+            }
+        }
+        ReferenceContext::Tag => {
+            if let Some(tag) = symbols.get_tag_by_index(index) {
+                return Some(ReferenceTarget::Tag {
+                    name: tag.name.clone(),
+                    index,
+                });
             }
         }
         ReferenceContext::Branch => {
@@ -488,6 +603,8 @@ fn walk_tree_for_references(
             | ReferenceContext::Branch
             | ReferenceContext::Table
             | ReferenceContext::Type
+            | ReferenceContext::Tag
+            | ReferenceContext::Memory
     ) {
         let mut ctx = ReferenceSearchContext {
             document,
@@ -678,6 +795,12 @@ fn matches_target_identifier(
             }
             name.as_ref() == Some(&identifier.to_string())
         }
+        ReferenceTarget::Tag { name, .. } => {
+            if *context != ReferenceContext::Tag {
+                return false;
+            }
+            name.as_ref() == Some(&identifier.to_string())
+        }
     }
 }
 
@@ -790,6 +913,15 @@ fn matches_target_index(
             }
             index == *target_index
         }
+        ReferenceTarget::Tag {
+            index: target_index,
+            ..
+        } => {
+            if *context != ReferenceContext::Tag {
+                return false;
+            }
+            index == *target_index
+        }
     }
 }
 
@@ -884,106 +1016,6 @@ fn position_to_byte(document: &str, position: Position) -> usize {
     byte_offset
 }
 
-/// Check if a line is within the same function as the target
-fn is_in_same_function_by_line(
-    line: u32,
-    target_function_start_byte: usize,
-    symbols: &SymbolTable,
-) -> bool {
-    // Find the function that contains this line
-    for func in &symbols.functions {
-        if line >= func.line && line <= func.end_line {
-            return func.start_byte == target_function_start_byte;
-        }
-    }
-    false
-}
-
-/// Determine reference context from AST node
-fn determine_reference_context(node: &Node, document: &str) -> ReferenceContext {
-    let mut current = *node;
-
-    loop {
-        let kind = current.kind();
-
-        // Only check instr_plain nodes, not expr1_plain to avoid duplicates
-        // (expr1_plain contains instr_plain, so we'd check the same instruction twice)
-        if kind == "instr_plain" {
-            let instr_text = &document[current.byte_range()];
-
-            if instr_text.contains("call") && !instr_text.contains("call_indirect") {
-                return ReferenceContext::Call;
-            } else if instr_text.contains("local.") {
-                return ReferenceContext::Local;
-            } else if instr_text.contains("global.") {
-                return ReferenceContext::Global;
-            } else if instr_text.starts_with("br") || instr_text.contains(" br") {
-                return ReferenceContext::Branch;
-            } else if instr_text.contains("table.") {
-                return ReferenceContext::Table;
-            } else if instr_text.contains("memory.") {
-                return ReferenceContext::Memory;
-            }
-        }
-
-        // Check for type usage (not definition)
-        if kind == "type_use" {
-            return ReferenceContext::Type;
-        }
-
-        // Check for exports - these should be treated as references!
-        if kind == "module_field_export" {
-            let export_text = &document[current.byte_range()];
-            if export_text.contains("func") {
-                return ReferenceContext::Call;
-            } else if export_text.contains("global") {
-                return ReferenceContext::Global;
-            } else if export_text.contains("table") {
-                return ReferenceContext::Table;
-            } else if export_text.contains("memory") {
-                return ReferenceContext::Memory;
-            }
-        }
-
-        // Check for function definition
-        if kind == "module_field_func" {
-            return ReferenceContext::Function;
-        }
-
-        // Walk up the tree
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
-        }
-    }
-
-    ReferenceContext::General
-}
-
-/// Determine context from line text (fallback for incomplete code)
-fn determine_context_from_line(line: &str) -> ReferenceContext {
-    if line.contains("call") {
-        ReferenceContext::Call
-    } else if line.contains("global") {
-        ReferenceContext::Global
-    } else if line.contains("local") {
-        ReferenceContext::Local
-    } else if line.contains("br") {
-        ReferenceContext::Branch
-    } else if line.contains("table") {
-        ReferenceContext::Table
-    } else if line.contains("memory") {
-        ReferenceContext::Memory
-    } else if line.contains("type") {
-        ReferenceContext::Type
-    } else if line.contains("func") {
-        ReferenceContext::Function
-    } else {
-        ReferenceContext::General
-    }
-}
-
 /// Extract block label from a block node
 fn extract_block_label(node: &Node, document: &str) -> Option<String> {
     let mut cursor = node.walk();
@@ -1021,12 +1053,17 @@ fn get_definition_location(
                 .functions
                 .iter()
                 .find(|f| f.start_byte == *function_start_byte)?;
-            let total_params = func.parameters.len();
-            if *index >= total_params {
-                let local_index = *index - total_params;
-                func.locals.get(local_index)?.range.as_ref()?
+
+            // Adjust index for parameters
+            if *index < func.parameters.len() {
+                // It's a parameter
+                func.parameters.get(*index)?.range.as_ref()?
             } else {
-                return None;
+                // It's a local
+                func.locals
+                    .get(*index - func.parameters.len())?
+                    .range
+                    .as_ref()?
             }
         }
         ReferenceTarget::Parameter {
@@ -1064,6 +1101,7 @@ fn get_definition_location(
             symbols.get_memory_by_index(*index)?.range.as_ref()?
         }
         ReferenceTarget::Type { index, .. } => symbols.get_type_by_index(*index)?.range.as_ref()?,
+        ReferenceTarget::Tag { index, .. } => symbols.get_tag_by_index(*index)?.range.as_ref()?,
     };
 
     Some(Location {
@@ -1093,4 +1131,11 @@ fn parse_nat(text: &str) -> Result<usize, std::num::ParseIntError> {
     } else {
         text.parse::<usize>()
     }
+}
+
+/// Block information for tracking nesting depth
+#[derive(Debug, Clone)]
+struct BlockInfo {
+    label: Option<String>,
+    line: u32,
 }

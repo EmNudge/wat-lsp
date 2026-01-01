@@ -16,7 +16,8 @@ enum DefinitionContext {
     Branch,   // Inside br/br_if
     Table,    // Inside table operation
     Memory,   // Inside memory operation
-    Type,     // Inside type definition/use
+    Type,     // Inside type definition/use or struct/array/cast constant
+    Tag,      // Inside throw/try
     Function, // Inside function definition
     General,  // General context
 }
@@ -45,12 +46,25 @@ fn determine_definition_context(node: tree_sitter::Node, document: &str) -> Defi
                 return DefinitionContext::Table;
             } else if instr_text.contains("memory.") {
                 return DefinitionContext::Memory;
+            } else if instr_text.contains("struct.")
+                || instr_text.contains("array.")
+                || instr_text.contains("ref.cast")
+                || instr_text.contains("ref.test")
+            {
+                return DefinitionContext::Type;
+            } else if instr_text.contains("throw") || instr_text.contains("rethrow") {
+                return DefinitionContext::Tag;
             }
         }
 
         // Check for type definition
         if kind == "module_field_type" || kind == "type_use" {
             return DefinitionContext::Type;
+        }
+
+        // Check for tag definition
+        if kind == "module_field_tag" {
+            return DefinitionContext::Tag;
         }
 
         // Walk up the tree
@@ -78,10 +92,16 @@ fn determine_context_from_line(line: &str) -> DefinitionContext {
         DefinitionContext::Table
     } else if line.contains("memory") {
         DefinitionContext::Memory
-    } else if line.contains("type") {
+    } else if line.contains("type")
+        || line.contains("struct")
+        || line.contains("array")
+        || line.contains("ref.")
+    {
         DefinitionContext::Type
     } else if line.contains("func") {
         DefinitionContext::Function
+    } else if line.contains("throw") || line.contains("tag") {
+        DefinitionContext::Tag
     } else {
         DefinitionContext::General
     }
@@ -135,7 +155,7 @@ fn provide_definition_at_cursor(
             // Check if the cursor position is within the definition range
             if position.line == range.start.line {
                 return Some(Location {
-                    uri: lsp_uri,
+                    uri: lsp_uri.clone(),
                     range: *range,
                 });
             }
@@ -147,50 +167,48 @@ fn provide_definition_at_cursor(
         if let Some(range) = global.range.as_ref() {
             if position.line == range.start.line {
                 return Some(Location {
-                    uri: lsp_uri,
+                    uri: lsp_uri.clone(),
                     range: *range,
                 });
             }
         }
     }
 
-    // Check if we're on a local/parameter definition
+    // Check if we're on a local/parameter definition (omitted for brevity, assume existing logic covers locals)
+    // Actually reusing existing function body finding logic
     if let Some(func) = find_containing_function(symbols, position) {
-        // Check parameters
+        // ... (locals check logic) ...
+        // Re-implementing logic here for safety
         for param in &func.parameters {
             if param.name.as_ref() == Some(&word.to_string()) {
                 if let Some(range) = param.range.as_ref() {
                     if position.line == range.start.line {
                         return Some(Location {
-                            uri: lsp_uri,
+                            uri: lsp_uri.clone(),
                             range: *range,
                         });
                     }
                 }
             }
         }
-
-        // Check locals
         for local in &func.locals {
             if local.name.as_ref() == Some(&word.to_string()) {
                 if let Some(range) = local.range.as_ref() {
                     if position.line == range.start.line {
                         return Some(Location {
-                            uri: lsp_uri,
+                            uri: lsp_uri.clone(),
                             range: *range,
                         });
                     }
                 }
             }
         }
-
-        // Check block labels
         for block in &func.blocks {
             if block.label == word {
                 if let Some(range) = block.range.as_ref() {
                     if position.line == range.start.line {
                         return Some(Location {
-                            uri: lsp_uri,
+                            uri: lsp_uri.clone(),
                             range: *range,
                         });
                     }
@@ -204,7 +222,7 @@ fn provide_definition_at_cursor(
         if let Some(range) = table.range.as_ref() {
             if position.line == range.start.line {
                 return Some(Location {
-                    uri: lsp_uri,
+                    uri: lsp_uri.clone(),
                     range: *range,
                 });
             }
@@ -216,7 +234,7 @@ fn provide_definition_at_cursor(
         if let Some(range) = memory.range.as_ref() {
             if position.line == range.start.line {
                 return Some(Location {
-                    uri: lsp_uri,
+                    uri: lsp_uri.clone(),
                     range: *range,
                 });
             }
@@ -228,7 +246,19 @@ fn provide_definition_at_cursor(
         if let Some(range) = type_def.range.as_ref() {
             if position.line == range.start.line {
                 return Some(Location {
-                    uri: lsp_uri,
+                    uri: lsp_uri.clone(),
+                    range: *range,
+                });
+            }
+        }
+    }
+
+    // Check tags
+    if let Some(tag) = symbols.get_tag_by_name(word) {
+        if let Some(range) = tag.range.as_ref() {
+            if position.line == range.start.line {
+                return Some(Location {
+                    uri: lsp_uri.clone(),
                     range: *range,
                 });
             }
@@ -354,6 +384,15 @@ fn provide_symbol_definition(
                 });
             }
         }
+        DefinitionContext::Tag => {
+            // Jump to tag definition
+            if let Some(tag) = symbols.get_tag_by_name(word) {
+                return tag.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: *range,
+                });
+            }
+        }
         DefinitionContext::Function => {
             // Jump to function definition (when in function header itself)
             if let Some(func) = symbols.get_function_by_name(word) {
@@ -396,6 +435,13 @@ fn provide_symbol_definition(
             // Try type
             if let Some(type_def) = symbols.get_type_by_name(word) {
                 return type_def.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: *range,
+                });
+            }
+            // Try tag
+            if let Some(tag) = symbols.get_tag_by_name(word) {
+                return tag.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
                     range: *range,
                 });
@@ -454,6 +500,24 @@ fn provide_index_definition(
             // Jump to global by index
             if let Some(global) = symbols.get_global_by_index(index) {
                 return global.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: *range,
+                });
+            }
+        }
+        DefinitionContext::Type => {
+            // Jump to type by index
+            if let Some(type_def) = symbols.get_type_by_index(index) {
+                return type_def.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: *range,
+                });
+            }
+        }
+        DefinitionContext::Tag => {
+            // Jump to tag by index
+            if let Some(tag) = symbols.get_tag_by_index(index) {
+                return tag.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
                     range: *range,
                 });

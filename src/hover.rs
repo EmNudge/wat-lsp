@@ -275,27 +275,44 @@ fn provide_symbol_hover(
     // Check for type
     if context == HoverContext::Type {
         if let Some(type_def) = symbols.get_type_by_name(word) {
-            let params = type_def
-                .parameters
-                .iter()
-                .map(|t| t.to_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let results = type_def
-                .results
-                .iter()
-                .map(|t| t.to_str())
-                .collect::<Vec<_>>()
-                .join(" ");
+            let sig = match &type_def.kind {
+                TypeKind::Func { params, results } => {
+                    let p_str = params
+                        .iter()
+                        .map(|t| t.to_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let r_str = results
+                        .iter()
+                        .map(|t| t.to_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
 
-            let mut sig = format!("(type {}", word);
-            if !params.is_empty() {
-                sig.push_str(&format!(" (param {})", params));
-            }
-            if !results.is_empty() {
-                sig.push_str(&format!(" (result {})", results));
-            }
-            sig.push(')');
+                    let mut s = format!("(type {}", word);
+                    if !p_str.is_empty() {
+                        s.push_str(&format!(" (param {})", p_str));
+                    }
+                    if !r_str.is_empty() {
+                        s.push_str(&format!(" (result {})", r_str));
+                    }
+                    s.push(')');
+                    s
+                }
+                TypeKind::Struct { fields } => {
+                    format!("(type {} (struct ... {} fields))", word, fields.len())
+                }
+                TypeKind::Array {
+                    element_type,
+                    mutable,
+                } => {
+                    format!(
+                        "(type {} (array {} {}))",
+                        word,
+                        if *mutable { "(mut ...)" } else { "..." },
+                        element_type.to_str()
+                    )
+                }
+            };
 
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
