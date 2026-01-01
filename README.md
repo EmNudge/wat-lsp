@@ -110,7 +110,33 @@ To add or modify instruction documentation, edit `docs/instructions.md` and rebu
 
 ## Usage
 
-The server can be integrated with any LSP-compatible editor (VS Code, Neovim, Helix, Emacs, etc.). Configure your editor to launch the `wat-lsp-rust` binary for `.wat` files. See your editor's LSP documentation for specific setup instructions.
+The server can be integrated with any LSP-compatible editor (VS Code, Neovim, Helix, Emacs, etc.).
+
+### VS Code Extension
+
+For VS Code users, we provide a ready-to-use extension:
+
+```bash
+# Build the extension (includes building the Rust server)
+./build-extension.sh        # Linux/macOS
+# or
+build-extension.bat         # Windows
+
+# Package the extension (optional)
+cd vscode-extension
+npm run package
+
+# Install the extension
+code --install-extension wat-lsp-*.vsix
+```
+
+For development, open this project in VS Code and press `F5` to launch the extension in debug mode.
+
+See [vscode-extension/README.md](vscode-extension/README.md) for detailed instructions.
+
+### Other Editors
+
+Configure your editor to launch the `wat-lsp-rust` binary for `.wat` files. See your editor's LSP documentation for specific setup instructions.
 
 ## Future Enhancements
 
