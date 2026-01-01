@@ -210,4 +210,32 @@ mod tests {
         assert_eq!(new_end.line, 1);
         assert_eq!(new_end.character, 4);
     }
+
+    #[test]
+    fn test_node_at_position_identifier() {
+        // We need tree-sitter-wasm to test this
+        // Note: verify if tree-sitter-wasm is available in test context.
+        // It is a dependency.
+
+        // Setup parser
+        use crate::tree_sitter_bindings;
+        let mut parser = tree_sitter_bindings::create_parser();
+
+        let source = "(func $test)";
+        let tree = parser.parse(source, None).unwrap();
+
+        // Position at '$' of $test (line 0, char 7)
+        let position = Position::new(0, 7);
+        let node = node_at_position(&tree, source, position).unwrap();
+
+        assert_eq!(node.kind(), "identifier");
+        assert_eq!(&source[node.byte_range()], "$test");
+
+        // Position at 't' of $test (line 0, char 8)
+        let position = Position::new(0, 8);
+        let node = node_at_position(&tree, source, position).unwrap();
+
+        assert_eq!(node.kind(), "identifier");
+        assert_eq!(&source[node.byte_range()], "$test");
+    }
 }

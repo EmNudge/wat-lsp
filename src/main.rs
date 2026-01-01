@@ -164,6 +164,10 @@ impl LanguageServer for Backend {
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 ..Default::default()
             },
         })
@@ -420,6 +424,146 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::WARNING, "No document/symbols/tree found")
             .await;
+
+        Ok(None)
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri.to_string();
+        let position = params.position;
+
+        let document = self.document_map.get(&uri);
+        let symbols = self.symbol_map.get(&uri);
+        let tree = self.tree_map.get(&uri);
+
+        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
+            if references::identify_symbol_at_position(&doc, &syms, &t, position).is_some() {
+                // The symbol logic deems this a valid symbol.
+                // Now find the range to select.
+                if let Some(node) = utils::node_at_position(&t, &doc, position) {
+                    // If it's an identifier (e.g. $foo), return its full range.
+                    if node.kind() == "identifier" {
+                        let range = Range {
+                            start: Position {
+                                line: node.start_position().row as u32,
+                                character: node.start_position().column as u32,
+                            },
+                            end: Position {
+                                line: node.end_position().row as u32,
+                                character: node.end_position().column as u32,
+                            },
+                        };
+                        return Ok(Some(PrepareRenameResponse::Range(range)));
+                    } else if node.kind() == "nat" || node.kind() == "index" {
+                        // Even for indices, return the range so client knows what to replace
+                        let range = Range {
+                            start: Position {
+                                line: node.start_position().row as u32,
+                                character: node.start_position().column as u32,
+                            },
+                            end: Position {
+                                line: node.end_position().row as u32,
+                                character: node.end_position().column as u32,
+                            },
+                        };
+                        return Ok(Some(PrepareRenameResponse::Range(range)));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri.to_string();
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        // Validation: New name MUST start with $
+        if !new_name.starts_with('$') {
+            self.client
+                .show_message(
+                    MessageType::ERROR,
+                    format!("Invalid name '{}': symbols must start with '$'", new_name),
+                )
+                .await;
+            return Ok(None);
+        }
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "Rename requested at {}:{} to {}",
+                    position.line, position.character, new_name
+                ),
+            )
+            .await;
+
+        let document = self.document_map.get(&uri);
+        let symbols = self.symbol_map.get(&uri);
+        let tree = self.tree_map.get(&uri);
+
+        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
+            // Identify the symbol we are renaming
+            if let Some(target) = references::identify_symbol_at_position(&doc, &syms, &t, position)
+            {
+                // Check if the symbol has a name - we don't support renaming unnamed symbols yet
+                let has_name = match &target {
+                    references::ReferenceTarget::Function { name, .. } => name.is_some(),
+                    references::ReferenceTarget::Global { name, .. } => name.is_some(),
+                    references::ReferenceTarget::Local { name, .. } => name.is_some(),
+                    references::ReferenceTarget::Parameter { name, .. } => name.is_some(),
+                    references::ReferenceTarget::BlockLabel { .. } => true, // Block labels are always named if identified as such
+                    references::ReferenceTarget::Table { name, .. } => name.is_some(),
+                    references::ReferenceTarget::Memory { name, .. } => name.is_some(),
+                    references::ReferenceTarget::Type { name, .. } => name.is_some(),
+                };
+
+                if !has_name {
+                    self.client
+                        .show_message(MessageType::ERROR, "Cannot rename unnamed symbol")
+                        .await;
+                    return Ok(None);
+                }
+
+                // Find all references
+                let refs = references::provide_references(
+                    &doc, &syms, &t, position, &uri, true, // include declaration
+                );
+
+                if refs.is_empty() {
+                    return Ok(None);
+                }
+
+                // Create WorkspaceEdit
+                let mut changes = std::collections::HashMap::new();
+                let mut text_edits = Vec::new();
+
+                for location in refs {
+                    text_edits.push(TextEdit {
+                        range: location.range,
+                        new_text: new_name.clone(),
+                    });
+                }
+
+                if let Ok(url) = Url::parse(&uri) {
+                    changes.insert(url, text_edits);
+                    return Ok(Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        document_changes: None,
+                        change_annotations: None,
+                    }));
+                }
+            } else {
+                self.client
+                    .show_message(MessageType::WARNING, "No symbol found at position")
+                    .await;
+            }
+        }
 
         Ok(None)
     }
