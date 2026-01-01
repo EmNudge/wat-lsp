@@ -10,7 +10,7 @@ mod tests;
 
 /// Represents the type of symbol being referenced
 #[derive(Debug, PartialEq, Clone)]
-enum ReferenceTarget {
+pub enum ReferenceTarget {
     Function {
         name: Option<String>,
         index: usize,
@@ -120,7 +120,7 @@ pub fn provide_references(
 }
 
 /// Identify what symbol the cursor is positioned on
-fn identify_symbol_at_position(
+pub fn identify_symbol_at_position(
     document: &str,
     symbols: &SymbolTable,
     tree: &Tree,

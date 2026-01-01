@@ -69,6 +69,12 @@ Find all references to a symbol:
 - Scope-aware for locals/parameters
 - Option to include/exclude declaration
 
+### ✏️ Rename Symbol
+Rename symbols across the file:
+- Functions, globals, locals, parameters
+- Updates both named references (`$var`) and numeric indices (`0`)
+- Validates that new names start with `$`
+
 ## Building
 
 ### Prerequisites
@@ -107,7 +113,6 @@ The server can be integrated with any LSP-compatible editor (VS Code, Neovim, He
 
 ## Future Enhancements
 
-- [ ] Symbol renaming
 - [ ] Document symbols for outline view
 - [ ] Code formatting
 - [ ] Inlay hints for types
