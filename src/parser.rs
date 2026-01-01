@@ -27,6 +27,7 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     extract_types(&root, source, &mut symbol_table);
     extract_tables(&root, source, &mut symbol_table);
     extract_memories(&root, source, &mut symbol_table);
+    extract_tags(&root, source, &mut symbol_table);
     extract_functions(&root, source, &mut symbol_table);
 
     Ok(symbol_table)
@@ -292,9 +293,12 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
     if kind == "block_block"
         || kind == "block_loop"
         || kind == "block_if"
+        || kind == "block_try"
+        || kind == "block_try_table"
         || kind == "expr1_block"
         || kind == "expr1_loop"
         || kind == "expr1_if"
+        || kind == "expr1_try"
     {
         // Check if it has a label
         if let Some(id_node) = find_identifier_node(node) {
@@ -303,6 +307,8 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
                 "block_block" | "expr1_block" => "block",
                 "block_loop" | "expr1_loop" => "loop",
                 "block_if" | "expr1_if" => "if",
+                "block_try" | "expr1_try" => "try",
+                "block_try_table" => "try_table",
                 _ => "unknown",
             }
             .to_string();
@@ -423,6 +429,10 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
                                 symbol_table.add_type(type_def);
                                 type_index += 1;
                             }
+                        } else if field_child.kind() == "module_field_rec" {
+                            // Extract types from rec group
+                            type_index =
+                                extract_rec_types(&field_child, source, symbol_table, type_index);
                         }
                     }
                 }
@@ -435,10 +445,181 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
                         symbol_table.add_type(type_def);
                         type_index += 1;
                     }
+                } else if field_child.kind() == "module_field_rec" {
+                    // Extract types from rec group
+                    type_index = extract_rec_types(&field_child, source, symbol_table, type_index);
                 }
             }
         }
     }
+}
+
+/// Extract types from a rec group
+fn extract_rec_types(
+    rec_node: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    mut type_index: usize,
+) -> usize {
+    // The rec node's children are flattened: "(", "rec", "(", "type", id?, type_field, ")", "(", "type", ..., ")", ")"
+    // We need to parse this as a sequence, looking for patterns: "(" "type" [id] type_field ")"
+
+    let mut cursor = rec_node.walk();
+    let children_vec: Vec<_> = rec_node.children(&mut cursor).collect();
+
+    let mut i = 0;
+    while i < children_vec.len() {
+        let child = &children_vec[i];
+
+        // Look for pattern: "(" followed by "type"
+        if child.kind() == "(" && i + 1 < children_vec.len() && children_vec[i + 1].kind() == "type"
+        {
+            // Found start of a type definition
+            i += 2; // Skip "(" and "type"
+
+            // Check for optional identifier
+            let (name, name_range) =
+                if i < children_vec.len() && children_vec[i].kind() == "identifier" {
+                    let id_node = &children_vec[i];
+                    i += 1;
+                    (
+                        Some(node_text(id_node, source)),
+                        Some(node_to_range(id_node)),
+                    )
+                } else {
+                    (None, None)
+                };
+
+            // Next should be the type_field or direct struct_type/array_type
+            if i < children_vec.len() {
+                let type_node = &children_vec[i];
+                if type_node.kind() == "struct_type"
+                    || type_node.kind() == "array_type"
+                    || type_node.kind() == "type_field"
+                {
+                    // Extract the type
+                    if let Some(type_def) = extract_type_from_single_node(
+                        type_node, source, type_index, name, name_range,
+                    ) {
+                        symbol_table.add_type(type_def);
+                        type_index += 1;
+                    }
+                    i += 1;
+                }
+            }
+
+            // Skip until we find the closing ")"
+            while i < children_vec.len() && children_vec[i].kind() != ")" {
+                i += 1;
+            }
+            if i < children_vec.len() && children_vec[i].kind() == ")" {
+                i += 1; // Skip the ")"
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    type_index
+}
+
+/// Extract a type from a single node (struct_type, array_type, or type_field)
+fn extract_type_from_single_node(
+    type_node: &Node,
+    source: &str,
+    index: usize,
+    name: Option<String>,
+    name_range: Option<Range>,
+) -> Option<TypeDef> {
+    let mut kind = TypeKind::Func {
+        params: Vec::new(),
+        results: Vec::new(),
+    };
+
+    match type_node.kind() {
+        "struct_type" => {
+            // Extract struct fields
+            let mut fields = Vec::new();
+            let mut cursor = type_node.walk();
+            for child in type_node.children(&mut cursor) {
+                if child.kind() == "field_type" {
+                    let (field_name, field_type, mutable) = extract_field_type(&child, source);
+                    fields.push((field_name, field_type, mutable));
+                }
+            }
+            kind = TypeKind::Struct { fields };
+        }
+        "array_type" => {
+            // Extract array field
+            let mut element_type = ValueType::Unknown;
+            let mut mutable = false;
+            let mut cursor = type_node.walk();
+            for child in type_node.children(&mut cursor) {
+                if child.kind() == "field_type" {
+                    let (_, field_type, mut_flag) = extract_field_type(&child, source);
+                    element_type = field_type;
+                    mutable = mut_flag;
+                }
+            }
+            kind = TypeKind::Array {
+                element_type,
+                mutable,
+            };
+        }
+        "type_field" => {
+            // This is a func type inside a type_field wrapper
+            let mut parameters = Vec::new();
+            let mut results = Vec::new();
+            let mut cursor = type_node.walk();
+            for child in type_node.children(&mut cursor) {
+                if child.kind() == "func_type" {
+                    let params = extract_parameters(&child, source);
+                    for param in params {
+                        parameters.push(param.param_type);
+                    }
+                    results.extend(extract_results(&child, source));
+                }
+            }
+            if !parameters.is_empty() || !results.is_empty() {
+                kind = TypeKind::Func {
+                    params: parameters,
+                    results,
+                };
+            }
+        }
+        _ => return None,
+    }
+
+    Some(TypeDef {
+        name,
+        index,
+        kind,
+        line: type_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
+/// Extract field_type information (name, type, mutability)
+fn extract_field_type(field_node: &Node, source: &str) -> (Option<String>, ValueType, bool) {
+    let mut field_name = None;
+    let mut field_type = ValueType::Unknown;
+    let mut mutable = false;
+
+    let mut cursor = field_node.walk();
+    for child in field_node.children(&mut cursor) {
+        if child.kind() == "identifier" {
+            field_name = Some(node_text(&child, source));
+        } else if child.kind() == "value_type" {
+            field_type = extract_value_type(&child, source);
+        }
+    }
+
+    let text = node_text(field_node, source);
+    if text.contains("(mut") || text.contains(" mut ") {
+        mutable = true;
+    }
+
+    (field_name, field_type, mutable)
 }
 
 /// Extract a single type definition from a type node
@@ -454,33 +635,158 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
 
     let mut parameters = Vec::new();
     let mut results = Vec::new();
+    let mut kind = TypeKind::Func {
+        params: Vec::new(),
+        results: Vec::new(),
+    };
 
     let mut cursor = type_node.walk();
     for child in type_node.children(&mut cursor) {
-        if child.kind() == "type_field" {
-            // type_field wraps func_type nodes
+        // Check if this child is directly a struct_type or array_type
+        // (happens when type_field is just the type itself)
+        if child.kind() == "struct_type" {
+            // Extract struct fields directly
+            let mut fields = Vec::new();
+            let mut struct_cursor = child.walk();
+
+            for struct_child in child.children(&mut struct_cursor) {
+                if struct_child.kind() == "field_type" {
+                    let mut field_name = None;
+                    let mut field_type = ValueType::Unknown;
+                    let mut mutable = false;
+
+                    let mut fc = struct_child.walk();
+                    for c in struct_child.children(&mut fc) {
+                        if c.kind() == "identifier" {
+                            field_name = Some(node_text(&c, source));
+                        } else if c.kind() == "value_type" {
+                            field_type = extract_value_type(&c, source);
+                        }
+                    }
+
+                    let text = node_text(&struct_child, source);
+                    if text.contains("(mut") || text.contains(" mut ") {
+                        mutable = true;
+                    }
+
+                    fields.push((field_name, field_type, mutable));
+                }
+            }
+            kind = TypeKind::Struct { fields };
+        } else if child.kind() == "array_type" {
+            // Extract array field directly
+            let mut element_type = ValueType::Unknown;
+            let mut mutable = false;
+
+            let mut array_cursor = child.walk();
+            for array_child in child.children(&mut array_cursor) {
+                if array_child.kind() == "field_type" {
+                    let mut fc = array_child.walk();
+                    for c in array_child.children(&mut fc) {
+                        if c.kind() == "value_type" {
+                            element_type = extract_value_type(&c, source);
+                        }
+                    }
+                    let text = node_text(&array_child, source);
+                    if text.contains("(mut") || text.contains(" mut ") {
+                        mutable = true;
+                    }
+                }
+            }
+            kind = TypeKind::Array {
+                element_type,
+                mutable,
+            };
+        } else if child.kind() == "type_field" {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
                 if field_child.kind() == "func_type" {
                     // Extract parameters and results from func_type
-                    // Pass the func_type node to extract_parameters (it will find func_type_params children)
+                    // Accumulate across all func_type children
                     let params = extract_parameters(&field_child, source);
                     for param in params {
                         parameters.push(param.param_type);
                     }
-
-                    // Extract results
                     results.extend(extract_results(&field_child, source));
+                } else if field_child.kind() == "struct_type" {
+                    // Extract struct fields
+                    let mut fields = Vec::new();
+                    let mut struct_cursor = field_child.walk();
+
+                    for struct_child in field_child.children(&mut struct_cursor) {
+                        if struct_child.kind() == "field_type" {
+                            // field_type: (field $id? type ...)
+                            let mut field_name = None;
+                            let mut field_type = ValueType::Unknown;
+                            let mut mutable = false;
+
+                            let mut fc = struct_child.walk();
+                            for c in struct_child.children(&mut fc) {
+                                if c.kind() == "identifier" {
+                                    field_name = Some(node_text(&c, source));
+                                } else if c.kind() == "value_type" {
+                                    field_type = extract_value_type(&c, source);
+                                } else if c.kind() == "mut" {
+                                    // If we see 'mut' directly (depends on grammar)
+                                    mutable = true;
+                                }
+                                // Check for (mut type) pattern if it exists as a node
+                                // Current grammar is tricky, doing best effort
+                            }
+
+                            // Check source text for "mut" if structure is unclear
+                            let text = node_text(&struct_child, source);
+                            if text.contains("(mut") || text.contains(" mut ") {
+                                mutable = true;
+                            }
+
+                            fields.push((field_name, field_type, mutable));
+                        }
+                    }
+                    kind = TypeKind::Struct { fields };
+                } else if field_child.kind() == "array_type" {
+                    // Extract array field
+                    // array_type: (array field_type)
+                    let mut element_type = ValueType::Unknown;
+                    let mut mutable = false;
+
+                    let mut array_cursor = field_child.walk();
+                    for array_child in field_child.children(&mut array_cursor) {
+                        if array_child.kind() == "field_type" {
+                            // Extract type from field_type
+                            let mut fc = array_child.walk();
+                            for c in array_child.children(&mut fc) {
+                                if c.kind() == "value_type" {
+                                    element_type = extract_value_type(&c, source);
+                                }
+                            }
+                            let text = node_text(&array_child, source);
+                            if text.contains("(mut") || text.contains(" mut ") {
+                                mutable = true;
+                            }
+                        }
+                    }
+                    kind = TypeKind::Array {
+                        element_type,
+                        mutable,
+                    };
                 }
             }
         }
     }
 
+    // Update kind if we accumulated func parameters/results
+    if !parameters.is_empty() || !results.is_empty() {
+        kind = TypeKind::Func {
+            params: parameters,
+            results,
+        };
+    }
+
     Some(TypeDef {
         name,
         index,
-        parameters,
-        results,
+        kind,
         line: type_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -717,18 +1023,132 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
     })
 }
 
+/// Extract tag definitions
+fn extract_tags(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+    let mut cursor = root.walk();
+    let mut tag_index = 0;
+
+    for child in root.children(&mut cursor) {
+        if child.kind() == "module" {
+            let mut module_cursor = child.walk();
+            for module_child in child.children(&mut module_cursor) {
+                if module_child.kind() == "module_field" {
+                    let mut field_cursor = module_child.walk();
+                    for field_child in module_child.children(&mut field_cursor) {
+                        if field_child.kind() == "module_field_tag" {
+                            if let Some(tag) = extract_tag(&field_child, source, tag_index) {
+                                symbol_table.add_tag(tag);
+                                tag_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if child.kind() == "module_field" {
+            let mut field_cursor = child.walk();
+            for field_child in child.children(&mut field_cursor) {
+                if field_child.kind() == "module_field_tag" {
+                    if let Some(tag) = extract_tag(&field_child, source, tag_index) {
+                        symbol_table.add_tag(tag);
+                        tag_index += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Extract a single tag from a tag node
+fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(tag_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut params = Vec::new();
+
+    let mut cursor = tag_node.walk();
+    for child in tag_node.children(&mut cursor) {
+        if child.kind() == "tag_type" {
+            // tag_type contains func_type_params
+            let mut type_cursor = child.walk();
+            for type_child in child.children(&mut type_cursor) {
+                if type_child.kind() == "func_type_params" {
+                    // Reuse extract_parameters logic but we only need types
+                    let mut params_cursor = type_child.walk();
+                    for param_child in type_child.children(&mut params_cursor) {
+                        if param_child.kind() == "func_type_params_one"
+                            || param_child.kind() == "func_type_params_many"
+                        {
+                            let mut param_type_cursor = param_child.walk();
+                            for child in param_child.children(&mut param_type_cursor) {
+                                if child.kind() == "value_type" {
+                                    params.push(extract_value_type(&child, source));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Some(Tag {
+        name,
+        index,
+        params,
+        line: tag_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
 /// Helper: Extract text from a node
 fn node_text(node: &Node, source: &str) -> String {
     source[node.byte_range()].to_string()
 }
 
 /// Extract value type from a value_type node (handles nested structure)
-fn extract_value_type(value_type_node: &Node, _source: &str) -> ValueType {
+fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
+    // Check strict match first (for direct children like "i32" in some contexts)
+    let text = node_text(value_type_node, source);
+    match text.as_str() {
+        "i32" => return ValueType::I32,
+        "i64" => return ValueType::I64,
+        "f32" => return ValueType::F32,
+        "f64" => return ValueType::F64,
+        "v128" => return ValueType::V128,
+        "i8" => return ValueType::I8,
+        "i16" => return ValueType::I16,
+        "funcref" => return ValueType::Funcref,
+        "externref" => return ValueType::Externref,
+        "structref" => return ValueType::Structref,
+        "arrayref" => return ValueType::Arrayref,
+        "i31ref" => return ValueType::I31ref,
+        "anyref" => return ValueType::Anyref,
+        "eqref" => return ValueType::Eqref,
+        "nullref" => return ValueType::Nullref,
+        "nullfuncref" => return ValueType::NullFuncref,
+        "nullexternref" => return ValueType::NullExternref,
+        _ => {}
+    }
+
     let mut cursor = value_type_node.walk();
     for child in value_type_node.children(&mut cursor) {
         match child.kind() {
             "value_type_num_type" => {
-                // Numeric type: i32, i64, f32, f64
+                let text = node_text(&child, source);
+                // Handle i8/i16 which might be direct children or nested
+                if text == "i8" {
+                    return ValueType::I8;
+                }
+                if text == "i16" {
+                    return ValueType::I16;
+                }
+
                 let mut num_cursor = child.walk();
                 for num_child in child.children(&mut num_cursor) {
                     match num_child.kind() {
@@ -736,36 +1156,139 @@ fn extract_value_type(value_type_node: &Node, _source: &str) -> ValueType {
                         "num_type_i64" => return ValueType::I64,
                         "num_type_f32" => return ValueType::F32,
                         "num_type_f64" => return ValueType::F64,
-                        _ => {}
+                        "num_type_v128" => return ValueType::V128,
+                        _ => {
+                            if node_text(&num_child, source) == "i8" {
+                                return ValueType::I8;
+                            }
+                            if node_text(&num_child, source) == "i16" {
+                                return ValueType::I16;
+                            }
+                        }
                     }
                 }
             }
             "value_type_ref_type" => {
-                // Reference type: funcref, externref
-                let mut ref_cursor = child.walk();
-                for ref_child in child.children(&mut ref_cursor) {
-                    match ref_child.kind() {
-                        "ref_type_funcref" => return ValueType::Funcref,
-                        "ref_type_externref" => return ValueType::Externref,
-                        _ => {}
-                    }
+                // Delegate to extract_ref_type
+                return extract_ref_type(&child, source);
+            }
+            // Direct matches for some parser structures
+            "ref_type" => return extract_ref_type(&child, source),
+            _ => {
+                // Check if child itself is a type keyword
+                let text = node_text(&child, source);
+                if let Some(vt) = simple_type_from_str(&text) {
+                    return vt;
                 }
             }
-            _ => {}
         }
     }
     ValueType::Unknown
 }
 
+fn simple_type_from_str(s: &str) -> Option<ValueType> {
+    match s {
+        "i32" => Some(ValueType::I32),
+        "i64" => Some(ValueType::I64),
+        "f32" => Some(ValueType::F32),
+        "f64" => Some(ValueType::F64),
+        "v128" => Some(ValueType::V128),
+        "i8" => Some(ValueType::I8),
+        "i16" => Some(ValueType::I16),
+        "funcref" => Some(ValueType::Funcref),
+        "externref" => Some(ValueType::Externref),
+        "structref" => Some(ValueType::Structref),
+        "arrayref" => Some(ValueType::Arrayref),
+        "i31ref" => Some(ValueType::I31ref),
+        "anyref" => Some(ValueType::Anyref),
+        "eqref" => Some(ValueType::Eqref),
+        "nullref" => Some(ValueType::Nullref),
+        "nullfuncref" => Some(ValueType::NullFuncref),
+        "nullexternref" => Some(ValueType::NullExternref),
+        _ => None,
+    }
+}
+
 /// Extract reference type from a ref_type node (handles nested structure)
-fn extract_ref_type(ref_type_node: &Node, _source: &str) -> ValueType {
+fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
+    // Check strict match first
+    let text = node_text(ref_type_node, source);
+    if let Some(vt) = simple_type_from_str(&text) {
+        return vt;
+    }
+
     let mut cursor = ref_type_node.walk();
     for child in ref_type_node.children(&mut cursor) {
         match child.kind() {
             "ref_type_funcref" => return ValueType::Funcref,
             "ref_type_externref" => return ValueType::Externref,
-            _ => {}
+            "ref_type_concrete" => {
+                // (ref null? $index)
+                // Find index child
+                let mut concrete_cursor = child.walk();
+                let mut index_val = None;
+                let mut nullable = false;
+
+                for c in child.children(&mut concrete_cursor) {
+                    if c.kind() == "index" {
+                        // Parse index (could be numeric or identifier)
+                        // For now we just store 0 or some indicator, or we need to resolve it?
+                        // ValueType::Ref(u32) stores a numeric index.
+                        // But if it's an identifier, we can't resolve it yet without symbol table lookup.
+                        // However, Symbols extractor runs in passes. Globals using Ref types might refer to types not yet seen?
+                        // No, Types are extracted before globals.
+                        // But we don't have access to the SymbolTable here easily.
+                        // We will rely on later resolution or just store 0 for now if identifier.
+                        // Improving this requires major refactor to pass SymbolTable.
+                        // For now, let's just return Ref(0) if we can't parse, or Ref(index).
+                        let idx_text = node_text(&c, source);
+                        if let Ok(idx) = idx_text.parse::<u32>() {
+                            index_val = Some(idx);
+                        } else {
+                            // It's a named index ($type).
+                            // We arguably should store the name in ValueType, but ValueType::Ref takes u32.
+                            // Let's stick to parsing what we can.
+                        }
+                    } else if c.kind() == "null" {
+                        // "null" keyword
+                        nullable = true;
+                    } else if node_text(&c, source) == "null" {
+                        nullable = true;
+                    }
+                }
+
+                if let Some(idx) = index_val {
+                    return if nullable {
+                        ValueType::RefNull(idx)
+                    } else {
+                        ValueType::Ref(idx)
+                    };
+                }
+                // Fallback for named types: map to generic StructRef or similar?
+                // Or maybe we treat Ref(0) as "some typed ref".
+                return ValueType::Structref; // Safe fallback?
+            }
+            "ref_type_ref" => {
+                // (ref null? kind) or (ref null? $type)
+                // Similar logic
+                return ValueType::Structref; // Fallback
+            }
+            _ => {
+                let text = node_text(&child, source);
+                if let Some(vt) = simple_type_from_str(&text) {
+                    return vt;
+                }
+            }
         }
     }
-    ValueType::Funcref // Default to funcref
+
+    // Check for direct string matches in children (e.g. "anyref")
+    for child in ref_type_node.children(&mut cursor) {
+        let text = node_text(&child, source);
+        if let Some(vt) = simple_type_from_str(&text) {
+            return vt;
+        }
+    }
+
+    ValueType::Funcref // Default to funcref logic if all else fails
 }

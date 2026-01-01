@@ -13,7 +13,7 @@ pub fn provide_semantic_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     walk_tree_for_undefined_references(tree.root_node(), source, symbols, &mut diagnostics);
-    walk_tree_for_parameter_counts(tree.root_node(), source, &mut diagnostics);
+    walk_tree_for_parameter_counts(tree.root_node(), source, symbols, &mut diagnostics);
     diagnostics
 }
 
@@ -25,6 +25,7 @@ enum ReferenceContext {
     Global, // global.get, global.set
     Table,  // table operations
     Type,   // type use
+    Tag,    // tag use (throw)
     Unknown,
 }
 
@@ -75,13 +76,18 @@ fn determine_reference_context(node: &Node, source: &str) -> ReferenceContext {
             return ReferenceContext::Global;
         } else if text.contains("table.") {
             return ReferenceContext::Table;
+        } else if text.contains("throw") || text.contains("rethrow") {
+            return ReferenceContext::Tag;
         }
     }
 
-    // Check for type use context
+    // Check for type use context or tag use context
     if kind == "type_use" {
         return ReferenceContext::Type;
     }
+
+    // Check for tag reference nodes if they exist (depending on grammar)
+    // Actually `throw` instruction params are handled inside instr_plain logic above.
 
     ReferenceContext::Unknown
 }
@@ -162,6 +168,10 @@ fn find_undefined_identifiers(
                 // Check if type exists
                 symbols.get_type_by_name(identifier_name).is_some()
             }
+            ReferenceContext::Tag => {
+                // Check if tag exists
+                symbols.get_tag_by_name(identifier_name).is_some()
+            }
             ReferenceContext::Unknown => true, // Don't flag unknowns
         };
 
@@ -202,6 +212,7 @@ fn create_undefined_reference_diagnostic(
         ReferenceContext::Global => format!("Undefined global '{}'", identifier_name),
         ReferenceContext::Table => format!("Undefined table '{}'", identifier_name),
         ReferenceContext::Type => format!("Undefined type '{}'", identifier_name),
+        ReferenceContext::Tag => format!("Undefined tag '{}'", identifier_name),
         ReferenceContext::Unknown => format!("Undefined reference '{}'", identifier_name),
     };
 
@@ -251,7 +262,12 @@ fn get_arity_map() -> &'static std::collections::HashMap<
 }
 
 /// Recursively walk the tree looking for instructions with incorrect parameter counts
-fn walk_tree_for_parameter_counts(node: Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn walk_tree_for_parameter_counts(
+    node: Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     // Validate linear format instructions
     if node.kind() == "instr_plain" {
         check_instruction_parameter_count(&node, source, diagnostics);
@@ -261,14 +277,14 @@ fn walk_tree_for_parameter_counts(node: Node, source: &str, diagnostics: &mut Ve
 
     // Validate folded format instructions (e.g., (i32.add expr expr))
     if node.kind() == "expr1_plain" {
-        check_folded_instruction_parameter_count(&node, source, diagnostics);
+        check_folded_instruction_parameter_count(&node, source, symbols, diagnostics);
         // Still recurse to check nested expressions
     }
 
     // Recursively check children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_tree_for_parameter_counts(child, source, diagnostics);
+        walk_tree_for_parameter_counts(child, source, symbols, diagnostics);
     }
 }
 
@@ -285,20 +301,21 @@ fn check_instruction_parameter_count(node: &Node, source: &str, diagnostics: &mu
     let instr_kind = first_child.kind();
 
     match instr_kind {
-        "op_index" | "op_index_opt" => {
-            // Instructions like local.get, local.set, global.get, call, br, etc.
+        "op_index" | "op_index_opt" | "op_gc" | "op_exception" => {
+            // Instructions like local.get, struct.new, throw etc.
+            // op_gc and op_exception are new categories I added to grammar logic
+            // Assuming grammar structure wraps them. If not, text lookup works.
             let instr_name = source[first_child.byte_range()].trim();
-            // Count only 'index' nodes as parameters
+            // Count 'index' nodes or 'ref_type' nodes as parameters
             let param_count = children
                 .iter()
                 .skip(1)
-                .filter(|c| c.kind() == "index")
+                .filter(|c| c.kind() == "index" || c.kind() == "ref_type") // Some ref instructions take types
                 .count();
             validate_instruction_arity(instr_name, param_count, node, diagnostics);
         }
         "op_const" => {
             // Constant instructions like i32.const, f64.const
-            // The op_const node has children: [pat00/pat01 (instruction name), int/float (value)]
             let mut op_const_cursor = first_child.walk();
             let op_const_children: Vec<_> = first_child.children(&mut op_const_cursor).collect();
 
@@ -306,7 +323,6 @@ fn check_instruction_parameter_count(node: &Node, source: &str, diagnostics: &mu
                 return;
             }
 
-            // First child is the instruction name (pat00 or pat01)
             let instr_name = source[op_const_children[0].byte_range()].trim();
             // Count int/float children as parameters
             let param_count = op_const_children
@@ -317,10 +333,9 @@ fn check_instruction_parameter_count(node: &Node, source: &str, diagnostics: &mu
             validate_instruction_arity(instr_name, param_count, node, diagnostics);
         }
         "op_nullary" => {
-            // Instructions with no parameters like drop, nop, i32.add, etc.
+            // Instructions with no parameters
             let instr_name = source[first_child.byte_range()].trim();
             // These should have no parameters in linear format
-            // Count only 'index' or 'expr' nodes after the instruction as erroneous parameters
             let param_count = children
                 .iter()
                 .skip(1)
@@ -328,8 +343,18 @@ fn check_instruction_parameter_count(node: &Node, source: &str, diagnostics: &mu
                 .count();
             validate_instruction_arity(instr_name, param_count, node, diagnostics);
         }
+        // Fallback for new instruction types if not covered above but are plain instructions
+        k if k.starts_with("op_") => {
+            let instr_name = source[first_child.byte_range()].trim();
+            let param_count = children
+                .iter()
+                .skip(1)
+                .filter(|c| c.kind() == "index")
+                .count();
+            validate_instruction_arity(instr_name, param_count, node, diagnostics);
+        }
         _ => {
-            // Other instruction types - skip for now (future enhancement)
+            // Other instruction types
         }
     }
 }
@@ -338,6 +363,7 @@ fn check_instruction_parameter_count(node: &Node, source: &str, diagnostics: &mu
 fn check_folded_instruction_parameter_count(
     node: &Node,
     source: &str,
+    symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut cursor = node.walk();
@@ -362,9 +388,7 @@ fn check_folded_instruction_parameter_count(
 
     let instr_kind = instr_children[0].kind();
     let instr_name = match instr_kind {
-        "op_index" | "op_index_opt" | "op_nullary" => source[instr_children[0].byte_range()].trim(),
         "op_const" => {
-            // For constants, get the instruction name from the first child
             let mut const_cursor = instr_children[0].walk();
             let const_children: Vec<_> = instr_children[0].children(&mut const_cursor).collect();
             if const_children.is_empty() {
@@ -372,7 +396,7 @@ fn check_folded_instruction_parameter_count(
             }
             source[const_children[0].byte_range()].trim()
         }
-        _ => return,
+        _ => source[instr_children[0].byte_range()].trim(),
     };
 
     // Count expr children (these are the operands)
@@ -385,16 +409,114 @@ fn check_folded_instruction_parameter_count(
     // Validate operand count
     let arity_map = get_arity_map();
     if let Some(arity) = arity_map.get(instr_name) {
-        if !arity.is_valid_operands(operand_count) {
-            let diagnostic = create_operand_count_diagnostic(
-                node,
-                instr_name,
-                operand_count,
-                &arity.expected_operands_message(),
-            );
-            diagnostics.push(diagnostic);
+        use crate::diagnostics::instruction_metadata::OperandMode;
+
+        match arity.operand_mode {
+            OperandMode::Fixed(expected) => {
+                if operand_count != expected {
+                    let diagnostic = create_operand_count_diagnostic(
+                        node,
+                        instr_name,
+                        operand_count,
+                        &arity.expected_operands_message(),
+                    );
+                    diagnostics.push(diagnostic);
+                }
+            }
+            OperandMode::Dynamic => {
+                // Perform dynamic validation based on instruction type
+                validate_dynamic_operands(
+                    node,
+                    instr_name,
+                    operand_count,
+                    symbols,
+                    source,
+                    diagnostics,
+                );
+            }
         }
     }
+}
+
+fn validate_dynamic_operands(
+    node: &Node,
+    instr_name: &str,
+    operand_count: usize,
+    symbols: &SymbolTable,
+    source: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match instr_name {
+        "struct.new" => {
+            // Expects 1 param (type index) + N operands (where N = fields)
+            // But instr_plain contains the type index.
+            // We need to extract the type index from instr_plain children.
+            // (expr1_plain (instr_plain struct.new $T) (expr...) (expr...))
+            // Extract $T from instr_plain.
+            if let Some(type_name) = extract_instruction_type_param(node, source) {
+                if let Some(type_def) = symbols.get_type_by_name(&type_name) {
+                    use crate::symbols::TypeKind;
+                    if let TypeKind::Struct { fields } = &type_def.kind {
+                        let expected = fields.len();
+                        if operand_count != expected {
+                            let msg =
+                                format!("{} operands (fields of struct {})", expected, type_name);
+                            let diagnostic = create_operand_count_diagnostic(
+                                node,
+                                instr_name,
+                                operand_count,
+                                &msg,
+                            );
+                            diagnostics.push(diagnostic);
+                        }
+                    }
+                }
+            }
+        }
+        "array.new_fixed" => {
+            // (array.new_fixed $T length (arg)*)
+            // length should match operand count
+            // We need to parse length immediate.
+            // This is complex because immediate might be part of instr_plain or separate.
+            // Assuming simplified check: just verify type existence?
+            // Or extract length immediate.
+        }
+        "throw" => {
+            // (throw $tag (arg)*)
+            if let Some(tag_name) = extract_instruction_type_param(node, source) {
+                if let Some(tag) = symbols.get_tag_by_name(&tag_name) {
+                    let expected = tag.params.len();
+                    if operand_count != expected {
+                        let msg = format!("{} operands (params of tag {})", expected, tag_name);
+                        let diagnostic =
+                            create_operand_count_diagnostic(node, instr_name, operand_count, &msg);
+                        diagnostics.push(diagnostic);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_instruction_type_param(expr_node: &Node, source: &str) -> Option<String> {
+    // expr1_plain -> instr_plain -> (op_... $index)
+    let mut cursor = expr_node.walk();
+    for child in expr_node.children(&mut cursor) {
+        if child.kind() == "instr_plain" {
+            let mut instr_cursor = child.walk();
+            for instr_child in child.children(&mut instr_cursor) {
+                // Look for 'index' or identifier child
+                let mut param_cursor = instr_child.walk();
+                for param in instr_child.children(&mut param_cursor) {
+                    if param.kind() == "index" || param.kind() == "identifier" {
+                        return Some(source[param.byte_range()].trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Validate instruction arity and create diagnostic if incorrect

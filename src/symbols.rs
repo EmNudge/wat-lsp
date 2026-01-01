@@ -10,8 +10,21 @@ pub enum ValueType {
     I64,
     F32,
     F64,
+    V128,
+    I8,
+    I16,
     Funcref,
     Externref,
+    Structref,
+    Arrayref,
+    I31ref,
+    Anyref,
+    Eqref,
+    Nullref,
+    NullFuncref,
+    NullExternref,
+    Ref(u32),     // Typed reference to a type index
+    RefNull(u32), // Nullable typed reference
     Unknown,
 }
 
@@ -23,21 +36,45 @@ impl ValueType {
             "i64" => ValueType::I64,
             "f32" => ValueType::F32,
             "f64" => ValueType::F64,
+            "v128" => ValueType::V128,
+            "i8" => ValueType::I8,
+            "i16" => ValueType::I16,
             "funcref" => ValueType::Funcref,
             "externref" => ValueType::Externref,
+            "structref" => ValueType::Structref,
+            "arrayref" => ValueType::Arrayref,
+            "i31ref" => ValueType::I31ref,
+            "anyref" => ValueType::Anyref,
+            "eqref" => ValueType::Eqref,
+            "nullref" => ValueType::Nullref,
+            "nullfuncref" => ValueType::NullFuncref,
+            "nullexternref" => ValueType::NullExternref,
             _ => ValueType::Unknown,
         }
     }
 
-    pub fn to_str(&self) -> &str {
+    pub fn to_str(&self) -> String {
         match self {
-            ValueType::I32 => "i32",
-            ValueType::I64 => "i64",
-            ValueType::F32 => "f32",
-            ValueType::F64 => "f64",
-            ValueType::Funcref => "funcref",
-            ValueType::Externref => "externref",
-            ValueType::Unknown => "unknown",
+            ValueType::I32 => "i32".to_string(),
+            ValueType::I64 => "i64".to_string(),
+            ValueType::F32 => "f32".to_string(),
+            ValueType::F64 => "f64".to_string(),
+            ValueType::V128 => "v128".to_string(),
+            ValueType::I8 => "i8".to_string(),
+            ValueType::I16 => "i16".to_string(),
+            ValueType::Funcref => "funcref".to_string(),
+            ValueType::Externref => "externref".to_string(),
+            ValueType::Structref => "structref".to_string(),
+            ValueType::Arrayref => "arrayref".to_string(),
+            ValueType::I31ref => "i31ref".to_string(),
+            ValueType::Anyref => "anyref".to_string(),
+            ValueType::Eqref => "eqref".to_string(),
+            ValueType::Nullref => "nullref".to_string(),
+            ValueType::NullFuncref => "nullfuncref".to_string(),
+            ValueType::NullExternref => "nullexternref".to_string(),
+            ValueType::Ref(idx) => format!("(ref {})", idx),
+            ValueType::RefNull(idx) => format!("(ref null {})", idx),
+            ValueType::Unknown => "unknown".to_string(),
         }
     }
 }
@@ -69,7 +106,7 @@ pub struct Parameter {
 #[derive(Debug, Clone)]
 pub struct BlockLabel {
     pub label: String,
-    pub block_type: String, // "block", "loop", "if"
+    pub block_type: String, // "block", "loop", "if", "try", "try_table"
     pub line: u32,
     #[allow(dead_code)] // Useful for go-to-definition
     pub range: Option<Range>,
@@ -136,12 +173,38 @@ pub struct Memory {
 }
 
 #[derive(Debug, Clone)]
+pub enum TypeKind {
+    Func {
+        params: Vec<ValueType>,
+        results: Vec<ValueType>,
+    },
+    Struct {
+        fields: Vec<(Option<String>, ValueType, bool)>, // (name, type, mutable)
+    },
+    Array {
+        element_type: ValueType,
+        mutable: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: Option<String>,
     #[allow(dead_code)] // Useful for numeric type references
     pub index: usize,
-    pub parameters: Vec<ValueType>,
-    pub results: Vec<ValueType>,
+    pub kind: TypeKind,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tag {
+    pub name: Option<String>,
+    #[allow(dead_code)] // Useful for numeric tag references
+    pub index: usize,
+    pub params: Vec<ValueType>,
     #[allow(dead_code)] // Useful for go-to-definition
     pub line: u32,
     #[allow(dead_code)] // Useful for go-to-definition
@@ -155,6 +218,7 @@ pub struct SymbolTable {
     pub tables: Vec<Table>,
     pub memories: Vec<Memory>,
     pub types: Vec<TypeDef>,
+    pub tags: Vec<Tag>,
 
     // Maps for quick lookup by name
     pub function_map: HashMap<String, usize>,
@@ -162,6 +226,7 @@ pub struct SymbolTable {
     pub table_map: HashMap<String, usize>,
     pub memory_map: HashMap<String, usize>,
     pub type_map: HashMap<String, usize>,
+    pub tag_map: HashMap<String, usize>,
 }
 
 impl SymbolTable {
@@ -255,5 +320,21 @@ impl SymbolTable {
 
     pub fn get_type_by_index(&self, index: usize) -> Option<&TypeDef> {
         self.types.get(index)
+    }
+
+    pub fn add_tag(&mut self, tag: Tag) {
+        let index = self.tags.len();
+        if let Some(ref name) = tag.name {
+            self.tag_map.insert(name.clone(), index);
+        }
+        self.tags.push(tag);
+    }
+
+    pub fn get_tag_by_name(&self, name: &str) -> Option<&Tag> {
+        self.tag_map.get(name).and_then(|&idx| self.tags.get(idx))
+    }
+
+    pub fn get_tag_by_index(&self, index: usize) -> Option<&Tag> {
+        self.tags.get(index)
     }
 }

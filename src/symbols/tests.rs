@@ -92,8 +92,10 @@ fn test_add_type() {
     let type_def = TypeDef {
         name: Some("$binop".to_string()),
         index: 0,
-        parameters: vec![ValueType::I32, ValueType::I32],
-        results: vec![ValueType::I32],
+        kind: TypeKind::Func {
+            params: vec![ValueType::I32, ValueType::I32],
+            results: vec![ValueType::I32],
+        },
         line: 0,
         range: None,
     };
@@ -104,8 +106,12 @@ fn test_add_type() {
     assert!(table.type_map.contains_key("$binop"));
 
     let t = table.get_type_by_name("$binop").unwrap();
-    assert_eq!(t.parameters.len(), 2);
-    assert_eq!(t.results.len(), 1);
+    if let TypeKind::Func { params, results } = &t.kind {
+        assert_eq!(params.len(), 2);
+        assert_eq!(results.len(), 1);
+    } else {
+        panic!("Expected Func type");
+    }
 }
 
 #[test]
