@@ -218,6 +218,11 @@ pub fn provide_completion(
         ));
         completions.push(make_completion("fill", "memory.fill", "Fill memory region"));
         completions.push(make_completion("copy", "memory.copy", "Copy memory region"));
+        completions.push(make_completion(
+            "init",
+            "memory.init",
+            "Initialize memory from data segment",
+        ));
         return completions;
     }
 
@@ -228,6 +233,11 @@ pub fn provide_completion(
         completions.push(make_completion("grow", "table.grow", "Grow table"));
         completions.push(make_completion("fill", "table.fill", "Fill table entries"));
         completions.push(make_completion("copy", "table.copy", "Copy table elements"));
+        completions.push(make_completion(
+            "init",
+            "table.init",
+            "Initialize table from element segment",
+        ));
         return completions;
     }
 
@@ -432,7 +442,20 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
             ("shl", "Shift left"),
             ("shr_s", "Signed shift right"),
             ("shr_u", "Unsigned shift right"),
+            ("rotl", "Rotate left"),
+            ("rotr", "Rotate right"),
+            ("clz", "Count leading zeros"),
+            ("ctz", "Count trailing zeros"),
+            ("popcnt", "Population count"),
             ("eqz", "Check if zero"),
+            ("lt_s", "Signed less than"),
+            ("lt_u", "Unsigned less than"),
+            ("gt_s", "Signed greater than"),
+            ("gt_u", "Unsigned greater than"),
+            ("le_s", "Signed less or equal"),
+            ("le_u", "Unsigned less or equal"),
+            ("ge_s", "Signed greater or equal"),
+            ("ge_u", "Unsigned greater or equal"),
         ];
         for (name, desc) in int_ops {
             completions.push(make_completion(
@@ -452,6 +475,13 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
             ("neg", "Negate value"),
             ("ceil", "Round up"),
             ("floor", "Round down"),
+            ("trunc", "Round toward zero"),
+            ("nearest", "Round to nearest"),
+            ("copysign", "Copy sign"),
+            ("lt", "Less than"),
+            ("gt", "Greater than"),
+            ("le", "Less or equal"),
+            ("ge", "Greater or equal"),
         ];
         for (name, desc) in float_ops {
             completions.push(make_completion(

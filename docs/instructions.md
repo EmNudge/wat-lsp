@@ -502,6 +502,822 @@ Example:
 ```
 ---
 
+## i64.div_s
+Signed division of two i64 values. Traps if divisor is zero.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.div_s (i64.const -10) (i64.const 3))  ;; Returns -3
+```
+---
+
+## i64.div_u
+Unsigned division of two i64 values. Traps if divisor is zero.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.div_u (i64.const 10) (i64.const 3))  ;; Returns 3
+```
+---
+
+## i64.rem_s
+Signed remainder of division.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.rem_s (i64.const 10) (i64.const 3))  ;; Returns 1
+```
+---
+
+## i64.rem_u
+Unsigned remainder of division.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.rem_u (i64.const 10) (i64.const 3))  ;; Returns 1
+```
+---
+
+## i64.and
+Bitwise AND of two i64 values.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.and (i64.const 0b1100) (i64.const 0b1010))  ;; Returns 0b1000 (8)
+```
+---
+
+## i64.or
+Bitwise OR of two i64 values.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.or (i64.const 0b1100) (i64.const 0b1010))  ;; Returns 0b1110 (14)
+```
+---
+
+## i64.xor
+Bitwise XOR of two i64 values.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.xor (i64.const 0b1100) (i64.const 0b1010))  ;; Returns 0b0110 (6)
+```
+---
+
+## i64.shl
+Shift left.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.shl (i64.const 5) (i64.const 2))  ;; Returns 20 (5 << 2)
+```
+---
+
+## i64.shr_s
+Signed shift right (arithmetic shift).
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.shr_s (i64.const -8) (i64.const 2))  ;; Returns -2 (preserves sign)
+```
+---
+
+## i64.shr_u
+Unsigned shift right (logical shift).
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.shr_u (i64.const 20) (i64.const 2))  ;; Returns 5
+```
+---
+
+## i64.rotl
+Rotate left.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.rotl (i64.const 0x123456789ABCDEF0) (i64.const 4))
+```
+---
+
+## i64.rotr
+Rotate right.
+
+Signature: `(param i64 i64) (result i64)`
+
+Example:
+```wat
+(i64.rotr (i64.const 0x123456789ABCDEF0) (i64.const 4))
+```
+---
+
+## i64.clz
+Count leading zeros.
+
+Signature: `(param i64) (result i64)`
+
+Example:
+```wat
+(i64.clz (i64.const 0x00FF000000000000))  ;; Returns 8
+```
+---
+
+## i64.ctz
+Count trailing zeros.
+
+Signature: `(param i64) (result i64)`
+
+Example:
+```wat
+(i64.ctz (i64.const 0xFF00000000000000))  ;; Returns 56
+```
+---
+
+## i64.popcnt
+Count number of 1 bits (population count).
+
+Signature: `(param i64) (result i64)`
+
+Example:
+```wat
+(i64.popcnt (i64.const 0b1101))  ;; Returns 3
+```
+---
+
+## i64.eq
+Check if two i64 values are equal.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.eq (i64.const 5) (i64.const 5))  ;; Returns 1 (true)
+```
+---
+
+## i64.ne
+Check if two i64 values are not equal.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.ne (i64.const 5) (i64.const 3))  ;; Returns 1 (true)
+```
+---
+
+## i64.lt_s
+Signed less than comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.lt_s (i64.const -5) (i64.const 3))  ;; Returns 1 (true)
+```
+---
+
+## i64.lt_u
+Unsigned less than comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.lt_u (i64.const 3) (i64.const 5))  ;; Returns 1 (true)
+```
+---
+
+## i64.gt_s
+Signed greater than comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.gt_s (i64.const 5) (i64.const 3))  ;; Returns 1 (true)
+```
+---
+
+## i64.gt_u
+Unsigned greater than comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.gt_u (i64.const 5) (i64.const 3))  ;; Returns 1 (true)
+```
+---
+
+## i64.le_s
+Signed less than or equal comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.le_s (i64.const 5) (i64.const 5))  ;; Returns 1 (true)
+```
+---
+
+## i64.le_u
+Unsigned less than or equal comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.le_u (i64.const 5) (i64.const 5))  ;; Returns 1 (true)
+```
+---
+
+## i64.ge_s
+Signed greater than or equal comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.ge_s (i64.const 5) (i64.const 5))  ;; Returns 1 (true)
+```
+---
+
+## i64.ge_u
+Unsigned greater than or equal comparison.
+
+Signature: `(param i64 i64) (result i32)`
+
+Example:
+```wat
+(i64.ge_u (i64.const 5) (i64.const 3))  ;; Returns 1 (true)
+```
+---
+
+## i64.load
+Load i64 from memory at the given address.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.load (i32.const 0))
+(i64.load offset=8 align=8 (i32.const 0))
+```
+---
+
+## i64.load8_s
+Load signed 8-bit value from memory and sign-extend to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.load8_s (i32.const 100))
+```
+---
+
+## i64.load8_u
+Load unsigned 8-bit value from memory and zero-extend to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.load8_u (i32.const 100))
+```
+---
+
+## i64.load16_s
+Load signed 16-bit value from memory and sign-extend to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.load16_s (i32.const 100))
+```
+---
+
+## i64.load16_u
+Load unsigned 16-bit value from memory and zero-extend to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.load16_u (i32.const 100))
+```
+---
+
+## i64.load32_s
+Load signed 32-bit value from memory and sign-extend to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.load32_s (i32.const 100))
+```
+---
+
+## i64.load32_u
+Load unsigned 32-bit value from memory and zero-extend to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.load32_u (i32.const 100))
+```
+---
+
+## i64.store
+Store i64 value to memory.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+(i64.store (i32.const 0) (i64.const 42))
+(i64.store offset=8 (i32.const 0) (i64.const 100))
+```
+---
+
+## i64.store8
+Store low 8 bits of i64 to memory.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+(i64.store8 (i32.const 100) (i64.const 0xFF))
+```
+---
+
+## i64.store16
+Store low 16 bits of i64 to memory.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+(i64.store16 (i32.const 100) (i64.const 0xFFFF))
+```
+---
+
+## i64.store32
+Store low 32 bits of i64 to memory.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+(i64.store32 (i32.const 100) (i64.const 0xFFFFFFFF))
+```
+---
+
+## i32.wrap_i64
+Wrap i64 to i32 (keep low 32 bits).
+
+Signature: `(param i64) (result i32)`
+
+Example:
+```wat
+(i32.wrap_i64 (i64.const 0x123456789ABCDEF0))  ;; Returns 0x9ABCDEF0
+```
+---
+
+## i32.trunc_f32_s
+Truncate f32 to signed i32. Traps on overflow or NaN.
+
+Signature: `(param f32) (result i32)`
+
+Example:
+```wat
+(i32.trunc_f32_s (f32.const -3.7))  ;; Returns -3
+```
+---
+
+## i32.trunc_f32_u
+Truncate f32 to unsigned i32. Traps on overflow or NaN.
+
+Signature: `(param f32) (result i32)`
+
+Example:
+```wat
+(i32.trunc_f32_u (f32.const 3.7))  ;; Returns 3
+```
+---
+
+## i32.trunc_f64_s
+Truncate f64 to signed i32. Traps on overflow or NaN.
+
+Signature: `(param f64) (result i32)`
+
+Example:
+```wat
+(i32.trunc_f64_s (f64.const -3.7))  ;; Returns -3
+```
+---
+
+## i32.trunc_f64_u
+Truncate f64 to unsigned i32. Traps on overflow or NaN.
+
+Signature: `(param f64) (result i32)`
+
+Example:
+```wat
+(i32.trunc_f64_u (f64.const 3.7))  ;; Returns 3
+```
+---
+
+## i32.trunc_sat_f32_s
+Saturating truncate f32 to signed i32 (no trap).
+
+Signature: `(param f32) (result i32)`
+
+Example:
+```wat
+(i32.trunc_sat_f32_s (f32.const inf))  ;; Returns i32.max
+```
+---
+
+## i32.trunc_sat_f32_u
+Saturating truncate f32 to unsigned i32 (no trap).
+
+Signature: `(param f32) (result i32)`
+
+Example:
+```wat
+(i32.trunc_sat_f32_u (f32.const -1.0))  ;; Returns 0
+```
+---
+
+## i32.trunc_sat_f64_s
+Saturating truncate f64 to signed i32 (no trap).
+
+Signature: `(param f64) (result i32)`
+
+Example:
+```wat
+(i32.trunc_sat_f64_s (f64.const inf))  ;; Returns i32.max
+```
+---
+
+## i32.trunc_sat_f64_u
+Saturating truncate f64 to unsigned i32 (no trap).
+
+Signature: `(param f64) (result i32)`
+
+Example:
+```wat
+(i32.trunc_sat_f64_u (f64.const -1.0))  ;; Returns 0
+```
+---
+
+## i32.extend8_s
+Sign-extend 8-bit value to i32.
+
+Signature: `(param i32) (result i32)`
+
+Example:
+```wat
+(i32.extend8_s (i32.const 0x80))  ;; Returns -128
+```
+---
+
+## i32.extend16_s
+Sign-extend 16-bit value to i32.
+
+Signature: `(param i32) (result i32)`
+
+Example:
+```wat
+(i32.extend16_s (i32.const 0x8000))  ;; Returns -32768
+```
+---
+
+## i32.reinterpret_f32
+Reinterpret f32 bits as i32.
+
+Signature: `(param f32) (result i32)`
+
+Example:
+```wat
+(i32.reinterpret_f32 (f32.const 1.0))  ;; Returns 0x3F800000
+```
+---
+
+## i64.extend_i32_s
+Sign-extend i32 to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.extend_i32_s (i32.const -1))  ;; Returns -1 (as i64)
+```
+---
+
+## i64.extend_i32_u
+Zero-extend i32 to i64.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+(i64.extend_i32_u (i32.const -1))  ;; Returns 0xFFFFFFFF
+```
+---
+
+## i64.trunc_f32_s
+Truncate f32 to signed i64. Traps on overflow or NaN.
+
+Signature: `(param f32) (result i64)`
+
+Example:
+```wat
+(i64.trunc_f32_s (f32.const -3.7))  ;; Returns -3
+```
+---
+
+## i64.trunc_f32_u
+Truncate f32 to unsigned i64. Traps on overflow or NaN.
+
+Signature: `(param f32) (result i64)`
+
+Example:
+```wat
+(i64.trunc_f32_u (f32.const 3.7))  ;; Returns 3
+```
+---
+
+## i64.trunc_f64_s
+Truncate f64 to signed i64. Traps on overflow or NaN.
+
+Signature: `(param f64) (result i64)`
+
+Example:
+```wat
+(i64.trunc_f64_s (f64.const -3.7))  ;; Returns -3
+```
+---
+
+## i64.trunc_f64_u
+Truncate f64 to unsigned i64. Traps on overflow or NaN.
+
+Signature: `(param f64) (result i64)`
+
+Example:
+```wat
+(i64.trunc_f64_u (f64.const 3.7))  ;; Returns 3
+```
+---
+
+## i64.trunc_sat_f32_s
+Saturating truncate f32 to signed i64 (no trap).
+
+Signature: `(param f32) (result i64)`
+
+Example:
+```wat
+(i64.trunc_sat_f32_s (f32.const inf))  ;; Returns i64.max
+```
+---
+
+## i64.trunc_sat_f32_u
+Saturating truncate f32 to unsigned i64 (no trap).
+
+Signature: `(param f32) (result i64)`
+
+Example:
+```wat
+(i64.trunc_sat_f32_u (f32.const -1.0))  ;; Returns 0
+```
+---
+
+## i64.trunc_sat_f64_s
+Saturating truncate f64 to signed i64 (no trap).
+
+Signature: `(param f64) (result i64)`
+
+Example:
+```wat
+(i64.trunc_sat_f64_s (f64.const inf))  ;; Returns i64.max
+```
+---
+
+## i64.trunc_sat_f64_u
+Saturating truncate f64 to unsigned i64 (no trap).
+
+Signature: `(param f64) (result i64)`
+
+Example:
+```wat
+(i64.trunc_sat_f64_u (f64.const -1.0))  ;; Returns 0
+```
+---
+
+## i64.extend8_s
+Sign-extend 8-bit value to i64.
+
+Signature: `(param i64) (result i64)`
+
+Example:
+```wat
+(i64.extend8_s (i64.const 0x80))  ;; Returns -128
+```
+---
+
+## i64.extend16_s
+Sign-extend 16-bit value to i64.
+
+Signature: `(param i64) (result i64)`
+
+Example:
+```wat
+(i64.extend16_s (i64.const 0x8000))  ;; Returns -32768
+```
+---
+
+## i64.extend32_s
+Sign-extend 32-bit value to i64.
+
+Signature: `(param i64) (result i64)`
+
+Example:
+```wat
+(i64.extend32_s (i64.const 0x80000000))  ;; Returns -2147483648
+```
+---
+
+## i64.reinterpret_f64
+Reinterpret f64 bits as i64.
+
+Signature: `(param f64) (result i64)`
+
+Example:
+```wat
+(i64.reinterpret_f64 (f64.const 1.0))  ;; Returns 0x3FF0000000000000
+```
+---
+
+## f32.convert_i32_s
+Convert signed i32 to f32.
+
+Signature: `(param i32) (result f32)`
+
+Example:
+```wat
+(f32.convert_i32_s (i32.const -5))  ;; Returns -5.0
+```
+---
+
+## f32.convert_i32_u
+Convert unsigned i32 to f32.
+
+Signature: `(param i32) (result f32)`
+
+Example:
+```wat
+(f32.convert_i32_u (i32.const 5))  ;; Returns 5.0
+```
+---
+
+## f32.convert_i64_s
+Convert signed i64 to f32.
+
+Signature: `(param i64) (result f32)`
+
+Example:
+```wat
+(f32.convert_i64_s (i64.const -5))  ;; Returns -5.0
+```
+---
+
+## f32.convert_i64_u
+Convert unsigned i64 to f32.
+
+Signature: `(param i64) (result f32)`
+
+Example:
+```wat
+(f32.convert_i64_u (i64.const 5))  ;; Returns 5.0
+```
+---
+
+## f32.demote_f64
+Convert f64 to f32 (may lose precision).
+
+Signature: `(param f64) (result f32)`
+
+Example:
+```wat
+(f32.demote_f64 (f64.const 3.141592653589793))  ;; Returns ~3.1415927
+```
+---
+
+## f32.reinterpret_i32
+Reinterpret i32 bits as f32.
+
+Signature: `(param i32) (result f32)`
+
+Example:
+```wat
+(f32.reinterpret_i32 (i32.const 0x3F800000))  ;; Returns 1.0
+```
+---
+
+## f64.convert_i32_s
+Convert signed i32 to f64.
+
+Signature: `(param i32) (result f64)`
+
+Example:
+```wat
+(f64.convert_i32_s (i32.const -5))  ;; Returns -5.0
+```
+---
+
+## f64.convert_i32_u
+Convert unsigned i32 to f64.
+
+Signature: `(param i32) (result f64)`
+
+Example:
+```wat
+(f64.convert_i32_u (i32.const 5))  ;; Returns 5.0
+```
+---
+
+## f64.convert_i64_s
+Convert signed i64 to f64.
+
+Signature: `(param i64) (result f64)`
+
+Example:
+```wat
+(f64.convert_i64_s (i64.const -5))  ;; Returns -5.0
+```
+---
+
+## f64.convert_i64_u
+Convert unsigned i64 to f64.
+
+Signature: `(param i64) (result f64)`
+
+Example:
+```wat
+(f64.convert_i64_u (i64.const 5))  ;; Returns 5.0
+```
+---
+
+## f64.promote_f32
+Convert f32 to f64 (lossless).
+
+Signature: `(param f32) (result f64)`
+
+Example:
+```wat
+(f64.promote_f32 (f32.const 3.14))  ;; Returns 3.14 (as f64)
+```
+---
+
+## f64.reinterpret_i64
+Reinterpret i64 bits as f64.
+
+Signature: `(param i64) (result f64)`
+
+Example:
+```wat
+(f64.reinterpret_i64 (i64.const 0x3FF0000000000000))  ;; Returns 1.0
+```
+---
+
 ## f32.add
 Add two f32 values.
 
@@ -647,6 +1463,106 @@ Example:
 ```
 ---
 
+## f32.copysign
+Copy sign of second argument to first argument.
+
+Signature: `(param f32 f32) (result f32)`
+
+Example:
+```wat
+(f32.copysign (f32.const 5.0) (f32.const -1.0))  ;; Returns -5.0
+```
+---
+
+## f32.eq
+Check if two f32 values are equal.
+
+Signature: `(param f32 f32) (result i32)`
+
+Example:
+```wat
+(f32.eq (f32.const 3.14) (f32.const 3.14))  ;; Returns 1 (true)
+```
+---
+
+## f32.ne
+Check if two f32 values are not equal.
+
+Signature: `(param f32 f32) (result i32)`
+
+Example:
+```wat
+(f32.ne (f32.const 3.14) (f32.const 2.71))  ;; Returns 1 (true)
+```
+---
+
+## f32.lt
+Check if first f32 is less than second.
+
+Signature: `(param f32 f32) (result i32)`
+
+Example:
+```wat
+(f32.lt (f32.const 2.0) (f32.const 3.0))  ;; Returns 1 (true)
+```
+---
+
+## f32.gt
+Check if first f32 is greater than second.
+
+Signature: `(param f32 f32) (result i32)`
+
+Example:
+```wat
+(f32.gt (f32.const 3.0) (f32.const 2.0))  ;; Returns 1 (true)
+```
+---
+
+## f32.le
+Check if first f32 is less than or equal to second.
+
+Signature: `(param f32 f32) (result i32)`
+
+Example:
+```wat
+(f32.le (f32.const 3.0) (f32.const 3.0))  ;; Returns 1 (true)
+```
+---
+
+## f32.ge
+Check if first f32 is greater than or equal to second.
+
+Signature: `(param f32 f32) (result i32)`
+
+Example:
+```wat
+(f32.ge (f32.const 3.0) (f32.const 3.0))  ;; Returns 1 (true)
+```
+---
+
+## f32.load
+Load f32 from memory at the given address.
+
+Signature: `(param i32) (result f32)`
+
+Example:
+```wat
+(f32.load (i32.const 0))
+(f32.load offset=4 align=4 (i32.const 0))
+```
+---
+
+## f32.store
+Store f32 value to memory.
+
+Signature: `(param i32 f32)`
+
+Example:
+```wat
+(f32.store (i32.const 0) (f32.const 3.14))
+```
+---
+
 ## f32.const
 Create a constant f32 value.
 
@@ -672,6 +1588,39 @@ Example:
 ```
 ---
 
+## f64.sub
+Subtract two f64 values.
+
+Signature: `(param f64 f64) (result f64)`
+
+Example:
+```wat
+(f64.sub (f64.const 10.5) (f64.const 3.2))
+```
+---
+
+## f64.mul
+Multiply two f64 values.
+
+Signature: `(param f64 f64) (result f64)`
+
+Example:
+```wat
+(f64.mul (f64.const 3.5) (f64.const 2.0))
+```
+---
+
+## f64.div
+Divide two f64 values.
+
+Signature: `(param f64 f64) (result f64)`
+
+Example:
+```wat
+(f64.div (f64.const 10.0) (f64.const 3.0))
+```
+---
+
 ## f64.sqrt
 Calculate square root with double precision.
 
@@ -680,6 +1629,196 @@ Signature: `(param f64) (result f64)`
 Example:
 ```wat
 (f64.sqrt (f64.const 2.0))  ;; Returns 1.4142135623730951
+```
+---
+
+## f64.min
+Return minimum of two f64 values.
+
+Signature: `(param f64 f64) (result f64)`
+
+Example:
+```wat
+(f64.min (f64.const 3.5) (f64.const 2.1))  ;; Returns 2.1
+```
+---
+
+## f64.max
+Return maximum of two f64 values.
+
+Signature: `(param f64 f64) (result f64)`
+
+Example:
+```wat
+(f64.max (f64.const 3.5) (f64.const 2.1))  ;; Returns 3.5
+```
+---
+
+## f64.abs
+Absolute value.
+
+Signature: `(param f64) (result f64)`
+
+Example:
+```wat
+(f64.abs (f64.const -3.14))  ;; Returns 3.14
+```
+---
+
+## f64.neg
+Negate value.
+
+Signature: `(param f64) (result f64)`
+
+Example:
+```wat
+(f64.neg (f64.const 3.14))  ;; Returns -3.14
+```
+---
+
+## f64.ceil
+Round up to nearest integer.
+
+Signature: `(param f64) (result f64)`
+
+Example:
+```wat
+(f64.ceil (f64.const 3.2))  ;; Returns 4.0
+```
+---
+
+## f64.floor
+Round down to nearest integer.
+
+Signature: `(param f64) (result f64)`
+
+Example:
+```wat
+(f64.floor (f64.const 3.8))  ;; Returns 3.0
+```
+---
+
+## f64.trunc
+Round toward zero.
+
+Signature: `(param f64) (result f64)`
+
+Example:
+```wat
+(f64.trunc (f64.const 3.8))   ;; Returns 3.0
+(f64.trunc (f64.const -3.8))  ;; Returns -3.0
+```
+---
+
+## f64.nearest
+Round to nearest integer, ties to even.
+
+Signature: `(param f64) (result f64)`
+
+Example:
+```wat
+(f64.nearest (f64.const 3.5))  ;; Returns 4.0
+(f64.nearest (f64.const 2.5))  ;; Returns 2.0 (ties to even)
+```
+---
+
+## f64.copysign
+Copy sign of second argument to first argument.
+
+Signature: `(param f64 f64) (result f64)`
+
+Example:
+```wat
+(f64.copysign (f64.const 5.0) (f64.const -1.0))  ;; Returns -5.0
+```
+---
+
+## f64.eq
+Check if two f64 values are equal.
+
+Signature: `(param f64 f64) (result i32)`
+
+Example:
+```wat
+(f64.eq (f64.const 3.14) (f64.const 3.14))  ;; Returns 1 (true)
+```
+---
+
+## f64.ne
+Check if two f64 values are not equal.
+
+Signature: `(param f64 f64) (result i32)`
+
+Example:
+```wat
+(f64.ne (f64.const 3.14) (f64.const 2.71))  ;; Returns 1 (true)
+```
+---
+
+## f64.lt
+Check if first f64 is less than second.
+
+Signature: `(param f64 f64) (result i32)`
+
+Example:
+```wat
+(f64.lt (f64.const 2.0) (f64.const 3.0))  ;; Returns 1 (true)
+```
+---
+
+## f64.gt
+Check if first f64 is greater than second.
+
+Signature: `(param f64 f64) (result i32)`
+
+Example:
+```wat
+(f64.gt (f64.const 3.0) (f64.const 2.0))  ;; Returns 1 (true)
+```
+---
+
+## f64.le
+Check if first f64 is less than or equal to second.
+
+Signature: `(param f64 f64) (result i32)`
+
+Example:
+```wat
+(f64.le (f64.const 3.0) (f64.const 3.0))  ;; Returns 1 (true)
+```
+---
+
+## f64.ge
+Check if first f64 is greater than or equal to second.
+
+Signature: `(param f64 f64) (result i32)`
+
+Example:
+```wat
+(f64.ge (f64.const 3.0) (f64.const 3.0))  ;; Returns 1 (true)
+```
+---
+
+## f64.load
+Load f64 from memory at the given address.
+
+Signature: `(param i32) (result f64)`
+
+Example:
+```wat
+(f64.load (i32.const 0))
+(f64.load offset=8 align=8 (i32.const 0))
+```
+---
+
+## f64.store
+Store f64 value to memory.
+
+Signature: `(param i32 f64)`
+
+Example:
+```wat
+(f64.store (i32.const 0) (f64.const 3.14159))
 ```
 ---
 
@@ -1046,6 +2185,34 @@ Example:
 ```
 ---
 
+## memory.init
+Initialize memory region from a passive data segment.
+
+Signature: `(param i32 i32 i32)`
+
+Example:
+```wat
+(data $my_data "Hello")
+;; Copy 5 bytes from data segment offset 0 to memory address 0
+(memory.init $my_data
+  (i32.const 0)   ;; memory destination
+  (i32.const 0)   ;; data segment offset
+  (i32.const 5))  ;; size
+```
+---
+
+## data.drop
+Drop a passive data segment, freeing its memory.
+
+Signature: None
+
+Example:
+```wat
+(data $my_data "Hello")
+(data.drop $my_data)  ;; Data segment can no longer be used
+```
+---
+
 ## table.get
 Get element from table at index.
 
@@ -1093,6 +2260,66 @@ Example:
 (table.grow $funcs
   (ref.null func)
   (i32.const 5))  ;; Grow by 5 elements
+```
+---
+
+## table.fill
+Fill a region of a table with a value.
+
+Signature: `(param i32 reftype i32)`
+
+Example:
+```wat
+(table $funcs 10 funcref)
+;; Fill 5 slots starting at index 0 with null
+(table.fill $funcs
+  (i32.const 0)       ;; start index
+  (ref.null func)     ;; value
+  (i32.const 5))      ;; count
+```
+---
+
+## table.copy
+Copy elements from one table region to another.
+
+Signature: `(param i32 i32 i32)`
+
+Example:
+```wat
+(table $funcs 10 funcref)
+;; Copy 3 elements from index 0 to index 5
+(table.copy $funcs $funcs
+  (i32.const 5)   ;; destination index
+  (i32.const 0)   ;; source index
+  (i32.const 3))  ;; count
+```
+---
+
+## table.init
+Initialize table region from a passive element segment.
+
+Signature: `(param i32 i32 i32)`
+
+Example:
+```wat
+(elem $my_elem func $f1 $f2 $f3)
+;; Copy 3 elements from elem segment to table
+(table.init $my_table $my_elem
+  (i32.const 0)   ;; table destination
+  (i32.const 0)   ;; elem segment offset
+  (i32.const 3))  ;; count
+```
+---
+
+## elem.drop
+Drop a passive element segment, freeing its memory.
+
+Signature: None
+
+Example:
+```wat
+(elem $my_elem func $f1 $f2)
+(elem.drop $my_elem)  ;; Element segment can no longer be used
 ```
 ---
 
@@ -1740,5 +2967,305 @@ Example:
 (try_table (catch $tag $handler_label)
   (throw $tag (i32.const 1))
 )
+```
+---
+
+## v128.const
+Create a constant 128-bit vector value.
+
+Signature: `(result v128)`
+
+Example:
+```wat
+(v128.const i32x4 1 2 3 4)
+(v128.const f32x4 1.0 2.0 3.0 4.0)
+(v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+```
+---
+
+## v128.load
+Load 128-bit vector from memory.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load (i32.const 0))
+(v128.load offset=16 align=16 (i32.const 0))
+```
+---
+
+## v128.store
+Store 128-bit vector to memory.
+
+Signature: `(param i32 v128)`
+
+Example:
+```wat
+(v128.store (i32.const 0) (local.get $vec))
+```
+---
+
+## v128.load8x8_s
+Load 8 signed 8-bit integers and extend to 16-bit.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load8x8_s (i32.const 0))
+```
+---
+
+## v128.load8x8_u
+Load 8 unsigned 8-bit integers and extend to 16-bit.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load8x8_u (i32.const 0))
+```
+---
+
+## v128.load16x4_s
+Load 4 signed 16-bit integers and extend to 32-bit.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load16x4_s (i32.const 0))
+```
+---
+
+## v128.load16x4_u
+Load 4 unsigned 16-bit integers and extend to 32-bit.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load16x4_u (i32.const 0))
+```
+---
+
+## v128.load32x2_s
+Load 2 signed 32-bit integers and extend to 64-bit.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load32x2_s (i32.const 0))
+```
+---
+
+## v128.load32x2_u
+Load 2 unsigned 32-bit integers and extend to 64-bit.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load32x2_u (i32.const 0))
+```
+---
+
+## v128.load8_splat
+Load 8-bit value and replicate to all lanes.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load8_splat (i32.const 0))  ;; Loads byte and replicates 16 times
+```
+---
+
+## v128.load16_splat
+Load 16-bit value and replicate to all lanes.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load16_splat (i32.const 0))  ;; Loads i16 and replicates 8 times
+```
+---
+
+## v128.load32_splat
+Load 32-bit value and replicate to all lanes.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load32_splat (i32.const 0))  ;; Loads i32 and replicates 4 times
+```
+---
+
+## v128.load64_splat
+Load 64-bit value and replicate to all lanes.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load64_splat (i32.const 0))  ;; Loads i64 and replicates 2 times
+```
+---
+
+## v128.any_true
+Check if any bit in the vector is non-zero.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+(v128.any_true (local.get $vec))  ;; Returns 1 if any bit is set
+```
+---
+
+## i8x16.add
+Add two i8x16 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i8x16.add (local.get $a) (local.get $b))
+```
+---
+
+## i16x8.add
+Add two i16x8 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i16x8.add (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.add
+Add two i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i32x4.add (local.get $a) (local.get $b))
+```
+---
+
+## i64x2.add
+Add two i64x2 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i64x2.add (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.add
+Add two f32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.add (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.add
+Add two f64x2 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.add (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.eq
+Compare two i32x4 vectors for equality lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i32x4.eq (local.get $a) (local.get $b))  ;; Returns -1 for equal lanes, 0 otherwise
+```
+---
+
+## i32x4.gt_s
+Signed greater-than comparison for i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i32x4.gt_s (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.gt_u
+Unsigned greater-than comparison for i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i32x4.gt_u (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.le_s
+Signed less-than-or-equal comparison for i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i32x4.le_s (local.get $a) (local.get $b))
+```
+---
+
+## i8x16.all_true
+Check if all lanes in an i8x16 vector are non-zero.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+(i8x16.all_true (local.get $vec))  ;; Returns 1 if all 16 lanes are non-zero
+```
+---
+
+## i32x4.all_true
+Check if all lanes in an i32x4 vector are non-zero.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+(i32x4.all_true (local.get $vec))  ;; Returns 1 if all 4 lanes are non-zero
+```
+---
+
+## i32x4.abs
+Absolute value of each lane in an i32x4 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(i32x4.abs (local.get $vec))
 ```
 ---
