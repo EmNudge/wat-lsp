@@ -1,6 +1,7 @@
 use crate::symbols::*;
 use crate::utils::{
-    find_containing_function, get_line_at_position, get_word_at_position, node_at_position,
+    determine_instruction_context_at_node, find_containing_function, get_line_at_position,
+    get_word_at_position, node_at_position, InstructionContext,
 };
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
@@ -52,20 +53,6 @@ pub enum ReferenceTarget {
     },
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
-enum ReferenceContext {
-    Call,     // Inside call instruction
-    Global,   // Inside global.get/set
-    Local,    // Inside local.get/set/tee
-    Branch,   // Inside br/br_if/br_table
-    Table,    // Inside table operation
-    Memory,   // Inside memory operation
-    Type,     // Inside type definition/use or struct/array/cast constant
-    Tag,      // Inside throw/try
-    Function, // Inside function definition
-    General,  // General context
-}
-
 /// Context for reference search operations
 struct ReferenceSearchContext<'a> {
     document: &'a str,
@@ -87,49 +74,6 @@ fn is_in_same_function_by_line(
         }
     }
     false
-}
-
-/// Determine reference context from AST node
-fn determine_reference_context(node: &tree_sitter::Node, document: &str) -> ReferenceContext {
-    let kind = node.kind();
-
-    // Check for instruction contexts
-    if kind == "instr_plain" || kind == "expr1_plain" {
-        // Get the text of the instruction to determine its type
-        let instr_text = &document[node.byte_range()];
-
-        if instr_text.contains("call") {
-            return ReferenceContext::Call;
-        } else if instr_text.contains("local.") {
-            return ReferenceContext::Local;
-        } else if instr_text.contains("global.") {
-            return ReferenceContext::Global;
-        } else if instr_text.starts_with("br") || instr_text.contains(" br") {
-            return ReferenceContext::Branch;
-        } else if instr_text.contains("table.") {
-            return ReferenceContext::Table;
-        } else if instr_text.contains("memory.") {
-            return ReferenceContext::Memory;
-        } else if instr_text.contains("struct.")
-            || instr_text.contains("array.")
-            || instr_text.contains("ref.cast")
-            || instr_text.contains("ref.test")
-        {
-            return ReferenceContext::Type;
-        } else if instr_text.contains("throw") || instr_text.contains("rethrow") {
-            return ReferenceContext::Tag;
-        }
-    }
-
-    // Check for type use (not definition)
-    if kind == "type_use" {
-        return ReferenceContext::Type;
-    }
-
-    // Check for tag use (not definition)
-    // Note: module_field_tag is a definition, not a use
-
-    ReferenceContext::General
 }
 
 /// Check if a line contains a keyword as an instruction (not as part of an identifier)
@@ -175,32 +119,33 @@ fn line_contains_keyword(line: &str, keyword: &str) -> bool {
 }
 
 /// Determine context from line text (fallback for incomplete code)
-fn determine_context_from_line(line: &str) -> ReferenceContext {
+/// Uses specialized keyword matching for accurate reference detection
+fn determine_context_from_line_refs(line: &str) -> InstructionContext {
     // Check for instruction keywords (order matters - more specific first)
     if line_contains_keyword(line, "call") {
-        ReferenceContext::Call
+        InstructionContext::Call
     } else if line_contains_keyword(line, "global") {
-        ReferenceContext::Global
+        InstructionContext::Global
     } else if line_contains_keyword(line, "local") {
-        ReferenceContext::Local
+        InstructionContext::Local
     } else if line_contains_keyword(line, "br") {
-        ReferenceContext::Branch
+        InstructionContext::Branch
     } else if line_contains_keyword(line, "table") {
-        ReferenceContext::Table
+        InstructionContext::Table
     } else if line_contains_keyword(line, "memory") {
-        ReferenceContext::Memory
+        InstructionContext::Memory
     } else if line_contains_keyword(line, "type")
         || line_contains_keyword(line, "struct")
         || line_contains_keyword(line, "array")
         || line.contains("ref.")
     {
-        ReferenceContext::Type
+        InstructionContext::Type
     } else if line_contains_keyword(line, "func") {
-        ReferenceContext::Function
+        InstructionContext::Function
     } else if line_contains_keyword(line, "throw") || line_contains_keyword(line, "tag") {
-        ReferenceContext::Tag
+        InstructionContext::Tag
     } else {
-        ReferenceContext::General
+        InstructionContext::General
     }
 }
 
@@ -257,13 +202,13 @@ pub fn identify_symbol_at_position(
 
     // Determine context using AST, with fallback to line matching
     let context = if let Some(node) = node_at_position(tree, document, position) {
-        let ast_context = determine_reference_context(&node, document);
-        if ast_context == ReferenceContext::General {
+        let ast_context = determine_instruction_context_at_node(&node, document);
+        if ast_context == InstructionContext::General {
             // Fallback to line-based detection for incomplete code
             if let Some(line) = get_line_at_position(document, position.line as usize) {
-                determine_context_from_line(line)
+                determine_context_from_line_refs(line)
             } else {
-                ReferenceContext::General
+                InstructionContext::General
             }
         } else {
             ast_context
@@ -271,9 +216,9 @@ pub fn identify_symbol_at_position(
     } else {
         // Fallback to line-based detection
         if let Some(line) = get_line_at_position(document, position.line as usize) {
-            determine_context_from_line(line)
+            determine_context_from_line_refs(line)
         } else {
-            ReferenceContext::General
+            InstructionContext::General
         }
     };
 
@@ -286,9 +231,9 @@ pub fn identify_symbol_at_position(
                 identify_indexed_symbol(index, symbols, context, position, tree, document);
 
             // If we couldn't identify the symbol with AST context, try line-based fallback
-            if result.is_none() && context == ReferenceContext::Function {
+            if result.is_none() && context == InstructionContext::Function {
                 if let Some(line) = get_line_at_position(document, position.line as usize) {
-                    let line_context = determine_context_from_line(line);
+                    let line_context = determine_context_from_line_refs(line);
                     result = identify_indexed_symbol(
                         index,
                         symbols,
@@ -313,11 +258,11 @@ pub fn identify_symbol_at_position(
 fn identify_named_symbol(
     word: &str,
     symbols: &SymbolTable,
-    context: ReferenceContext,
+    context: InstructionContext,
     position: Position,
 ) -> Option<ReferenceTarget> {
     match context {
-        ReferenceContext::Call => {
+        InstructionContext::Call => {
             // Only function calls
             if let Some(func) = symbols.get_function_by_name(word) {
                 return Some(ReferenceTarget::Function {
@@ -326,7 +271,7 @@ fn identify_named_symbol(
                 });
             }
         }
-        ReferenceContext::Global => {
+        InstructionContext::Global => {
             if let Some(global) = symbols.get_global_by_name(word) {
                 return Some(ReferenceTarget::Global {
                     name: Some(word.to_string()),
@@ -334,7 +279,7 @@ fn identify_named_symbol(
                 });
             }
         }
-        ReferenceContext::Local => {
+        InstructionContext::Local => {
             if let Some(func) = find_containing_function(symbols, position) {
                 // Check parameters first
                 for param in &func.parameters {
@@ -358,7 +303,7 @@ fn identify_named_symbol(
                 }
             }
         }
-        ReferenceContext::Branch => {
+        InstructionContext::Branch | InstructionContext::Block => {
             if let Some(func) = find_containing_function(symbols, position) {
                 for block in &func.blocks {
                     if block.label == word {
@@ -371,7 +316,7 @@ fn identify_named_symbol(
                 }
             }
         }
-        ReferenceContext::Function | ReferenceContext::General => {
+        InstructionContext::Function | InstructionContext::General => {
             // Try all symbol types, including block labels, locals, and parameters
 
             // Try function
@@ -453,7 +398,7 @@ fn identify_named_symbol(
                 });
             }
         }
-        ReferenceContext::Table => {
+        InstructionContext::Table => {
             if let Some(table) = symbols.get_table_by_name(word) {
                 return Some(ReferenceTarget::Table {
                     name: Some(word.to_string()),
@@ -461,7 +406,7 @@ fn identify_named_symbol(
                 });
             }
         }
-        ReferenceContext::Memory => {
+        InstructionContext::Memory => {
             if let Some(memory) = symbols.get_memory_by_name(word) {
                 return Some(ReferenceTarget::Memory {
                     name: Some(word.to_string()),
@@ -469,7 +414,7 @@ fn identify_named_symbol(
                 });
             }
         }
-        ReferenceContext::Type => {
+        InstructionContext::Type => {
             if let Some(type_def) = symbols.get_type_by_name(word) {
                 return Some(ReferenceTarget::Type {
                     name: Some(word.to_string()),
@@ -477,7 +422,7 @@ fn identify_named_symbol(
                 });
             }
         }
-        ReferenceContext::Tag => {
+        InstructionContext::Tag => {
             if let Some(tag) = symbols.get_tag_by_name(word) {
                 return Some(ReferenceTarget::Tag {
                     name: Some(word.to_string()),
@@ -494,13 +439,13 @@ fn identify_named_symbol(
 fn identify_indexed_symbol(
     index: usize,
     symbols: &SymbolTable,
-    context: ReferenceContext,
+    context: InstructionContext,
     position: Position,
     tree: &Tree,
     document: &str,
 ) -> Option<ReferenceTarget> {
     match context {
-        ReferenceContext::Call => {
+        InstructionContext::Call => {
             if let Some(func) = symbols.get_function_by_index(index) {
                 return Some(ReferenceTarget::Function {
                     name: func.name.clone(),
@@ -508,7 +453,7 @@ fn identify_indexed_symbol(
                 });
             }
         }
-        ReferenceContext::Global => {
+        InstructionContext::Global => {
             if let Some(global) = symbols.get_global_by_index(index) {
                 return Some(ReferenceTarget::Global {
                     name: global.name.clone(),
@@ -516,7 +461,7 @@ fn identify_indexed_symbol(
                 });
             }
         }
-        ReferenceContext::Local => {
+        InstructionContext::Local => {
             if let Some(func) = find_containing_function(symbols, position) {
                 let total_params = func.parameters.len();
 
@@ -542,7 +487,7 @@ fn identify_indexed_symbol(
                 }
             }
         }
-        ReferenceContext::Type => {
+        InstructionContext::Type => {
             if let Some(type_def) = symbols.get_type_by_index(index) {
                 return Some(ReferenceTarget::Type {
                     name: type_def.name.clone(),
@@ -550,7 +495,7 @@ fn identify_indexed_symbol(
                 });
             }
         }
-        ReferenceContext::Tag => {
+        InstructionContext::Tag => {
             if let Some(tag) = symbols.get_tag_by_index(index) {
                 return Some(ReferenceTarget::Tag {
                     name: tag.name.clone(),
@@ -558,7 +503,7 @@ fn identify_indexed_symbol(
                 });
             }
         }
-        ReferenceContext::Branch => {
+        InstructionContext::Branch => {
             // For branch instructions with numeric depth, resolve the block at that depth
             if let Some(func) = find_containing_function(symbols, position) {
                 // Build block stack at the current position
@@ -608,12 +553,12 @@ fn find_all_references(
 }
 
 /// Determine reference context for export descriptors
-fn determine_export_context(node: &tree_sitter::Node) -> Option<ReferenceContext> {
+fn determine_export_context(node: &tree_sitter::Node) -> Option<InstructionContext> {
     match node.kind() {
-        "export_desc_func" => Some(ReferenceContext::Call),
-        "export_desc_global" => Some(ReferenceContext::Global),
-        "export_desc_table" => Some(ReferenceContext::Table),
-        "export_desc_memory" => Some(ReferenceContext::Memory),
+        "export_desc_func" => Some(InstructionContext::Call),
+        "export_desc_global" => Some(InstructionContext::Global),
+        "export_desc_table" => Some(InstructionContext::Table),
+        "export_desc_memory" => Some(InstructionContext::Memory),
         _ => None,
     }
 }
@@ -658,19 +603,19 @@ fn walk_tree_for_references(
     }
 
     // Check if this node is a reference instruction
-    let context = determine_reference_context(&node, document);
+    let context = determine_instruction_context_at_node(&node, document);
 
     // Only process actual reference contexts, not definition contexts like Function
     if matches!(
         context,
-        ReferenceContext::Call
-            | ReferenceContext::Global
-            | ReferenceContext::Local
-            | ReferenceContext::Branch
-            | ReferenceContext::Table
-            | ReferenceContext::Type
-            | ReferenceContext::Tag
-            | ReferenceContext::Memory
+        InstructionContext::Call
+            | InstructionContext::Global
+            | InstructionContext::Local
+            | InstructionContext::Branch
+            | InstructionContext::Table
+            | InstructionContext::Type
+            | InstructionContext::Tag
+            | InstructionContext::Memory
     ) {
         let mut ctx = ReferenceSearchContext {
             document,
@@ -682,7 +627,7 @@ fn walk_tree_for_references(
 
         // For most contexts, we've already processed this subtree, so don't recurse
         // Exception: Branch context may contain nested instructions like local.get in br_if
-        if context != ReferenceContext::Branch {
+        if context != InstructionContext::Branch {
             if is_block {
                 block_stack.pop();
             }
@@ -707,7 +652,7 @@ fn check_node_for_reference(
     node: &Node,
     target: &ReferenceTarget,
     ctx: &mut ReferenceSearchContext,
-    context: &ReferenceContext,
+    context: &InstructionContext,
     block_stack: &[BlockInfo],
 ) {
     // Find identifier or index nodes within this instruction
@@ -729,7 +674,7 @@ fn find_reference_identifiers(
     node: &Node,
     target: &ReferenceTarget,
     ctx: &mut ReferenceSearchContext,
-    context: &ReferenceContext,
+    context: &InstructionContext,
     block_stack: &[BlockInfo],
     is_root: bool,
 ) {
@@ -800,7 +745,7 @@ fn find_reference_identifiers(
 fn matches_target_identifier(
     identifier: &str,
     target: &ReferenceTarget,
-    context: &ReferenceContext,
+    context: &InstructionContext,
     line: u32,
     symbols: &SymbolTable,
     _block_stack: &[BlockInfo],
@@ -808,13 +753,13 @@ fn matches_target_identifier(
     match target {
         ReferenceTarget::Function { name, .. } => {
             // Only match in Call context, not Function context (which is the definition)
-            if *context != ReferenceContext::Call {
+            if *context != InstructionContext::Call {
                 return false;
             }
             name.as_ref() == Some(&identifier.to_string())
         }
         ReferenceTarget::Global { name, .. } => {
-            if *context != ReferenceContext::Global {
+            if *context != InstructionContext::Global {
                 return false;
             }
             name.as_ref() == Some(&identifier.to_string())
@@ -824,7 +769,7 @@ fn matches_target_identifier(
             function_start_byte,
             ..
         } => {
-            if *context != ReferenceContext::Local {
+            if *context != InstructionContext::Local {
                 return false;
             }
             if name.as_ref() != Some(&identifier.to_string()) {
@@ -838,7 +783,7 @@ fn matches_target_identifier(
             function_start_byte,
             ..
         } => {
-            if *context != ReferenceContext::Local {
+            if *context != InstructionContext::Local {
                 return false;
             }
             if name.as_ref() != Some(&identifier.to_string()) {
@@ -852,7 +797,7 @@ fn matches_target_identifier(
             function_start_byte,
             ..
         } => {
-            if *context != ReferenceContext::Branch {
+            if *context != InstructionContext::Branch {
                 return false;
             }
             if label != identifier {
@@ -862,25 +807,25 @@ fn matches_target_identifier(
             is_in_same_function_by_line(line, *function_start_byte, symbols)
         }
         ReferenceTarget::Table { name, .. } => {
-            if *context != ReferenceContext::Table {
+            if *context != InstructionContext::Table {
                 return false;
             }
             name.as_ref() == Some(&identifier.to_string())
         }
         ReferenceTarget::Memory { name, .. } => {
-            if *context != ReferenceContext::Memory {
+            if *context != InstructionContext::Memory {
                 return false;
             }
             name.as_ref() == Some(&identifier.to_string())
         }
         ReferenceTarget::Type { name, .. } => {
-            if *context != ReferenceContext::Type {
+            if *context != InstructionContext::Type {
                 return false;
             }
             name.as_ref() == Some(&identifier.to_string())
         }
         ReferenceTarget::Tag { name, .. } => {
-            if *context != ReferenceContext::Tag {
+            if *context != InstructionContext::Tag {
                 return false;
             }
             name.as_ref() == Some(&identifier.to_string())
@@ -892,7 +837,7 @@ fn matches_target_identifier(
 fn matches_target_index(
     index: usize,
     target: &ReferenceTarget,
-    context: &ReferenceContext,
+    context: &InstructionContext,
     line: u32,
     symbols: &SymbolTable,
     block_stack: &[BlockInfo],
@@ -903,7 +848,7 @@ fn matches_target_index(
             ..
         } => {
             // Only match in Call context, not Function context (which is the definition)
-            if *context != ReferenceContext::Call {
+            if *context != InstructionContext::Call {
                 return false;
             }
             index == *target_index
@@ -912,7 +857,7 @@ fn matches_target_index(
             index: target_index,
             ..
         } => {
-            if *context != ReferenceContext::Global {
+            if *context != InstructionContext::Global {
                 return false;
             }
             index == *target_index
@@ -922,7 +867,7 @@ fn matches_target_index(
             function_start_byte,
             ..
         } => {
-            if *context != ReferenceContext::Local {
+            if *context != InstructionContext::Local {
                 return false;
             }
             if index != *target_index {
@@ -936,7 +881,7 @@ fn matches_target_index(
             function_start_byte,
             ..
         } => {
-            if *context != ReferenceContext::Local {
+            if *context != InstructionContext::Local {
                 return false;
             }
             if index != *target_index {
@@ -951,7 +896,7 @@ fn matches_target_index(
             line: target_line,
             ..
         } => {
-            if *context != ReferenceContext::Branch {
+            if *context != InstructionContext::Branch {
                 return false;
             }
             // Resolve depth to block label
@@ -974,7 +919,7 @@ fn matches_target_index(
             index: target_index,
             ..
         } => {
-            if *context != ReferenceContext::Table {
+            if *context != InstructionContext::Table {
                 return false;
             }
             index == *target_index
@@ -983,7 +928,7 @@ fn matches_target_index(
             index: target_index,
             ..
         } => {
-            if *context != ReferenceContext::Memory {
+            if *context != InstructionContext::Memory {
                 return false;
             }
             index == *target_index
@@ -992,7 +937,7 @@ fn matches_target_index(
             index: target_index,
             ..
         } => {
-            if *context != ReferenceContext::Type {
+            if *context != InstructionContext::Type {
                 return false;
             }
             index == *target_index
@@ -1001,7 +946,7 @@ fn matches_target_index(
             index: target_index,
             ..
         } => {
-            if *context != ReferenceContext::Tag {
+            if *context != InstructionContext::Tag {
                 return false;
             }
             index == *target_index
