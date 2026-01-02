@@ -2,7 +2,7 @@
   "name": "wat-lsp",
   "displayName": "WebAssembly Text Format (WAT) Language Support",
   "description": "Language Server Protocol support for WebAssembly Text Format (.wat files)",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "EmNudge",
   "icon": "icon.png",
   "repository": {
@@ -28,6 +28,12 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "watLsp.toggle",
+        "title": "WAT LSP: Toggle Language Server"
+      }
+    ],
     "languages": [
       {
         "id": "wat",
@@ -42,10 +48,50 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "grammars": [
+      {
+        "language": "wat",
+        "scopeName": "source.wat",
+        "path": "./syntaxes/wat.tmLanguage.json"
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "controlFlow",
+        "description": "Control flow keywords"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "wat",
+        "scopes": {
+          "comment": ["comment.wat"],
+          "string": ["string.quoted.double.wat"],
+          "number": ["constant.numeric.wat"],
+          "type": ["entity.name.type.wat"],
+          "type.defaultLibrary": ["entity.name.type.wat"],
+          "function": ["entity.name.function.wat"],
+          "function.definition": ["entity.name.function.wat"],
+          "variable": ["variable.other.wat"],
+          "variable.definition": ["variable.other.wat"],
+          "keyword": ["storage.type.wat"],
+          "keyword.controlFlow": ["keyword.control.wat"],
+          "operator": ["keyword.operator.word.wat"],
+          "namespace": ["support.class.wat"],
+          "parameter": ["variable.parameter.wat"],
+          "property": ["variable.other.local.wat"]
+        }
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "WAT LSP Configuration",
       "properties": {
+        "watLsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable the WAT language server."
+        },
         "watLsp.trace.server": {
           "type": "string",
           "enum": [
@@ -66,7 +112,8 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "npm run copy:queries && tsc -p ./",
+    "copy:queries": "mkdir -p ./grammars/queries && cp ../tree-sitter-wasm/queries/highlights.scm ./grammars/queries/",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "lint": "eslint src --ext ts",
@@ -75,7 +122,8 @@
     "copy:server": "mkdir -p ./server && cp ../target/release/wat-lsp-rust ./server/wat-lsp-rust || cp ../target/release/wat-lsp-rust.exe ./server/wat-lsp-rust.exe"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^9.0.1",
+    "tree-sitter": "^0.21.0"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",

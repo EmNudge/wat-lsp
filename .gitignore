@@ -19,10 +19,12 @@ tree-sitter-wasm/bindings/
 tree-sitter-wasm/*.wasm
 tree-sitter-wasm/package.json
 tree-sitter-wasm/node_modules/
+tree-sitter-wasm/build/
 
 # VS Code Extension
 vscode-extension/node_modules/
 vscode-extension/out/
+vscode-extension/grammars/queries/
 vscode-extension/server/
 vscode-extension/*.vsix
 vscode-extension/package-lock.json
