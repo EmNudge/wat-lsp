@@ -78,6 +78,10 @@ fn parse_instruction_docs(content: &str) -> HashMap<String, String> {
     let save_instruction =
         |name: &mut Option<String>, lines: &mut Vec<&str>, docs: &mut HashMap<String, String>| {
             if let Some(n) = name.take() {
+                // Trim trailing empty lines
+                while lines.last() == Some(&"") {
+                    lines.pop();
+                }
                 if !lines.is_empty() {
                     let doc = lines.join("\n");
                     docs.insert(n, doc);
@@ -129,8 +133,11 @@ fn parse_instruction_docs(content: &str) -> HashMap<String, String> {
         }
 
         // Add content line if we're collecting for an instruction
-        if instruction_name.is_some() && !trimmed.is_empty() {
-            doc_lines.push(trimmed);
+        if instruction_name.is_some() {
+            // Include empty lines only after we've started collecting content
+            if !trimmed.is_empty() || !doc_lines.is_empty() {
+                doc_lines.push(trimmed);
+            }
         }
     }
 
