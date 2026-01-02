@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,6 +13,7 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.actor == github.repository_owner
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
