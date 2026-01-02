@@ -4,6 +4,7 @@
   "description": "Language Server Protocol support for WebAssembly Text Format (.wat files)",
   "version": "0.1.1",
   "publisher": "EmNudge",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/EmNudge/wat-lsp"
