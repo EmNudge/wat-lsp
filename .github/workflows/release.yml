@@ -123,6 +123,12 @@ jobs:
 
       - name: Publish to Open VSX
         working-directory: vscode-extension
+        continue-on-error: true
         run: |
           npm install -g ovsx
           ovsx publish *.vsix -p ${{ secrets.OPENVSX_TOKEN }}
+
+      - name: Publish to VS Code Marketplace
+        working-directory: vscode-extension
+        continue-on-error: true
+        run: npx vsce publish --pat ${{ secrets.VSCE_PAT }}
