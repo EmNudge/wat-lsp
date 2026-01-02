@@ -413,12 +413,16 @@ fn check_folded_instruction_parameter_count(
 
         match arity.operand_mode {
             OperandMode::Fixed(expected) => {
-                if operand_count != expected {
+                // Only report error if there are TOO MANY operands.
+                // Having fewer operands is valid in WAT because remaining operands
+                // can come from the implicit stack (linear or partially folded style).
+                // For example: (br_if $loop) is valid when condition is on the stack.
+                if operand_count > expected {
                     let diagnostic = create_operand_count_diagnostic(
                         node,
                         instr_name,
                         operand_count,
-                        &arity.expected_operands_message(),
+                        &format!("at most {}", arity.expected_operands_message()),
                     );
                     diagnostics.push(diagnostic);
                 }
@@ -491,6 +495,41 @@ fn validate_dynamic_operands(
                         let diagnostic =
                             create_operand_count_diagnostic(node, instr_name, operand_count, &msg);
                         diagnostics.push(diagnostic);
+                    }
+                }
+            }
+        }
+        "call" => {
+            // (call $func (arg)*)
+            // The number of operands should match the function's parameter count
+            if let Some(func_name) = extract_instruction_type_param(node, source) {
+                if let Some(func) = symbols.get_function_by_name(&func_name) {
+                    let expected = func.parameters.len();
+                    if operand_count != expected {
+                        let msg =
+                            format!("{} operands (params of function {})", expected, func_name);
+                        let diagnostic =
+                            create_operand_count_diagnostic(node, instr_name, operand_count, &msg);
+                        diagnostics.push(diagnostic);
+                    }
+                } else if let Ok(idx) = func_name.parse::<usize>() {
+                    // Numeric function index
+                    if let Some(func) = symbols.get_function_by_index(idx) {
+                        let expected = func.parameters.len();
+                        if operand_count != expected {
+                            let func_display = func.name.as_deref().unwrap_or(&func_name);
+                            let msg = format!(
+                                "{} operands (params of function {})",
+                                expected, func_display
+                            );
+                            let diagnostic = create_operand_count_diagnostic(
+                                node,
+                                instr_name,
+                                operand_count,
+                                &msg,
+                            );
+                            diagnostics.push(diagnostic);
+                        }
                     }
                 }
             }
@@ -944,8 +983,9 @@ mod tests {
     }
 
     #[test]
-    fn test_folded_expression_too_few_operands() {
-        // i32.add with 1 operand instead of 2
+    fn test_folded_expression_partial_is_valid() {
+        // i32.add with 1 inline operand - the other comes from the stack (mixed style)
+        // This is valid WAT: (i32.const 5) (i32.add (i32.const 1)) means add 1 to stack top
         let document = r#"(func $test
   (i32.add (i32.const 1)))"#;
 
@@ -958,13 +998,12 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("i32.add") && d.message.contains("expects"))
             .collect();
+        // Partial folding is valid - remaining operands come from the stack
         assert_eq!(
             operand_errors.len(),
-            1,
-            "i32.add with 1 operand should produce one error"
+            0,
+            "i32.add with 1 operand is valid (other from stack)"
         );
-        assert!(operand_errors[0].message.contains("2 operands"));
-        assert!(operand_errors[0].message.contains("got 1"));
     }
 
     #[test]

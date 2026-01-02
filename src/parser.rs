@@ -21,16 +21,344 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     let mut symbol_table = SymbolTable::new();
     let root = tree.root_node();
 
+    // Extract imports FIRST - imports get indices before regular declarations
+    // Returns counters for each kind of import
+    let import_counts = extract_imports(&root, source, &mut symbol_table);
+
     // Extract in order: globals, types, tables, memories, functions
     // (Order matters for index assignment)
-    extract_globals(&root, source, &mut symbol_table);
+    // Pass import counts to offset the indices
+    extract_globals_with_offset(&root, source, &mut symbol_table, import_counts.globals);
     extract_types(&root, source, &mut symbol_table);
-    extract_tables(&root, source, &mut symbol_table);
-    extract_memories(&root, source, &mut symbol_table);
+    extract_tables_with_offset(&root, source, &mut symbol_table, import_counts.tables);
+    extract_memories_with_offset(&root, source, &mut symbol_table, import_counts.memories);
     extract_tags(&root, source, &mut symbol_table);
-    extract_functions(&root, source, &mut symbol_table);
+    extract_functions_with_offset(&root, source, &mut symbol_table, import_counts.functions);
 
     Ok(symbol_table)
+}
+
+/// Counters for imported items
+struct ImportCounts {
+    functions: usize,
+    globals: usize,
+    tables: usize,
+    memories: usize,
+}
+
+/// Extract imports from the module
+fn extract_imports(root: &Node, source: &str, symbol_table: &mut SymbolTable) -> ImportCounts {
+    let mut counts = ImportCounts {
+        functions: 0,
+        globals: 0,
+        tables: 0,
+        memories: 0,
+    };
+
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "module" {
+            let mut module_cursor = child.walk();
+            for module_child in child.children(&mut module_cursor) {
+                if module_child.kind() == "module_field" {
+                    let mut field_cursor = module_child.walk();
+                    for field_child in module_child.children(&mut field_cursor) {
+                        if field_child.kind() == "module_field_import" {
+                            extract_single_import(&field_child, source, symbol_table, &mut counts);
+                        }
+                    }
+                }
+            }
+        } else if child.kind() == "module_field" {
+            let mut field_cursor = child.walk();
+            for field_child in child.children(&mut field_cursor) {
+                if field_child.kind() == "module_field_import" {
+                    extract_single_import(&field_child, source, symbol_table, &mut counts);
+                }
+            }
+        }
+    }
+
+    counts
+}
+
+/// Extract a single import declaration
+fn extract_single_import(
+    import_node: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    counts: &mut ImportCounts,
+) {
+    let mut cursor = import_node.walk();
+
+    // Find the import_desc wrapper which contains the actual import descriptor
+    for child in import_node.children(&mut cursor) {
+        if child.kind() == "import_desc" {
+            // Look inside import_desc for the specific import type
+            let mut desc_cursor = child.walk();
+            for desc_child in child.children(&mut desc_cursor) {
+                match desc_child.kind() {
+                    "import_desc_func_type" | "import_desc_type_use" => {
+                        // Imported function: (func $name? ...)
+                        if let Some(func) =
+                            extract_imported_function(&desc_child, source, counts.functions)
+                        {
+                            symbol_table.add_function(func);
+                            counts.functions += 1;
+                        }
+                    }
+                    "import_desc_global_type" => {
+                        // Imported global: (global $name? global_type)
+                        if let Some(global) =
+                            extract_imported_global(&desc_child, source, counts.globals)
+                        {
+                            symbol_table.add_global(global);
+                            counts.globals += 1;
+                        }
+                    }
+                    "import_desc_table_type" => {
+                        // Imported table: (table $name? table_type)
+                        if let Some(table) =
+                            extract_imported_table(&desc_child, source, counts.tables)
+                        {
+                            symbol_table.add_table(table);
+                            counts.tables += 1;
+                        }
+                    }
+                    "import_desc_memory_type" => {
+                        // Imported memory: (memory $name? memory_type)
+                        if let Some(memory) =
+                            extract_imported_memory(&desc_child, source, counts.memories)
+                        {
+                            symbol_table.add_memory(memory);
+                            counts.memories += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// Extract an imported function
+fn extract_imported_function(desc_node: &Node, source: &str, index: usize) -> Option<Function> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    // For imports, parameters and results can be in multiple func_type nodes:
+    // import_desc_func_type -> func_type (params) + func_type (results)
+    // Or they could be combined. We need to accumulate all params and results.
+    let mut parameters = Vec::new();
+    let mut results = Vec::new();
+
+    let mut cursor = desc_node.walk();
+    for child in desc_node.children(&mut cursor) {
+        if child.kind() == "func_type" {
+            // Extract from the func_type node and accumulate
+            let new_params = extract_parameters(&child, source);
+            let new_results = extract_results(&child, source);
+            if !new_params.is_empty() {
+                // Re-index parameters to continue the sequence
+                let base_idx = parameters.len();
+                for mut p in new_params {
+                    p.index += base_idx;
+                    parameters.push(p);
+                }
+            }
+            if !new_results.is_empty() {
+                results.extend(new_results);
+            }
+        } else if child.kind() == "func_type_params" {
+            // Direct params
+            let new_params = extract_parameters(desc_node, source);
+            if !new_params.is_empty() {
+                let base_idx = parameters.len();
+                for mut p in new_params {
+                    p.index += base_idx;
+                    parameters.push(p);
+                }
+            }
+        } else if child.kind() == "func_type_results" {
+            let new_results = extract_results(desc_node, source);
+            results.extend(new_results);
+        }
+    }
+
+    // Also check for params directly under desc_node (fallback)
+    if parameters.is_empty() {
+        parameters = extract_parameters(desc_node, source);
+    }
+    if results.is_empty() {
+        results = extract_results(desc_node, source);
+    }
+
+    Some(Function {
+        name,
+        index,
+        parameters,
+        results,
+        locals: Vec::new(), // Imported functions have no locals
+        blocks: Vec::new(), // Imported functions have no blocks
+        line: desc_node.range().start_point.row as u32,
+        end_line: desc_node.range().end_point.row as u32,
+        start_byte: desc_node.start_byte(),
+        end_byte: desc_node.end_byte(),
+        range: name_range,
+    })
+}
+
+/// Extract an imported global
+fn extract_imported_global(desc_node: &Node, source: &str, index: usize) -> Option<Global> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut is_mutable = false;
+    let mut var_type = ValueType::Unknown;
+
+    let mut cursor = desc_node.walk();
+    for child in desc_node.children(&mut cursor) {
+        if child.kind() == "global_type" {
+            let mut type_cursor = child.walk();
+            for type_child in child.children(&mut type_cursor) {
+                if type_child.kind() == "global_type_mut" {
+                    is_mutable = true;
+                    let mut mut_cursor = type_child.walk();
+                    for mut_child in type_child.children(&mut mut_cursor) {
+                        if mut_child.kind() == "value_type" {
+                            var_type = extract_value_type(&mut_child, source);
+                        }
+                    }
+                } else if type_child.kind() == "value_type" {
+                    var_type = extract_value_type(&type_child, source);
+                }
+            }
+        }
+    }
+
+    Some(Global {
+        name,
+        index,
+        var_type,
+        is_mutable,
+        initial_value: None,
+        line: desc_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
+/// Extract an imported table
+fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Option<Table> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut ref_type = ValueType::Funcref;
+    let mut min_limit = 0;
+    let mut max_limit = None;
+
+    let mut cursor = desc_node.walk();
+    for child in desc_node.children(&mut cursor) {
+        if child.kind() == "table_type" {
+            let mut type_cursor = child.walk();
+            for type_child in child.children(&mut type_cursor) {
+                if type_child.kind() == "limits" {
+                    let mut limits_cursor = type_child.walk();
+                    let mut nat_index = 0;
+                    for limit_child in type_child.children(&mut limits_cursor) {
+                        if limit_child.kind() == "nat" {
+                            let text = node_text(&limit_child, source);
+                            if let Ok(num) = text.parse::<u32>() {
+                                if nat_index == 0 {
+                                    min_limit = num;
+                                } else {
+                                    max_limit = Some(num);
+                                }
+                                nat_index += 1;
+                            }
+                        }
+                    }
+                } else if type_child.kind() == "ref_type" {
+                    ref_type = extract_ref_type(&type_child, source);
+                }
+            }
+        }
+    }
+
+    Some(Table {
+        name,
+        index,
+        ref_type,
+        limits: (min_limit, max_limit),
+        line: desc_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
+/// Extract an imported memory
+fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Option<Memory> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut min_limit = 0;
+    let mut max_limit = None;
+
+    let mut cursor = desc_node.walk();
+    for child in desc_node.children(&mut cursor) {
+        if child.kind() == "memory_type" {
+            let mut type_cursor = child.walk();
+            for type_child in child.children(&mut type_cursor) {
+                if type_child.kind() == "limits" {
+                    let mut limits_cursor = type_child.walk();
+                    let mut nat_index = 0;
+                    for limit_child in type_child.children(&mut limits_cursor) {
+                        if limit_child.kind() == "nat" {
+                            let text = node_text(&limit_child, source);
+                            if let Ok(num) = text.parse::<u32>() {
+                                if nat_index == 0 {
+                                    min_limit = num;
+                                } else {
+                                    max_limit = Some(num);
+                                }
+                                nat_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Some(Memory {
+        name,
+        index,
+        limits: (min_limit, max_limit),
+        line: desc_node.range().start_point.row as u32,
+        range: name_range,
+    })
 }
 
 /// Convert a tree-sitter node to an LSP Range
@@ -61,10 +389,21 @@ fn find_identifier_node<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
     None
 }
 
-/// Extract function symbols using tree-sitter AST traversal
-fn extract_functions(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+/// Extract function symbols using tree-sitter AST traversal (with offset for imports)
+fn extract_functions_with_offset(
+    root: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    start_index: usize,
+) {
     let mut cursor = root.walk();
-    let mut func_index = 0;
+    let mut func_index = start_index;
+
+    // Track seen function names to deduplicate (error recovery can create duplicates)
+    // Also track by byte range for unnamed functions
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_ranges: std::collections::HashSet<(usize, usize)> =
+        std::collections::HashSet::new();
 
     // Walk through all children of root (could be module or direct module_field)
     for child in root.children(&mut cursor) {
@@ -77,8 +416,23 @@ fn extract_functions(root: &Node, source: &str, symbol_table: &mut SymbolTable) 
                     for field_child in module_child.children(&mut field_cursor) {
                         if field_child.kind() == "module_field_func" {
                             if let Some(func) = extract_function(&field_child, source, func_index) {
-                                symbol_table.add_function(func);
-                                func_index += 1;
+                                // Skip duplicates from error recovery
+                                let is_duplicate = if let Some(ref name) = func.name {
+                                    seen_names.contains(name)
+                                } else {
+                                    let range = (func.start_byte, func.end_byte);
+                                    seen_ranges.contains(&range)
+                                };
+
+                                if !is_duplicate {
+                                    if let Some(ref name) = func.name {
+                                        seen_names.insert(name.clone());
+                                    } else {
+                                        seen_ranges.insert((func.start_byte, func.end_byte));
+                                    }
+                                    symbol_table.add_function(func);
+                                    func_index += 1;
+                                }
                             }
                         }
                     }
@@ -90,8 +444,22 @@ fn extract_functions(root: &Node, source: &str, symbol_table: &mut SymbolTable) 
             for field_child in child.children(&mut field_cursor) {
                 if field_child.kind() == "module_field_func" {
                     if let Some(func) = extract_function(&field_child, source, func_index) {
-                        symbol_table.add_function(func);
-                        func_index += 1;
+                        let is_duplicate = if let Some(ref name) = func.name {
+                            seen_names.contains(name)
+                        } else {
+                            let range = (func.start_byte, func.end_byte);
+                            seen_ranges.contains(&range)
+                        };
+
+                        if !is_duplicate {
+                            if let Some(ref name) = func.name {
+                                seen_names.insert(name.clone());
+                            } else {
+                                seen_ranges.insert((func.start_byte, func.end_byte));
+                            }
+                            symbol_table.add_function(func);
+                            func_index += 1;
+                        }
                     }
                 }
             }
@@ -329,10 +697,15 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
     }
 }
 
-/// Extract global variables
-fn extract_globals(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+/// Extract global variables (with offset for imports)
+fn extract_globals_with_offset(
+    root: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    start_index: usize,
+) {
     let mut cursor = root.walk();
-    let mut global_index = 0;
+    let mut global_index = start_index;
 
     for child in root.children(&mut cursor) {
         if child.kind() == "module" {
@@ -792,10 +1165,15 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
     })
 }
 
-/// Extract table definitions
-fn extract_tables(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+/// Extract table definitions (with offset for imports)
+fn extract_tables_with_offset(
+    root: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    start_index: usize,
+) {
     let mut cursor = root.walk();
-    let mut table_index = 0;
+    let mut table_index = start_index;
 
     for child in root.children(&mut cursor) {
         if child.kind() == "module" {
@@ -911,10 +1289,15 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
     })
 }
 
-/// Extract memory definitions
-fn extract_memories(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+/// Extract memory definitions (with offset for imports)
+fn extract_memories_with_offset(
+    root: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    start_index: usize,
+) {
     let mut cursor = root.walk();
-    let mut memory_index = 0;
+    let mut memory_index = start_index;
 
     for child in root.children(&mut cursor) {
         if child.kind() == "module" {

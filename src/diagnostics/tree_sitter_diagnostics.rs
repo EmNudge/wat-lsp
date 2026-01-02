@@ -155,4 +155,28 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_store8_load8_valid() {
+        // These are valid WASM instructions and should not produce errors
+        let document = r#"(module
+  (memory 1)
+  (func $test
+    (i32.store8 (i32.const 0) (i32.const 42))
+    (drop (i32.load8_u (i32.const 0)))
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        for diag in &diagnostics {
+            eprintln!("Diagnostic: {}", diag.message);
+        }
+        assert!(
+            diagnostics.is_empty(),
+            "i32.store8 and i32.load8_u should not produce syntax errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }
