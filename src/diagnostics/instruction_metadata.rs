@@ -118,7 +118,7 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     // Control flow instructions
     map.insert("br", InstructionArity::exact(1, "label index", 0));
     map.insert("br_if", InstructionArity::exact(1, "label index", 1)); // consumes condition
-    map.insert("call", InstructionArity::exact(1, "function index", 0)); // variable operands
+    map.insert("call", InstructionArity::dynamic(1, 1, "function index")); // operands depend on function signature
     map.insert("return", InstructionArity::nullary());
     map.insert("unreachable", InstructionArity::nullary());
     map.insert("nop", InstructionArity::nullary());

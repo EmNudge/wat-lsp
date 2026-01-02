@@ -1,12 +1,32 @@
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
-use wat_lsp_rust::{parser, symbols::SymbolTable, tree_sitter_bindings::create_parser};
+use wat_lsp_rust::{
+    diagnostics::{
+        merge_all_diagnostics, provide_semantic_diagnostics, provide_tree_sitter_diagnostics,
+        validate_wat,
+    },
+    parser,
+    symbols::SymbolTable,
+    tree_sitter_bindings::create_parser,
+};
 
 fn create_test_tree(document: &str) -> Tree {
     let mut parser = create_parser();
     parser
         .parse(document, None)
         .expect("Failed to parse test document")
+}
+
+/// Run full LSP diagnostics pipeline on a WAT document
+fn get_all_diagnostics(wat: &str) -> Vec<Diagnostic> {
+    let tree = create_test_tree(wat);
+    let symbols = parser::parse_document(wat).unwrap_or_default();
+
+    let tree_sitter_diags = provide_tree_sitter_diagnostics(&tree, wat);
+    let semantic_diags = provide_semantic_diagnostics(&tree, wat, &symbols);
+    let wast_diags = validate_wat(wat);
+
+    merge_all_diagnostics(tree_sitter_diags, semantic_diags, wast_diags)
 }
 
 mod hover_integration {
@@ -344,4 +364,261 @@ fn test_comments_ignored() {
 
     let symbols = parser::parse_document(wat).unwrap();
     assert_eq!(symbols.functions.len(), 1);
+}
+
+/// Comprehensive tests for watlings exercise files that use imports
+mod import_diagnostics {
+    use super::*;
+
+    /// Test 010_memory.wat - imports memory, uses i32.store8, i32.load8_u, loops
+    #[test]
+    fn test_010_memory_no_diagnostics() {
+        let wat = r#"(module
+  (import "env" "mem" (memory 1))
+
+  (func $increment_data (param $start i32) (param $end i32)
+    (local $index i32)
+    (local $cur_num i32)
+
+    (local.set $index (local.get $start))
+
+    (loop $loop_name
+      (i32.store8
+        (local.get $index)
+        (i32.add
+          (i32.load8_u (local.get $index))
+          (i32.const 1)
+        )
+      )
+
+      (local.set $index (i32.add (local.get $index) (i32.const 1)))
+
+      (i32.lt_u (local.get $index) (local.get $end))
+      (br_if $loop_name)
+    )
+  )
+
+  (func $double_data (param $start i32) (param $end i32)
+    (local $index i32)
+    (local.set $index (local.get $start))
+
+    (loop $loop_name
+      (i32.store8
+        (local.get $index)
+        (i32.mul
+          (i32.const 2)
+          (i32.load8_u (local.get $index))
+        )
+      )
+
+      (local.set $index (i32.add (local.get $index) (i32.const 1)))
+
+      (i32.lt_u (local.get $index) (local.get $end))
+      (br_if $loop_name)
+    )
+  )
+
+  (export "incrementData" (func $increment_data))
+  (export "doubleData" (func $double_data))
+)"#;
+
+        let diagnostics = get_all_diagnostics(wat);
+
+        if !diagnostics.is_empty() {
+            for diag in &diagnostics {
+                eprintln!(
+                    "Line {}: {:?} - {}",
+                    diag.range.start.line, diag.severity, diag.message
+                );
+            }
+        }
+
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for valid 010_memory.wat, but got {} diagnostics",
+            diagnostics.len()
+        );
+    }
+
+    /// Test 011_host.wat - imports memory AND function, uses call
+    #[test]
+    fn test_011_host_no_diagnostics() {
+        let wat = r#"(module
+  (import "env" "memory" (memory 1))
+  (import "env" "log" (func $log (param i32)))
+
+  (func $square_num (param i32) (result i32)
+    (i32.mul (local.get 0) (local.get 0))
+  )
+
+  (func $log_some_numbers
+    (call $log (i32.const 1))
+    (call $log (i32.const 42))
+    (call $log (i32.const 88))
+  )
+
+  (func $edit_memory
+    (local $index i32)
+    (local $end i32)
+
+    (local.set $index (i32.const 0))
+    (local.set $end (i32.const 500))
+
+    (loop $loop_name
+      (i32.store8
+        (local.get $index)
+        (i32.mul
+          (i32.load8_u (local.get $index))
+          (i32.const 2)
+        )
+      )
+
+      (local.set $index (i32.add (local.get $index) (i32.const 1)))
+      (i32.lt_u (local.get $index) (local.get $end))
+      (br_if $loop_name)
+    )
+  )
+
+  (export "squareNum" (func $square_num))
+  (export "logSomeNumbers" (func $log_some_numbers))
+  (export "editMemory" (func $edit_memory))
+)"#;
+
+        let diagnostics = get_all_diagnostics(wat);
+
+        if !diagnostics.is_empty() {
+            for diag in &diagnostics {
+                eprintln!(
+                    "Line {}: {:?} - {}",
+                    diag.range.start.line, diag.severity, diag.message
+                );
+            }
+        }
+
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for valid 011_host.wat, but got {} diagnostics",
+            diagnostics.len()
+        );
+    }
+
+    /// Test that calling an imported function with correct args produces no errors
+    #[test]
+    fn test_call_imported_function_no_errors() {
+        let wat = r#"(module
+  (import "env" "print" (func $print (param i32)))
+
+  (func $main
+    (call $print (i32.const 42))
+  )
+)"#;
+
+        let diagnostics = get_all_diagnostics(wat);
+
+        if !diagnostics.is_empty() {
+            for diag in &diagnostics {
+                eprintln!(
+                    "Diagnostic: {} at line {}",
+                    diag.message, diag.range.start.line
+                );
+            }
+        }
+
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for calling imported function with correct args"
+        );
+    }
+
+    /// Test imported function with multiple params
+    #[test]
+    fn test_call_imported_function_multiple_params() {
+        let wat = r#"(module
+  (import "env" "add" (func $add (param i32 i32) (result i32)))
+
+  (func $main (result i32)
+    (call $add (i32.const 1) (i32.const 2))
+  )
+)"#;
+
+        let diagnostics = get_all_diagnostics(wat);
+
+        if !diagnostics.is_empty() {
+            for diag in &diagnostics {
+                eprintln!(
+                    "Diagnostic: {} at line {}",
+                    diag.message, diag.range.start.line
+                );
+            }
+        }
+
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for calling imported function with multiple params"
+        );
+    }
+
+    /// Test imported global
+    #[test]
+    fn test_imported_global() {
+        let wat = r#"(module
+  (import "env" "counter" (global $counter (mut i32)))
+
+  (func $increment
+    (global.set $counter
+      (i32.add (global.get $counter) (i32.const 1))
+    )
+  )
+)"#;
+
+        let diagnostics = get_all_diagnostics(wat);
+
+        if !diagnostics.is_empty() {
+            for diag in &diagnostics {
+                eprintln!(
+                    "Diagnostic: {} at line {}",
+                    diag.message, diag.range.start.line
+                );
+            }
+        }
+
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for imported global"
+        );
+    }
+
+    /// Test imported table
+    #[test]
+    fn test_imported_table() {
+        let wat = r#"(module
+  (import "env" "table" (table $t 10 funcref))
+
+  (func $indirect (param $idx i32) (result i32)
+    (call_indirect (type 0) (local.get $idx))
+  )
+
+  (type (func (result i32)))
+)"#;
+
+        let diagnostics = get_all_diagnostics(wat);
+
+        // Filter out any diagnostics that aren't errors (we may get warnings about call_indirect)
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+
+        if !errors.is_empty() {
+            for diag in &errors {
+                eprintln!("Error: {} at line {}", diag.message, diag.range.start.line);
+            }
+        }
+
+        // This test is more lenient - just check for no hard errors
+        assert!(
+            errors.is_empty(),
+            "Expected no error diagnostics for imported table"
+        );
+    }
 }

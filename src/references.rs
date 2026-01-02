@@ -132,29 +132,72 @@ fn determine_reference_context(node: &tree_sitter::Node, document: &str) -> Refe
     ReferenceContext::General
 }
 
+/// Check if a line contains a keyword as an instruction (not as part of an identifier)
+/// Keywords are matched when they appear as:
+/// - An instruction (e.g., "call ", "local.get", "memory.grow")
+/// - A declaration (e.g., "(func ", "(global ", "(memory ")
+fn line_contains_keyword(line: &str, keyword: &str) -> bool {
+    // Check for instruction pattern: keyword followed by space, dot, or end of string
+    // Also check for declaration pattern: (keyword followed by space or identifier
+    for (i, _) in line.match_indices(keyword) {
+        // Check character before the match (if any)
+        let char_before = if i > 0 { line.chars().nth(i - 1) } else { None };
+
+        // Check character after the match (if any)
+        let char_after = line.chars().nth(i + keyword.len());
+
+        // The keyword should be preceded by non-identifier char or start of string
+        let valid_before = match char_before {
+            None => true,       // Start of line
+            Some('(') => true,  // Declaration like (func
+            Some(' ') => true,  // Instruction
+            Some('\t') => true, // Tab
+            Some(_) => false,   // Part of identifier like $edit_memory
+        };
+
+        // The keyword should be followed by non-identifier char
+        let valid_after = match char_after {
+            None => true,                          // End of line
+            Some(' ') => true,                     // Keyword followed by space
+            Some('.') => true,                     // Instruction like local.get
+            Some('_') if keyword == "br" => true,  // br_if, br_table
+            Some(')') => true,                     // End of s-expr
+            Some('$') => true,                     // Keyword followed by identifier
+            Some(c) if c.is_ascii_digit() => true, // Like br0, call0
+            Some(_) => false,                      // Part of identifier
+        };
+
+        if valid_before && valid_after {
+            return true;
+        }
+    }
+    false
+}
+
 /// Determine context from line text (fallback for incomplete code)
 fn determine_context_from_line(line: &str) -> ReferenceContext {
-    if line.contains("call") {
+    // Check for instruction keywords (order matters - more specific first)
+    if line_contains_keyword(line, "call") {
         ReferenceContext::Call
-    } else if line.contains("global") {
+    } else if line_contains_keyword(line, "global") {
         ReferenceContext::Global
-    } else if line.contains("local") {
+    } else if line_contains_keyword(line, "local") {
         ReferenceContext::Local
-    } else if line.contains("br") {
+    } else if line_contains_keyword(line, "br") {
         ReferenceContext::Branch
-    } else if line.contains("table") {
+    } else if line_contains_keyword(line, "table") {
         ReferenceContext::Table
-    } else if line.contains("memory") {
+    } else if line_contains_keyword(line, "memory") {
         ReferenceContext::Memory
-    } else if line.contains("type")
-        || line.contains("struct")
-        || line.contains("array")
+    } else if line_contains_keyword(line, "type")
+        || line_contains_keyword(line, "struct")
+        || line_contains_keyword(line, "array")
         || line.contains("ref.")
     {
         ReferenceContext::Type
-    } else if line.contains("func") {
+    } else if line_contains_keyword(line, "func") {
         ReferenceContext::Function
-    } else if line.contains("throw") || line.contains("tag") {
+    } else if line_contains_keyword(line, "throw") || line_contains_keyword(line, "tag") {
         ReferenceContext::Tag
     } else {
         ReferenceContext::General
@@ -564,6 +607,17 @@ fn find_all_references(
     results
 }
 
+/// Determine reference context for export descriptors
+fn determine_export_context(node: &tree_sitter::Node) -> Option<ReferenceContext> {
+    match node.kind() {
+        "export_desc_func" => Some(ReferenceContext::Call),
+        "export_desc_global" => Some(ReferenceContext::Global),
+        "export_desc_table" => Some(ReferenceContext::Table),
+        "export_desc_memory" => Some(ReferenceContext::Memory),
+        _ => None,
+    }
+}
+
 /// Recursively walk the tree to find all references
 fn walk_tree_for_references(
     node: Node,
@@ -589,6 +643,18 @@ fn walk_tree_for_references(
             label,
             line: node.start_position().row as u32,
         });
+    }
+
+    // Check for export descriptors - these contain references to functions/globals/etc.
+    if let Some(export_context) = determine_export_context(&node) {
+        let mut ctx = ReferenceSearchContext {
+            document,
+            symbols,
+            uri,
+            results,
+        };
+        check_node_for_reference(&node, target, &mut ctx, &export_context, block_stack);
+        // Don't return early - exports don't have nested instructions
     }
 
     // Check if this node is a reference instruction
@@ -645,7 +711,17 @@ fn check_node_for_reference(
     block_stack: &[BlockInfo],
 ) {
     // Find identifier or index nodes within this instruction
-    find_reference_identifiers(node, target, ctx, context, block_stack);
+    // Pass is_root=true since this is the starting node for the search
+    find_reference_identifiers(node, target, ctx, context, block_stack, true);
+}
+
+/// Check if a node represents a nested expression that has its own context
+/// We skip these to avoid treating constant values as references
+fn is_nested_expression(kind: &str) -> bool {
+    // Only skip nested expressions (s-expressions), not the instruction itself
+    // "expr" is for nested s-expressions like (i32.const 1) inside (call $log (i32.const 1))
+    // "instr" is for flat nested instructions
+    matches!(kind, "expr" | "instr")
 }
 
 /// Find identifier nodes and check if they match the target
@@ -655,8 +731,16 @@ fn find_reference_identifiers(
     ctx: &mut ReferenceSearchContext,
     context: &ReferenceContext,
     block_stack: &[BlockInfo],
+    is_root: bool,
 ) {
     let kind = node.kind();
+
+    // Skip nested expressions - they have their own context
+    // Only skip if this is not the root node we started from
+    // This prevents treating constants like (i32.const 1) as function references
+    if !is_root && is_nested_expression(kind) {
+        return;
+    }
 
     // Check if this is an identifier node
     if kind == "identifier" {
@@ -708,7 +792,7 @@ fn find_reference_identifiers(
     // Recurse to children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        find_reference_identifiers(&child, target, ctx, context, block_stack);
+        find_reference_identifiers(&child, target, ctx, context, block_stack, false);
     }
 }
 

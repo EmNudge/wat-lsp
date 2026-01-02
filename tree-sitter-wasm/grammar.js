@@ -258,6 +258,7 @@ module.exports = grammar({
         $.op_nullary,
         seq($.op_index, $.index),
         seq($.op_index_opt, optional($.index)),
+        seq($.op_index_opt_offset_opt_align_opt, optional($.offset_value), optional($.align_value)),
         seq("br_table", $.index, repeat($.index)),
         $.op_const,
         $.op_select,

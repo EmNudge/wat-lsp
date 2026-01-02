@@ -271,3 +271,204 @@ fn test_parse_complex_module() {
     // The complex module test mainly checks that parsing doesn't crash
     assert!(!symbols.functions.is_empty() || !symbols.globals.is_empty());
 }
+
+#[test]
+fn test_parse_imported_memory() {
+    // This is a valid WAT program that imports memory from the host
+    let wat = r#"(module
+  (import "env" "mem" (memory 1))
+
+  (func $test (param $start i32) (param $end i32)
+    (local $index i32)
+    (local.set $index (local.get $start))
+  )
+
+  (export "test" (func $test))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+
+    // There should be 1 function
+    assert_eq!(symbols.functions.len(), 1);
+    let func = symbols.get_function_by_name("$test").unwrap();
+    assert_eq!(func.parameters.len(), 2);
+    assert_eq!(func.locals.len(), 1);
+}
+
+#[test]
+fn test_parse_imported_function() {
+    // This is a valid WAT program that imports a function from the host
+    let wat = r#"(module
+  (import "env" "log" (func $log (param i32)))
+
+  (func $main
+    (call $log (i32.const 42))
+  )
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+
+    // Debug: Print all functions found
+    eprintln!(
+        "Functions found: {:?}",
+        symbols
+            .functions
+            .iter()
+            .map(|f| (&f.name, f.parameters.len()))
+            .collect::<Vec<_>>()
+    );
+
+    // The imported function should be parsed and available
+    let log_fn = symbols
+        .get_function_by_name("$log")
+        .expect("Imported function $log should be found");
+
+    // Critical: the imported function should have its parameter extracted
+    assert_eq!(
+        log_fn.parameters.len(),
+        1,
+        "Imported function $log should have 1 parameter, got {:?}",
+        log_fn.parameters
+    );
+    assert_eq!(
+        log_fn.parameters[0].param_type,
+        crate::symbols::ValueType::I32
+    );
+
+    // The local function should also be there
+    assert!(
+        symbols.get_function_by_name("$main").is_some(),
+        "$main function should be found"
+    );
+}
+
+#[test]
+fn test_parse_imported_function_multiple_params() {
+    // This tests that multiple parameters in a single (param ...) clause are parsed
+    let wat = r#"(module
+  (import "env" "add" (func $add (param i32 i32) (result i32)))
+
+  (func $main (result i32)
+    (call $add (i32.const 1) (i32.const 2))
+  )
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+
+    let add_fn = symbols
+        .get_function_by_name("$add")
+        .expect("Imported function $add should be found");
+
+    // Critical: the imported function should have both parameters extracted
+    assert_eq!(
+        add_fn.parameters.len(),
+        2,
+        "Imported function $add should have 2 parameters"
+    );
+    assert_eq!(
+        add_fn.parameters[0].param_type,
+        crate::symbols::ValueType::I32
+    );
+    assert_eq!(
+        add_fn.parameters[1].param_type,
+        crate::symbols::ValueType::I32
+    );
+
+    // Results should also be extracted
+    assert_eq!(add_fn.results.len(), 1);
+    assert_eq!(add_fn.results[0], crate::symbols::ValueType::I32);
+}
+
+#[test]
+fn test_parse_010_memory_watlings() {
+    // Real-world example from watlings exercises
+    let wat = r#"(module
+  (import "env" "mem" (memory 1))
+
+  (func $increment_data (param $start i32) (param $end i32)
+    (local $index i32)
+    (local $cur_num i32)
+
+    (local.set $index (local.get $start))
+
+    (loop $loop_name
+      (i32.store8
+        (local.get $index)
+        (i32.add
+          (i32.load8_u (local.get $index))
+          (i32.const 1)
+        )
+      )
+
+      (local.set $index (i32.add (local.get $index) (i32.const 1)))
+
+      (i32.lt_u (local.get $index) (local.get $end))
+      (br_if $loop_name)
+    )
+  )
+
+  (export "incrementData" (func $increment_data))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+
+    // Function should be parsed (deduplication should handle error recovery duplicates)
+    assert_eq!(
+        symbols.functions.len(),
+        1,
+        "Expected 1 function, found {:?}",
+        symbols
+            .functions
+            .iter()
+            .map(|f| &f.name)
+            .collect::<Vec<_>>()
+    );
+    let func = symbols.get_function_by_name("$increment_data").unwrap();
+    assert_eq!(func.parameters.len(), 2);
+    assert_eq!(func.locals.len(), 2);
+
+    // Blocks should be parsed
+    assert!(
+        func.blocks.iter().any(|b| b.label == "$loop_name"),
+        "Loop label $loop_name should be found"
+    );
+}
+
+#[test]
+fn test_parse_011_host_watlings() {
+    // Real-world example from watlings exercises
+    let wat = r#"(module
+  (import "env" "memory" (memory 1))
+  (import "env" "log" (func $log (param i32)))
+
+  (func $square_num (param i32) (result i32)
+    (i32.mul (local.get 0) (local.get 0))
+  )
+
+  (func $log_some_numbers
+    (call $log (i32.const 1))
+    (call $log (i32.const 42))
+    (call $log (i32.const 88))
+  )
+
+  (export "squareNum" (func $square_num))
+  (export "logSomeNumbers" (func $log_some_numbers))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+
+    // All functions (including imported) should be parsed
+    // With import support, we expect 3 functions: $log (imported), $square_num, $log_some_numbers
+    assert!(
+        symbols.get_function_by_name("$log").is_some(),
+        "Imported function $log should be found"
+    );
+    assert!(
+        symbols.get_function_by_name("$square_num").is_some(),
+        "$square_num should be found"
+    );
+    assert!(
+        symbols.get_function_by_name("$log_some_numbers").is_some(),
+        "$log_some_numbers should be found"
+    );
+}
