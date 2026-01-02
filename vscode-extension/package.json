@@ -26,9 +26,6 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "extensionDependencies": [
-    "dtsvet.vscode-wasm"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
