@@ -1,99 +1,13 @@
 use crate::symbols::*;
 use crate::utils::{
-    find_containing_function, get_line_at_position, get_word_at_position, node_at_position,
+    determine_context_from_line, determine_instruction_context, find_containing_function,
+    get_line_at_position, get_word_at_position, node_at_position, InstructionContext,
 };
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
 
 #[cfg(test)]
 mod tests;
-
-#[derive(Debug, PartialEq)]
-enum HoverContext {
-    Call,     // Inside call instruction
-    Global,   // Inside global.get/set
-    Local,    // Inside local.get/set/tee
-    Branch,   // Inside br/br_if
-    Block,    // Inside block/loop
-    Table,    // Inside table operation
-    Type,     // Inside type definition/use
-    Function, // Inside function definition
-    General,  // General context
-}
-
-/// Determine hover context from AST node
-fn determine_hover_context(node: tree_sitter::Node, document: &str) -> HoverContext {
-    let mut current = node;
-
-    loop {
-        let kind = current.kind();
-
-        // Check for instruction contexts
-        if kind == "instr_plain" || kind == "expr1_plain" {
-            // Get the text of the instruction to determine its type
-            let instr_text = &document[current.byte_range()];
-
-            if instr_text.contains("call") {
-                return HoverContext::Call;
-            } else if instr_text.contains("local.") {
-                return HoverContext::Local;
-            } else if instr_text.contains("global.") {
-                return HoverContext::Global;
-            } else if instr_text.starts_with("br") || instr_text.contains(" br") {
-                return HoverContext::Branch;
-            } else if instr_text.contains("table.") {
-                return HoverContext::Table;
-            }
-        }
-
-        // Check for block/loop contexts
-        if kind == "instr_block" || kind == "instr_loop" {
-            return HoverContext::Block;
-        }
-
-        // Check for function definition
-        if kind == "module_field_func" {
-            return HoverContext::Function;
-        }
-
-        // Check for type definition
-        if kind == "module_field_type" || kind == "type_use" {
-            return HoverContext::Type;
-        }
-
-        // Walk up the tree
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
-        }
-    }
-
-    HoverContext::General
-}
-
-/// Determine context from line text (fallback for incomplete code)
-fn determine_context_from_line(line: &str) -> HoverContext {
-    if line.contains("call") {
-        HoverContext::Call
-    } else if line.contains("global") {
-        HoverContext::Global
-    } else if line.contains("local") {
-        HoverContext::Local
-    } else if line.contains("br") {
-        HoverContext::Branch
-    } else if line.contains("block") || line.contains("loop") {
-        HoverContext::Block
-    } else if line.contains("table") {
-        HoverContext::Table
-    } else if line.contains("type") {
-        HoverContext::Type
-    } else if line.contains("func") {
-        HoverContext::Function
-    } else {
-        HoverContext::General
-    }
-}
 
 pub fn provide_hover(
     document: &str,
@@ -138,13 +52,13 @@ fn provide_symbol_hover(
 ) -> Option<Hover> {
     // Determine context using AST, with fallback to line matching
     let context = if let Some(node) = node_at_position(tree, document, position) {
-        let ast_context = determine_hover_context(node, document);
-        if ast_context == HoverContext::General {
+        let ast_context = determine_instruction_context(node, document);
+        if ast_context == InstructionContext::General {
             // Fallback to line-based detection for incomplete code
             if let Some(line) = get_line_at_position(document, position.line as usize) {
                 determine_context_from_line(line)
             } else {
-                HoverContext::General
+                InstructionContext::General
             }
         } else {
             ast_context
@@ -154,12 +68,12 @@ fn provide_symbol_hover(
         if let Some(line) = get_line_at_position(document, position.line as usize) {
             determine_context_from_line(line)
         } else {
-            HoverContext::General
+            InstructionContext::General
         }
     };
 
     // Check for function
-    if context == HoverContext::Call || context == HoverContext::Function {
+    if context == InstructionContext::Call || context == InstructionContext::Function {
         if let Some(func) = symbols.get_function_by_name(word) {
             let signature = format_function_signature(func);
             return Some(Hover {
@@ -173,7 +87,7 @@ fn provide_symbol_hover(
     }
 
     // Check for global
-    if context == HoverContext::Global {
+    if context == InstructionContext::Global {
         if let Some(global) = symbols.get_global_by_name(word) {
             let mut info = format!(
                 "```wat\n(global {} {}{})\n```",
@@ -195,7 +109,7 @@ fn provide_symbol_hover(
     }
 
     // Check for local/param
-    if context == HoverContext::Local {
+    if context == InstructionContext::Local {
         if let Some(func) = find_containing_function(symbols, position) {
             // Check params
             for param in &func.parameters {
@@ -233,7 +147,7 @@ fn provide_symbol_hover(
     }
 
     // Check for block labels
-    if context == HoverContext::Branch || context == HoverContext::Block {
+    if context == InstructionContext::Branch || context == InstructionContext::Block {
         if let Some(func) = find_containing_function(symbols, position) {
             for block in &func.blocks {
                 if block.label == word {
@@ -255,7 +169,7 @@ fn provide_symbol_hover(
     }
 
     // Check for table
-    if context == HoverContext::Table {
+    if context == InstructionContext::Table {
         if let Some(table) = symbols.get_table_by_name(word) {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -273,7 +187,7 @@ fn provide_symbol_hover(
     }
 
     // Check for type
-    if context == HoverContext::Type {
+    if context == InstructionContext::Type {
         if let Some(type_def) = symbols.get_type_by_name(word) {
             let sig = match &type_def.kind {
                 TypeKind::Func { params, results } => {
@@ -336,13 +250,13 @@ fn provide_index_hover(
 ) -> Option<Hover> {
     // Determine context using AST, with fallback to line matching
     let context = if let Some(node) = node_at_position(tree, document, position) {
-        let ast_context = determine_hover_context(node, document);
-        if ast_context == HoverContext::General {
+        let ast_context = determine_instruction_context(node, document);
+        if ast_context == InstructionContext::General {
             // Fallback to line-based detection for incomplete code
             if let Some(line) = get_line_at_position(document, position.line as usize) {
                 determine_context_from_line(line)
             } else {
-                HoverContext::General
+                InstructionContext::General
             }
         } else {
             ast_context
@@ -352,12 +266,12 @@ fn provide_index_hover(
         if let Some(line) = get_line_at_position(document, position.line as usize) {
             determine_context_from_line(line)
         } else {
-            HoverContext::General
+            InstructionContext::General
         }
     };
 
     // Check context
-    if context == HoverContext::Call {
+    if context == InstructionContext::Call {
         if let Some(func) = symbols.get_function_by_index(index) {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -369,7 +283,7 @@ fn provide_index_hover(
         }
     }
 
-    if context == HoverContext::Global {
+    if context == InstructionContext::Global {
         if let Some(global) = symbols.get_global_by_index(index) {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -386,7 +300,7 @@ fn provide_index_hover(
         }
     }
 
-    if context == HoverContext::Local {
+    if context == InstructionContext::Local {
         if let Some(func) = find_containing_function(symbols, position) {
             let total_params = func.parameters.len();
             if index < total_params {

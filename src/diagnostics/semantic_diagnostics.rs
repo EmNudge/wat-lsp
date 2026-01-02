@@ -1,6 +1,8 @@
 use crate::diagnostics::instruction_metadata::get_instruction_arity_map;
 use crate::symbols::SymbolTable;
-use crate::utils::find_containing_function;
+use crate::utils::{
+    determine_instruction_context_at_node, find_containing_function, InstructionContext,
+};
 use std::sync::OnceLock;
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
@@ -17,18 +19,6 @@ pub fn provide_semantic_diagnostics(
     diagnostics
 }
 
-#[derive(Debug, PartialEq)]
-enum ReferenceContext {
-    Branch, // br, br_if, br_table
-    Call,   // call
-    Local,  // local.get, local.set, local.tee
-    Global, // global.get, global.set
-    Table,  // table operations
-    Type,   // type use
-    Tag,    // tag use (throw)
-    Unknown,
-}
-
 /// Recursively walk the tree looking for undefined references
 fn walk_tree_for_undefined_references(
     node: Node,
@@ -37,17 +27,15 @@ fn walk_tree_for_undefined_references(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Determine if this node is a reference instruction
-    let context = determine_reference_context(&node, source);
+    let context = determine_instruction_context_at_node(&node, source);
 
-    if context != ReferenceContext::Unknown {
+    if context != InstructionContext::General {
         // Check for undefined references in this instruction
         check_references(&node, source, symbols, diagnostics, &context);
-
-        // For branch instructions, still recurse to find nested instructions (like local.get inside br_if)
-        // For other instructions, don't recurse to avoid checking the same identifier multiple times
-        if context != ReferenceContext::Branch {
-            return;
-        }
+        // Don't recurse to avoid checking the same identifier multiple times
+        // Nested instructions (like local.get inside br_if) will be checked
+        // when we visit their nodes directly
+        return;
     }
 
     // Recursively check children
@@ -57,48 +45,13 @@ fn walk_tree_for_undefined_references(
     }
 }
 
-/// Determine the reference context from a node
-fn determine_reference_context(node: &Node, source: &str) -> ReferenceContext {
-    let kind = node.kind();
-
-    // Only check instr_plain nodes, not expr1_plain to avoid duplicates
-    // (expr1_plain contains instr_plain, so we'd check the same instruction twice)
-    if kind == "instr_plain" {
-        let text = &source[node.byte_range()];
-
-        if text.starts_with("br") || text.contains(" br") {
-            return ReferenceContext::Branch;
-        } else if text.contains("call") && !text.contains("call_indirect") {
-            return ReferenceContext::Call;
-        } else if text.contains("local.") {
-            return ReferenceContext::Local;
-        } else if text.contains("global.") {
-            return ReferenceContext::Global;
-        } else if text.contains("table.") {
-            return ReferenceContext::Table;
-        } else if text.contains("throw") || text.contains("rethrow") {
-            return ReferenceContext::Tag;
-        }
-    }
-
-    // Check for type use context or tag use context
-    if kind == "type_use" {
-        return ReferenceContext::Type;
-    }
-
-    // Check for tag reference nodes if they exist (depending on grammar)
-    // Actually `throw` instruction params are handled inside instr_plain logic above.
-
-    ReferenceContext::Unknown
-}
-
 /// Check if references in this instruction are defined
 fn check_references(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
-    context: &ReferenceContext,
+    context: &InstructionContext,
 ) {
     find_undefined_identifiers(node, source, symbols, diagnostics, context);
 }
@@ -109,7 +62,7 @@ fn find_undefined_identifiers(
     source: &str,
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
-    context: &ReferenceContext,
+    context: &InstructionContext,
 ) {
     if node.kind() == "identifier" {
         let identifier_name = &source[node.byte_range()];
@@ -127,7 +80,7 @@ fn find_undefined_identifiers(
         };
 
         let is_defined = match context {
-            ReferenceContext::Branch => {
+            InstructionContext::Branch | InstructionContext::Block => {
                 // Check if label exists in containing function
                 if let Some(func) = find_containing_function(symbols, position) {
                     func.blocks.iter().any(|block| {
@@ -138,11 +91,11 @@ fn find_undefined_identifiers(
                     false
                 }
             }
-            ReferenceContext::Call => {
+            InstructionContext::Call => {
                 // Check if function exists
                 symbols.get_function_by_name(identifier_name).is_some()
             }
-            ReferenceContext::Local => {
+            InstructionContext::Local => {
                 // Check if local or parameter exists in containing function
                 if let Some(func) = find_containing_function(symbols, position) {
                     func.parameters
@@ -156,23 +109,27 @@ fn find_undefined_identifiers(
                     false
                 }
             }
-            ReferenceContext::Global => {
+            InstructionContext::Global => {
                 // Check if global exists
                 symbols.get_global_by_name(identifier_name).is_some()
             }
-            ReferenceContext::Table => {
+            InstructionContext::Table => {
                 // Check if table exists
                 symbols.get_table_by_name(identifier_name).is_some()
             }
-            ReferenceContext::Type => {
+            InstructionContext::Memory => {
+                // Check if memory exists
+                symbols.get_memory_by_name(identifier_name).is_some()
+            }
+            InstructionContext::Type => {
                 // Check if type exists
                 symbols.get_type_by_name(identifier_name).is_some()
             }
-            ReferenceContext::Tag => {
+            InstructionContext::Tag => {
                 // Check if tag exists
                 symbols.get_tag_by_name(identifier_name).is_some()
             }
-            ReferenceContext::Unknown => true, // Don't flag unknowns
+            InstructionContext::Function | InstructionContext::General => true, // Don't flag function definitions or unknowns
         };
 
         if !is_defined {
@@ -184,7 +141,7 @@ fn find_undefined_identifiers(
 
     // For branch instructions, only check the index node (the label argument),
     // not identifiers in nested expressions (like local.get inside br_if condition)
-    if *context == ReferenceContext::Branch && node.kind() == "expr" {
+    if *context == InstructionContext::Branch && node.kind() == "expr" {
         // Don't recurse into expr nodes for branch instructions
         // The label is in the index node which is a sibling, not a child of expr
         return;
@@ -201,19 +158,24 @@ fn find_undefined_identifiers(
 fn create_undefined_reference_diagnostic(
     node: &Node,
     identifier_name: &str,
-    context: &ReferenceContext,
+    context: &InstructionContext,
 ) -> Diagnostic {
     let range = node_to_range(node);
 
     let message = match context {
-        ReferenceContext::Branch => format!("Undefined label '{}'", identifier_name),
-        ReferenceContext::Call => format!("Undefined function '{}'", identifier_name),
-        ReferenceContext::Local => format!("Undefined local or parameter '{}'", identifier_name),
-        ReferenceContext::Global => format!("Undefined global '{}'", identifier_name),
-        ReferenceContext::Table => format!("Undefined table '{}'", identifier_name),
-        ReferenceContext::Type => format!("Undefined type '{}'", identifier_name),
-        ReferenceContext::Tag => format!("Undefined tag '{}'", identifier_name),
-        ReferenceContext::Unknown => format!("Undefined reference '{}'", identifier_name),
+        InstructionContext::Branch | InstructionContext::Block => {
+            format!("Undefined label '{}'", identifier_name)
+        }
+        InstructionContext::Call => format!("Undefined function '{}'", identifier_name),
+        InstructionContext::Local => format!("Undefined local or parameter '{}'", identifier_name),
+        InstructionContext::Global => format!("Undefined global '{}'", identifier_name),
+        InstructionContext::Table => format!("Undefined table '{}'", identifier_name),
+        InstructionContext::Memory => format!("Undefined memory '{}'", identifier_name),
+        InstructionContext::Type => format!("Undefined type '{}'", identifier_name),
+        InstructionContext::Tag => format!("Undefined tag '{}'", identifier_name),
+        InstructionContext::Function | InstructionContext::General => {
+            format!("Undefined reference '{}'", identifier_name)
+        }
     };
 
     Diagnostic {

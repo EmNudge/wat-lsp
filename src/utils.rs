@@ -2,6 +2,161 @@ use crate::symbols::{Function, SymbolTable};
 use tower_lsp::lsp_types::Position;
 use tree_sitter::{Node, Tree};
 
+/// Unified context for instruction type identification.
+/// Used across hover, definition, references, completion, and diagnostics.
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum InstructionContext {
+    Call,     // call instruction
+    Global,   // global.get/set
+    Local,    // local.get/set/tee
+    Branch,   // br/br_if/br_table
+    Block,    // block/loop labels
+    Table,    // table operations
+    Memory,   // memory operations
+    Type,     // type definitions/uses
+    Tag,      // throw/try
+    Function, // function definition
+    General,  // fallback
+}
+
+/// Determine instruction context by walking up the AST tree.
+/// Used by hover, definition, and completion modules.
+pub fn determine_instruction_context(node: Node, document: &str) -> InstructionContext {
+    let mut current = node;
+
+    loop {
+        let kind = current.kind();
+
+        // Check for instruction contexts
+        if kind == "instr_plain" || kind == "expr1_plain" {
+            let instr_text = &document[current.byte_range()];
+
+            if instr_text.contains("call") {
+                return InstructionContext::Call;
+            } else if instr_text.contains("local.") {
+                return InstructionContext::Local;
+            } else if instr_text.contains("global.") {
+                return InstructionContext::Global;
+            } else if instr_text.starts_with("br") || instr_text.contains(" br") {
+                return InstructionContext::Branch;
+            } else if instr_text.contains("table.") {
+                return InstructionContext::Table;
+            } else if instr_text.contains("memory.") {
+                return InstructionContext::Memory;
+            } else if instr_text.contains("struct.")
+                || instr_text.contains("array.")
+                || instr_text.contains("ref.cast")
+                || instr_text.contains("ref.test")
+            {
+                return InstructionContext::Type;
+            } else if instr_text.contains("throw") || instr_text.contains("rethrow") {
+                return InstructionContext::Tag;
+            }
+        }
+
+        // Check for block/loop contexts
+        if kind == "instr_block" || kind == "instr_loop" {
+            return InstructionContext::Block;
+        }
+
+        // Check for function definition
+        if kind == "module_field_func" {
+            return InstructionContext::Function;
+        }
+
+        // Check for type definition
+        if kind == "module_field_type" || kind == "type_use" {
+            return InstructionContext::Type;
+        }
+
+        // Check for tag definition
+        if kind == "module_field_tag" {
+            return InstructionContext::Tag;
+        }
+
+        // Walk up the tree
+        if let Some(parent) = current.parent() {
+            current = parent;
+        } else {
+            break;
+        }
+    }
+
+    InstructionContext::General
+}
+
+/// Determine instruction context from a single node (no tree walking).
+/// Used by references and semantic diagnostics where only the current node should be checked.
+pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> InstructionContext {
+    let kind = node.kind();
+
+    // Only check instr_plain nodes for instruction context
+    if kind == "instr_plain" || kind == "expr1_plain" {
+        let instr_text = &document[node.byte_range()];
+
+        if instr_text.starts_with("br") || instr_text.contains(" br") {
+            return InstructionContext::Branch;
+        } else if instr_text.contains("call") && !instr_text.contains("call_indirect") {
+            return InstructionContext::Call;
+        } else if instr_text.contains("local.") {
+            return InstructionContext::Local;
+        } else if instr_text.contains("global.") {
+            return InstructionContext::Global;
+        } else if instr_text.contains("table.") {
+            return InstructionContext::Table;
+        } else if instr_text.contains("memory.") {
+            return InstructionContext::Memory;
+        } else if instr_text.contains("struct.")
+            || instr_text.contains("array.")
+            || instr_text.contains("ref.cast")
+            || instr_text.contains("ref.test")
+        {
+            return InstructionContext::Type;
+        } else if instr_text.contains("throw") || instr_text.contains("rethrow") {
+            return InstructionContext::Tag;
+        }
+    }
+
+    // Check for type use context
+    if kind == "type_use" {
+        return InstructionContext::Type;
+    }
+
+    InstructionContext::General
+}
+
+/// Determine context from line text (fallback for incomplete code).
+/// Used when AST-based detection returns General.
+pub fn determine_context_from_line(line: &str) -> InstructionContext {
+    if line.contains("call") {
+        InstructionContext::Call
+    } else if line.contains("global") {
+        InstructionContext::Global
+    } else if line.contains("local") {
+        InstructionContext::Local
+    } else if line.contains("br") {
+        InstructionContext::Branch
+    } else if line.contains("block") || line.contains("loop") {
+        InstructionContext::Block
+    } else if line.contains("table") {
+        InstructionContext::Table
+    } else if line.contains("memory") {
+        InstructionContext::Memory
+    } else if line.contains("type")
+        || line.contains("struct")
+        || line.contains("array")
+        || line.contains("ref.")
+    {
+        InstructionContext::Type
+    } else if line.contains("throw") || line.contains("tag") {
+        InstructionContext::Tag
+    } else if line.contains("func") {
+        InstructionContext::Function
+    } else {
+        InstructionContext::General
+    }
+}
+
 /// Find the function that contains the given position.
 /// Returns the last function whose start line is at or before the position.
 pub fn find_containing_function(symbols: &SymbolTable, position: Position) -> Option<&Function> {

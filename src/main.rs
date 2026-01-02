@@ -19,6 +19,13 @@ use wat_lsp_rust::tree_sitter_bindings;
 
 const DEBOUNCE_DURATION_MS: u64 = 500;
 
+/// Type alias for document context references returned by `get_document_context`
+type DocumentContext<'a> = (
+    dashmap::mapref::one::Ref<'a, String, String>,
+    dashmap::mapref::one::Ref<'a, String, symbols::SymbolTable>,
+    dashmap::mapref::one::Ref<'a, String, Tree>,
+);
+
 #[derive(Debug)]
 struct Backend {
     client: Client,
@@ -39,6 +46,15 @@ impl Backend {
         }
     }
 
+    /// Get document, symbols, and tree for a given URI.
+    /// Returns None if any of them are missing.
+    fn get_document_context(&self, uri: &str) -> Option<DocumentContext<'_>> {
+        let doc = self.document_map.get(uri)?;
+        let syms = self.symbol_map.get(uri)?;
+        let tree = self.tree_map.get(uri)?;
+        Some((doc, syms, tree))
+    }
+
     async fn update_document(&self, uri: String, text: String) {
         // Parse with tree-sitter and cache the tree
         let mut parser = tree_sitter_bindings::create_parser();
@@ -48,8 +64,10 @@ impl Backend {
 
             // Extract symbols from the document (needed for semantic diagnostics)
             let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(&text) {
-                self.symbol_map.insert(uri.clone(), symbol_table.clone());
-                diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table)
+                // Generate diagnostics first, then move symbol_table into the map to avoid clone
+                let diags = diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table);
+                self.symbol_map.insert(uri.clone(), symbol_table);
+                diags
             } else {
                 vec![]
             };
@@ -87,6 +105,7 @@ impl Backend {
         // Clone what we need for the async task
         let client = self.client.clone();
         let tree_map = self.tree_map.clone();
+        let symbol_map = self.symbol_map.clone();
 
         // Spawn background task
         tokio::spawn(async move {
@@ -109,14 +128,12 @@ impl Backend {
             };
 
             // Get semantic diagnostics (undefined label references)
-            let semantic_diags = if let Some(tree) = tree_map.get(&uri) {
-                if let Ok(symbols) = parser::parse_document(&text) {
+            // Use cached symbols instead of re-parsing
+            let semantic_diags = match (tree_map.get(&uri), symbol_map.get(&uri)) {
+                (Some(tree), Some(symbols)) => {
                     diagnostics::provide_semantic_diagnostics(&tree, &text, &symbols)
-                } else {
-                    vec![]
                 }
-            } else {
-                vec![]
+                _ => vec![],
             };
 
             // Run wast validation
@@ -257,8 +274,10 @@ impl LanguageServer for Backend {
 
             // Extract symbols and generate semantic diagnostics
             let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(&text) {
-                self.symbol_map.insert(uri.clone(), symbol_table.clone());
-                diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table)
+                // Generate diagnostics first, then move symbol_table into the map to avoid clone
+                let diags = diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table);
+                self.symbol_map.insert(uri.clone(), symbol_table);
+                diags
             } else {
                 vec![]
             };
@@ -310,12 +329,8 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let document = self.document_map.get(&uri);
-        let symbols = self.symbol_map.get(&uri);
-        let tree = self.tree_map.get(&uri);
-
-        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
-            return Ok(hover::provide_hover(&doc, &syms, &t, position));
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
+            return Ok(hover::provide_hover(&doc, &syms, &tree, position));
         }
 
         Ok(None)
@@ -325,13 +340,9 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
 
-        let document = self.document_map.get(&uri);
-        let symbols = self.symbol_map.get(&uri);
-        let tree = self.tree_map.get(&uri);
-
-        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
             return Ok(Some(CompletionResponse::Array(
-                completion::provide_completion(&doc, &syms, &t, position),
+                completion::provide_completion(&doc, &syms, &tree, position),
             )));
         }
 
@@ -346,12 +357,10 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let document = self.document_map.get(&uri);
-        let symbols = self.symbol_map.get(&uri);
-        let tree = self.tree_map.get(&uri);
-
-        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
-            return Ok(signature::provide_signature_help(&doc, &syms, &t, position));
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
+            return Ok(signature::provide_signature_help(
+                &doc, &syms, &tree, position,
+            ));
         }
 
         Ok(None)
@@ -368,12 +377,9 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let document = self.document_map.get(&uri);
-        let symbols = self.symbol_map.get(&uri);
-        let tree = self.tree_map.get(&uri);
-
-        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
-            if let Some(location) = definition::provide_definition(&doc, &syms, &t, position, &uri)
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
+            if let Some(location) =
+                definition::provide_definition(&doc, &syms, &tree, position, &uri)
             {
                 return Ok(Some(GotoDefinitionResponse::Scalar(location)));
             }
@@ -397,15 +403,11 @@ impl LanguageServer for Backend {
             )
             .await;
 
-        let document = self.document_map.get(&uri);
-        let symbols = self.symbol_map.get(&uri);
-        let tree = self.tree_map.get(&uri);
-
-        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
             let refs = references::provide_references(
                 &doc,
                 &syms,
-                &t,
+                &tree,
                 position,
                 &uri,
                 include_declaration,
@@ -435,15 +437,11 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
-        let document = self.document_map.get(&uri);
-        let symbols = self.symbol_map.get(&uri);
-        let tree = self.tree_map.get(&uri);
-
-        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
-            if references::identify_symbol_at_position(&doc, &syms, &t, position).is_some() {
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
+            if references::identify_symbol_at_position(&doc, &syms, &tree, position).is_some() {
                 // The symbol logic deems this a valid symbol.
                 // Now find the range to select.
-                if let Some(node) = utils::node_at_position(&t, &doc, position) {
+                if let Some(node) = utils::node_at_position(&tree, &doc, position) {
                     // If it's an identifier (e.g. $foo), return its full range.
                     if node.kind() == "identifier" {
                         let range = Range {
@@ -503,13 +501,10 @@ impl LanguageServer for Backend {
             )
             .await;
 
-        let document = self.document_map.get(&uri);
-        let symbols = self.symbol_map.get(&uri);
-        let tree = self.tree_map.get(&uri);
-
-        if let (Some(doc), Some(syms), Some(t)) = (document, symbols, tree) {
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
             // Identify the symbol we are renaming
-            if let Some(target) = references::identify_symbol_at_position(&doc, &syms, &t, position)
+            if let Some(target) =
+                references::identify_symbol_at_position(&doc, &syms, &tree, position)
             {
                 // Check if the symbol has a name - we don't support renaming unnamed symbols yet
                 let has_name = match &target {
@@ -533,7 +528,7 @@ impl LanguageServer for Backend {
 
                 // Find all references
                 let refs = references::provide_references(
-                    &doc, &syms, &t, position, &uri, true, // include declaration
+                    &doc, &syms, &tree, position, &uri, true, // include declaration
                 );
 
                 if refs.is_empty() {

@@ -1,5 +1,7 @@
 use crate::symbols::*;
-use crate::utils::{find_containing_function, get_line_at_position, node_at_position};
+use crate::utils::{
+    find_containing_function, get_line_at_position, node_at_position, InstructionContext,
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tower_lsp::lsp_types::*;
@@ -247,18 +249,18 @@ pub fn provide_completion(
         let context = if let Some(node) = node_at_position(tree, document, position) {
             let ast_context = determine_dollar_context(node);
             // If AST gives us General context, fall back to string matching
-            if ast_context == DollarContext::General {
-                determine_context_from_line(line_prefix)
+            if ast_context == InstructionContext::General {
+                determine_context_from_line_completion(line_prefix)
             } else {
                 ast_context
             }
         } else {
             // No valid AST node, use string matching
-            determine_context_from_line(line_prefix)
+            determine_context_from_line_completion(line_prefix)
         };
 
         match context {
-            DollarContext::Call => {
+            InstructionContext::Call => {
                 // Function completions
                 for func in &symbols.functions {
                     if let Some(ref name) = func.name {
@@ -296,7 +298,7 @@ pub fn provide_completion(
                     }
                 }
             }
-            DollarContext::Global => {
+            InstructionContext::Global => {
                 // Global variable completions
                 for global in &symbols.globals {
                     if let Some(ref name) = global.name {
@@ -313,7 +315,7 @@ pub fn provide_completion(
                     }
                 }
             }
-            DollarContext::Local => {
+            InstructionContext::Local => {
                 // Local variable completions
                 if let Some(func) = find_containing_function(symbols, position) {
                     for param in &func.parameters {
@@ -338,7 +340,7 @@ pub fn provide_completion(
                     }
                 }
             }
-            DollarContext::Branch => {
+            InstructionContext::Branch => {
                 // Block label completions
                 if let Some(func) = find_containing_function(symbols, position) {
                     for block in &func.blocks {
@@ -355,7 +357,9 @@ pub fn provide_completion(
                     }
                 }
             }
-            DollarContext::General => {
+            // For Block, Table, Memory, Type, Tag, Function, and General contexts,
+            // show all completions since we don't have special handling for these
+            _ => {
                 // General $ completions - show everything
                 for func in &symbols.functions {
                     if let Some(ref name) = func.name {
@@ -524,18 +528,8 @@ fn make_completion(label: &str, insert_text: &str, detail: &str) -> CompletionIt
 static NUMBER_CONST_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap());
 
-/// Context for dollar sign completions
-#[derive(Debug, PartialEq)]
-enum DollarContext {
-    Call,    // Inside call instruction
-    Global,  // Inside global.get/set
-    Local,   // Inside local.get/set/tee
-    Branch,  // Inside br/br_if
-    General, // General context, show all
-}
-
 /// Determine the context for dollar sign completion using AST
-fn determine_dollar_context(node: tree_sitter::Node) -> DollarContext {
+fn determine_dollar_context(node: tree_sitter::Node) -> InstructionContext {
     // Look for instruction ancestors to determine context
     let mut current = node;
     loop {
@@ -547,13 +541,13 @@ fn determine_dollar_context(node: tree_sitter::Node) -> DollarContext {
             if let Some(op_child) = current.child_by_field_name("op") {
                 let op_kind = op_child.kind();
                 if op_kind.starts_with("op_call") {
-                    return DollarContext::Call;
+                    return InstructionContext::Call;
                 } else if op_kind.contains("local") {
-                    return DollarContext::Local;
+                    return InstructionContext::Local;
                 } else if op_kind.contains("global") {
-                    return DollarContext::Global;
+                    return InstructionContext::Global;
                 } else if op_kind.starts_with("op_br") {
-                    return DollarContext::Branch;
+                    return InstructionContext::Branch;
                 }
             }
 
@@ -562,13 +556,13 @@ fn determine_dollar_context(node: tree_sitter::Node) -> DollarContext {
             for child in current.children(&mut cursor) {
                 let child_kind = child.kind();
                 if child_kind.starts_with("op_call") {
-                    return DollarContext::Call;
+                    return InstructionContext::Call;
                 } else if child_kind.contains("local") {
-                    return DollarContext::Local;
+                    return InstructionContext::Local;
                 } else if child_kind.contains("global") {
-                    return DollarContext::Global;
+                    return InstructionContext::Global;
                 } else if child_kind.starts_with("op_br") {
-                    return DollarContext::Branch;
+                    return InstructionContext::Branch;
                 }
             }
         }
@@ -581,20 +575,20 @@ fn determine_dollar_context(node: tree_sitter::Node) -> DollarContext {
         }
     }
 
-    DollarContext::General
+    InstructionContext::General
 }
 
 /// Fallback: Determine context from line text (for incomplete/malformed code)
-fn determine_context_from_line(line_prefix: &str) -> DollarContext {
+fn determine_context_from_line_completion(line_prefix: &str) -> InstructionContext {
     if line_prefix.contains("call ") {
-        DollarContext::Call
+        InstructionContext::Call
     } else if line_prefix.contains("global.") {
-        DollarContext::Global
+        InstructionContext::Global
     } else if line_prefix.contains("local.") {
-        DollarContext::Local
+        InstructionContext::Local
     } else if line_prefix.contains("br") {
-        DollarContext::Branch
+        InstructionContext::Branch
     } else {
-        DollarContext::General
+        InstructionContext::General
     }
 }
