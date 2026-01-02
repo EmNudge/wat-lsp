@@ -68,46 +68,74 @@ fn parse_instruction_docs(content: &str) -> HashMap<String, String> {
     let mut docs = HashMap::new();
     // Normalize line endings to handle both Unix (\n) and Windows (\r\n)
     let normalized = content.replace("\r\n", "\n");
-    let sections: Vec<&str> = normalized.split("\n---\n").collect();
 
-    for section in sections {
-        let section = section.trim();
-        if section.is_empty() {
+    // Process line by line instead of splitting on ---, since --- can appear inside code blocks
+    let mut instruction_name: Option<String> = None;
+    let mut doc_lines: Vec<&str> = Vec::new();
+    let mut in_code_block = false;
+
+    // Helper to save current instruction if we have one
+    let save_instruction =
+        |name: &mut Option<String>, lines: &mut Vec<&str>, docs: &mut HashMap<String, String>| {
+            if let Some(n) = name.take() {
+                if !lines.is_empty() {
+                    let doc = lines.join("\n");
+                    docs.insert(n, doc);
+                }
+                lines.clear();
+            }
+        };
+
+    for line in normalized.lines() {
+        let trimmed = line.trim();
+
+        // Check for code block boundaries
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            // Add code fence to doc if we're collecting
+            if instruction_name.is_some() {
+                doc_lines.push(trimmed);
+            }
             continue;
         }
 
-        // Find the instruction name (starts with ##)
-        let lines: Vec<&str> = section.lines().collect();
-        let mut instruction_name = None;
-        let mut doc_lines = Vec::new();
-        let mut in_header = false;
-
-        for line in lines {
-            let line = line.trim();
-
-            if let Some(stripped) = line.strip_prefix("## ") {
-                instruction_name = Some(stripped.trim().to_string());
-                in_header = true;
-                continue;
-            }
-
-            if line.starts_with("# ") {
-                // Skip document title
-                continue;
-            }
-
-            if in_header && !line.is_empty() {
+        // Inside code blocks, preserve original indentation
+        if in_code_block {
+            if instruction_name.is_some() {
                 doc_lines.push(line);
             }
+            continue;
         }
 
-        if let Some(name) = instruction_name {
-            if !doc_lines.is_empty() {
-                let doc = doc_lines.join("\n");
-                docs.insert(name, doc);
-            }
+        // Outside code blocks - check for section markers and headers
+
+        // Section separator - save current instruction and reset
+        if trimmed == "---" {
+            save_instruction(&mut instruction_name, &mut doc_lines, &mut docs);
+            continue;
+        }
+
+        // New instruction header
+        if let Some(stripped) = trimmed.strip_prefix("## ") {
+            // Save previous instruction if any
+            save_instruction(&mut instruction_name, &mut doc_lines, &mut docs);
+            instruction_name = Some(stripped.trim().to_string());
+            continue;
+        }
+
+        // Skip document title
+        if trimmed.starts_with("# ") {
+            continue;
+        }
+
+        // Add content line if we're collecting for an instruction
+        if instruction_name.is_some() && !trimmed.is_empty() {
+            doc_lines.push(trimmed);
         }
     }
+
+    // Don't forget the last instruction
+    save_instruction(&mut instruction_name, &mut doc_lines, &mut docs);
 
     docs
 }

@@ -389,6 +389,50 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("throw_ref", InstructionArity::unary_op()); // exnref
     map.insert("rethrow", InstructionArity::exact(1, "label index", 0));
 
+    // Bulk memory operations
+    map.insert("memory.copy", InstructionArity::exact(0, "", 3)); // dest, src, len
+    map.insert("memory.fill", InstructionArity::exact(0, "", 3)); // dest, val, len
+    map.insert("memory.init", InstructionArity::exact(1, "data index", 3)); // dest, offset, len
+    map.insert("data.drop", InstructionArity::exact(1, "data index", 0));
+
+    // Table operations
+    map.insert("table.get", InstructionArity::exact(1, "table index", 1)); // index
+    map.insert("table.set", InstructionArity::exact(1, "table index", 2)); // index, value
+    map.insert("table.size", InstructionArity::exact(1, "table index", 0));
+    map.insert("table.grow", InstructionArity::exact(1, "table index", 2)); // init, delta
+    map.insert("table.fill", InstructionArity::exact(1, "table index", 3)); // index, value, len
+    map.insert(
+        "table.copy",
+        InstructionArity::exact(2, "dest and src table index", 3),
+    ); // dest, src, len
+    map.insert(
+        "table.init",
+        InstructionArity::exact(2, "table and elem index", 3),
+    ); // dest, offset, len
+    map.insert("elem.drop", InstructionArity::exact(1, "elem index", 0));
+
+    // Reference operations
+    map.insert("ref.null", InstructionArity::exact(1, "type", 0));
+    map.insert("ref.func", InstructionArity::exact(1, "function index", 0));
+    map.insert("ref.is_null", InstructionArity::unary_op()); // ref
+
+    // Saturating truncation operations
+    map.insert("i32.trunc_sat_f32_s", InstructionArity::unary_op());
+    map.insert("i32.trunc_sat_f32_u", InstructionArity::unary_op());
+    map.insert("i32.trunc_sat_f64_s", InstructionArity::unary_op());
+    map.insert("i32.trunc_sat_f64_u", InstructionArity::unary_op());
+    map.insert("i64.trunc_sat_f32_s", InstructionArity::unary_op());
+    map.insert("i64.trunc_sat_f32_u", InstructionArity::unary_op());
+    map.insert("i64.trunc_sat_f64_s", InstructionArity::unary_op());
+    map.insert("i64.trunc_sat_f64_u", InstructionArity::unary_op());
+
+    // Sign extension operations
+    map.insert("i32.extend8_s", InstructionArity::unary_op());
+    map.insert("i32.extend16_s", InstructionArity::unary_op());
+    map.insert("i64.extend8_s", InstructionArity::unary_op());
+    map.insert("i64.extend16_s", InstructionArity::unary_op());
+    map.insert("i64.extend32_s", InstructionArity::unary_op());
+
     map
 }
 
