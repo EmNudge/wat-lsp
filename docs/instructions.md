@@ -2521,6 +2521,23 @@ Example:
 ```
 ---
 
+## start
+Declares a function to be called automatically when the module is instantiated.
+
+Example:
+```wat
+(module
+  (func $init
+    ;; Initialization code here
+    (call $setup_globals)
+    (call $init_memory))
+
+  ;; Set $init as the start function
+  (start $init)
+)
+```
+---
+
 ## type
 Declares a function type that can be referenced elsewhere.
 
