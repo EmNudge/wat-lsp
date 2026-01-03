@@ -32,7 +32,7 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     extract_types(&root, source, &mut symbol_table);
     extract_tables_with_offset(&root, source, &mut symbol_table, import_counts.tables);
     extract_memories_with_offset(&root, source, &mut symbol_table, import_counts.memories);
-    extract_tags(&root, source, &mut symbol_table);
+    extract_tags_with_offset(&root, source, &mut symbol_table, import_counts.tags);
     extract_functions_with_offset(&root, source, &mut symbol_table, import_counts.functions);
 
     Ok(symbol_table)
@@ -44,6 +44,7 @@ struct ImportCounts {
     globals: usize,
     tables: usize,
     memories: usize,
+    tags: usize,
 }
 
 /// Extract imports from the module
@@ -53,6 +54,7 @@ fn extract_imports(root: &Node, source: &str, symbol_table: &mut SymbolTable) ->
         globals: 0,
         tables: 0,
         memories: 0,
+        tags: 0,
     };
 
     let mut cursor = root.walk();
@@ -132,6 +134,13 @@ fn extract_single_import(
                         {
                             symbol_table.add_memory(memory);
                             counts.memories += 1;
+                        }
+                    }
+                    "import_desc_tag_type" => {
+                        // Imported tag: (tag $name? (param ...)?)
+                        if let Some(tag) = extract_imported_tag(&desc_child, source, counts.tags) {
+                            symbol_table.add_tag(tag);
+                            counts.tags += 1;
                         }
                     }
                     _ => {}
@@ -356,6 +365,51 @@ fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Opti
         name,
         index,
         limits: (min_limit, max_limit),
+        line: desc_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
+/// Extract an imported tag
+fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<Tag> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut params = Vec::new();
+
+    // Look for func_type_params in the import_desc_tag_type node
+    let mut cursor = desc_node.walk();
+    for child in desc_node.children(&mut cursor) {
+        if child.kind() == "func_type_params" {
+            let mut params_cursor = child.walk();
+            for param_child in child.children(&mut params_cursor) {
+                if param_child.kind() == "func_type_params_one"
+                    || param_child.kind() == "func_type_params_many"
+                {
+                    let mut param_type_cursor = param_child.walk();
+                    for type_child in param_child.children(&mut param_type_cursor) {
+                        if type_child.kind() == "value_type" {
+                            params.push(extract_value_type(&type_child, source));
+                        }
+                    }
+                } else if param_child.kind() == "value_type" {
+                    // Direct value_type children
+                    params.push(extract_value_type(&param_child, source));
+                }
+            }
+        }
+    }
+
+    Some(Tag {
+        name,
+        index,
+        params,
         line: desc_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -1407,9 +1461,14 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
 }
 
 /// Extract tag definitions
-fn extract_tags(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+fn extract_tags_with_offset(
+    root: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    offset: usize,
+) {
     let mut cursor = root.walk();
-    let mut tag_index = 0;
+    let mut tag_index = offset;
 
     for child in root.children(&mut cursor) {
         if child.kind() == "module" {

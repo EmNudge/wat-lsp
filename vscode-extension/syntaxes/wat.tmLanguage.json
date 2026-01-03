@@ -313,7 +313,7 @@
             {
               "comment": "Reference instruction [reference-types]",
               "name": "keyword.operator.word.wat",
-              "match": "\\b(ref)\\.(?:null|is_null|func|extern)\\b",
+              "match": "\\b(ref)\\.(?:null|is_null|as_non_null|func|extern)\\b",
               "captures": {
                 "1": {
                   "name": "support.class.wat"
@@ -516,7 +516,7 @@
             },
             {
               "comment": "Parametric instruction [mvp]",
-              "name": "keyword.operator.word.wat",
+              "name": "keyword.control.wat",
               "match": "\\b(?:drop|select)\\b"
             }
           ]

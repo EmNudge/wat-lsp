@@ -61,6 +61,26 @@ impl InstructionArity {
         Self::exact(0, "", 0)
     }
 
+    /// Memory load operation - can take optional memory index (multi-memory proposal)
+    const fn mem_load() -> Self {
+        Self {
+            min_params: 0,
+            max_params: 1,
+            param_description: "optional memory index",
+            operand_mode: OperandMode::Fixed(1), // consumes address
+        }
+    }
+
+    /// Memory store operation - can take optional memory index (multi-memory proposal)
+    const fn mem_store() -> Self {
+        Self {
+            min_params: 0,
+            max_params: 1,
+            param_description: "optional memory index",
+            operand_mode: OperandMode::Fixed(2), // consumes address and value
+        }
+    }
+
     pub fn is_valid(&self, param_count: usize) -> bool {
         param_count >= self.min_params && param_count <= self.max_params
     }
@@ -116,10 +136,12 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("global.set", InstructionArity::exact(1, "index", 1)); // consumes 1 value
 
     // Control flow instructions
-    map.insert("br", InstructionArity::exact(1, "label index", 0));
-    map.insert("br_if", InstructionArity::exact(1, "label index", 1)); // consumes condition
+    // br and br_if can pass values to blocks with result types (multi-value)
+    map.insert("br", InstructionArity::dynamic(1, 1, "label index"));
+    map.insert("br_if", InstructionArity::dynamic(1, 1, "label index")); // consumes condition + optional values
     map.insert("call", InstructionArity::dynamic(1, 1, "function index")); // operands depend on function signature
-    map.insert("return", InstructionArity::nullary());
+                                                                           // return can pass values for functions with result types
+    map.insert("return", InstructionArity::dynamic(0, 0, ""));
     map.insert("unreachable", InstructionArity::nullary());
     map.insert("nop", InstructionArity::nullary());
 
@@ -282,32 +304,32 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("f32.reinterpret_i32", InstructionArity::unary_op());
     map.insert("f64.reinterpret_i64", InstructionArity::unary_op());
 
-    // Memory load instructions (unary - consume address)
-    map.insert("i32.load", InstructionArity::unary_op());
-    map.insert("i64.load", InstructionArity::unary_op());
-    map.insert("f32.load", InstructionArity::unary_op());
-    map.insert("f64.load", InstructionArity::unary_op());
-    map.insert("i32.load8_s", InstructionArity::unary_op());
-    map.insert("i32.load8_u", InstructionArity::unary_op());
-    map.insert("i32.load16_s", InstructionArity::unary_op());
-    map.insert("i32.load16_u", InstructionArity::unary_op());
-    map.insert("i64.load8_s", InstructionArity::unary_op());
-    map.insert("i64.load8_u", InstructionArity::unary_op());
-    map.insert("i64.load16_s", InstructionArity::unary_op());
-    map.insert("i64.load16_u", InstructionArity::unary_op());
-    map.insert("i64.load32_s", InstructionArity::unary_op());
-    map.insert("i64.load32_u", InstructionArity::unary_op());
+    // Memory load instructions (optional memory index, consume address)
+    map.insert("i32.load", InstructionArity::mem_load());
+    map.insert("i64.load", InstructionArity::mem_load());
+    map.insert("f32.load", InstructionArity::mem_load());
+    map.insert("f64.load", InstructionArity::mem_load());
+    map.insert("i32.load8_s", InstructionArity::mem_load());
+    map.insert("i32.load8_u", InstructionArity::mem_load());
+    map.insert("i32.load16_s", InstructionArity::mem_load());
+    map.insert("i32.load16_u", InstructionArity::mem_load());
+    map.insert("i64.load8_s", InstructionArity::mem_load());
+    map.insert("i64.load8_u", InstructionArity::mem_load());
+    map.insert("i64.load16_s", InstructionArity::mem_load());
+    map.insert("i64.load16_u", InstructionArity::mem_load());
+    map.insert("i64.load32_s", InstructionArity::mem_load());
+    map.insert("i64.load32_u", InstructionArity::mem_load());
 
-    // Memory store instructions (binary - consume address and value)
-    map.insert("i32.store", InstructionArity::binary_op());
-    map.insert("i64.store", InstructionArity::binary_op());
-    map.insert("f32.store", InstructionArity::binary_op());
-    map.insert("f64.store", InstructionArity::binary_op());
-    map.insert("i32.store8", InstructionArity::binary_op());
-    map.insert("i32.store16", InstructionArity::binary_op());
-    map.insert("i64.store8", InstructionArity::binary_op());
-    map.insert("i64.store16", InstructionArity::binary_op());
-    map.insert("i64.store32", InstructionArity::binary_op());
+    // Memory store instructions (optional memory index, consume address and value)
+    map.insert("i32.store", InstructionArity::mem_store());
+    map.insert("i64.store", InstructionArity::mem_store());
+    map.insert("f32.store", InstructionArity::mem_store());
+    map.insert("f64.store", InstructionArity::mem_store());
+    map.insert("i32.store8", InstructionArity::mem_store());
+    map.insert("i32.store16", InstructionArity::mem_store());
+    map.insert("i64.store8", InstructionArity::mem_store());
+    map.insert("i64.store16", InstructionArity::mem_store());
+    map.insert("i64.store32", InstructionArity::mem_store());
 
     // Memory management (nullary in linear, but memory.grow consumes 1 in folded)
     map.insert("memory.size", InstructionArity::nullary());
@@ -415,6 +437,7 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("ref.null", InstructionArity::exact(1, "type", 0));
     map.insert("ref.func", InstructionArity::exact(1, "function index", 0));
     map.insert("ref.is_null", InstructionArity::unary_op()); // ref
+    map.insert("ref.as_non_null", InstructionArity::unary_op()); // nullable ref
 
     // Saturating truncation operations
     map.insert("i32.trunc_sat_f32_s", InstructionArity::unary_op());

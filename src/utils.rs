@@ -103,10 +103,13 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
         let first_token = instr_text.split_whitespace().next().unwrap_or("");
 
         // Check GC/struct/array instructions first (they take type indices)
+        // Also includes call_ref and return_call_ref which take type indices
         if first_token.starts_with("struct.")
             || first_token.starts_with("array.")
             || first_token == "ref.cast"
             || first_token == "ref.test"
+            || first_token == "call_ref"
+            || first_token == "return_call_ref"
         {
             return InstructionContext::Type;
         } else if first_token.starts_with("br") {

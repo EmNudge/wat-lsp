@@ -36,6 +36,9 @@
   "nullexternref"
 ] @type.builtin
 
+; Heap type keywords (used in ref.null, ref.cast, etc.)
+(ref_kind) @type.builtin
+
 ; Control flow keywords
 [
   "block"
@@ -79,6 +82,8 @@
   "field"
   "struct"
   "array"
+  "sub"
+  "final"
 ] @keyword
 
 ; Instructions - these contain the actual instruction text like "local.get", "i32.add"
