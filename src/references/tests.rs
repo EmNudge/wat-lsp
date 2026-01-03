@@ -1006,3 +1006,121 @@ fn test_011_host_edit_memory() {
         refs
     );
 }
+
+#[test]
+fn test_tag_references_in_catch_clause() {
+    let source = r#"(module
+  (tag $div_error (param i32))
+
+  (func $safe_div (param $a i32) (param $b i32) (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $div_error $caught)
+        ;; throw if b is zero
+        (if (i32.eqz (local.get $b))
+          (then (throw $div_error (i32.const 400)))
+        )
+        ;; otherwise return a / b
+        (i32.div_s (local.get $a) (local.get $b))
+      )
+    )
+  )
+
+  (export "safeDiv" (func $safe_div))
+)"#;
+
+    let symbols = parse_document(source).unwrap();
+    let mut parser = tree_sitter_bindings::create_parser();
+    let tree = parser.parse(source, None).unwrap();
+
+    // Verify tag is in symbol table
+    assert!(
+        symbols.get_tag_by_name("$div_error").is_some(),
+        "Tag $div_error should be in symbol table"
+    );
+
+    // Find position of $div_error in catch clause (line 5)
+    let line5 = source.lines().nth(5).unwrap();
+    let col = line5
+        .find("$div_error")
+        .expect("Should find $div_error on line 5");
+    let position = Position {
+        line: 5,
+        character: col as u32,
+    };
+
+    // Check identify_symbol_at_position works
+    let target = identify_symbol_at_position(source, &symbols, &tree, position);
+    assert!(
+        target.is_some(),
+        "Should identify tag symbol at position ({}, {}), line: '{}'",
+        position.line,
+        position.character,
+        line5
+    );
+
+    let refs = provide_references(source, &symbols, &tree, position, "file:///test.wat", false);
+
+    // Should find 2 references: catch clause (line 5) and throw (line 8)
+    assert_eq!(
+        refs.len(),
+        2,
+        "Expected 2 references for $div_error (catch and throw), got {:?}",
+        refs.iter().map(|r| r.range.start.line).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_tag_references_from_throw() {
+    let source = r#"(module
+  (tag $div_error (param i32))
+
+  (func $safe_div (param $a i32) (param $b i32) (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $div_error $caught)
+        ;; throw if b is zero
+        (if (i32.eqz (local.get $b))
+          (then (throw $div_error (i32.const 400)))
+        )
+        ;; otherwise return a / b
+        (i32.div_s (local.get $a) (local.get $b))
+      )
+    )
+  )
+
+  (export "safeDiv" (func $safe_div))
+)"#;
+
+    let symbols = parse_document(source).unwrap();
+    let mut parser = tree_sitter_bindings::create_parser();
+    let tree = parser.parse(source, None).unwrap();
+
+    // Find position of $div_error in throw (line 8)
+    let line8 = source.lines().nth(8).unwrap();
+    let col = line8
+        .find("$div_error")
+        .expect("Should find $div_error on line 8");
+    let position = Position {
+        line: 8,
+        character: col as u32,
+    };
+
+    // Check identify_symbol_at_position works
+    let target = identify_symbol_at_position(source, &symbols, &tree, position);
+    assert!(
+        target.is_some(),
+        "Should identify tag symbol at position ({}, {}), line: '{}'",
+        position.line,
+        position.character,
+        line8
+    );
+
+    let refs = provide_references(source, &symbols, &tree, position, "file:///test.wat", false);
+
+    // Should find 2 references: catch clause (line 5) and throw (line 8)
+    assert_eq!(
+        refs.len(),
+        2,
+        "Expected 2 references for $div_error (catch and throw), got {:?}",
+        refs.iter().map(|r| r.range.start.line).collect::<Vec<_>>()
+    );
+}

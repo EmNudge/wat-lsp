@@ -34,7 +34,6 @@
   "nullref"
   "nullfuncref"
   "nullexternref"
-  "exnref"
 ] @type.builtin
 
 ; Control flow keywords
@@ -45,11 +44,7 @@
   "then"
   "else"
   "end"
-  "br"
-  "br_if"
   "br_table"
-  "return"
-  "call"
   "call_indirect"
   "try"
   "catch"
@@ -57,8 +52,6 @@
   "throw"
   "rethrow"
   "delegate"
-  "return_call"
-  "return_call_indirect"
 ] @keyword.control
 
 ; Module structure keywords
@@ -78,7 +71,6 @@
   "global"
   "local"
   "mut"
-  "shared"
   "offset"
   "align"
   "item"
@@ -87,31 +79,83 @@
   "field"
   "struct"
   "array"
-  "sub"
-  "final"
 ] @keyword
 
 ; Instructions - these contain the actual instruction text like "local.get", "i32.add"
 ; The semantic tokens provider will split these into namespace.action
 (op_nullary) @function.instruction
 (op_index) @function.instruction
+(op_index_opt) @function.instruction
+(op_index_opt_offset_opt_align_opt) @function.instruction
 (op_const) @function.instruction
 (op_select) @function.instruction
 (op_simd_const) @function.instruction
 (op_simd_lane) @function.instruction
+(op_simd_offset_opt_align_opt) @function.instruction
 (op_table_copy) @function.instruction
 (op_table_init) @function.instruction
-(op_br_table) @function.instruction
-(op_call_indirect) @function.instruction
-(op_memory) @function.instruction
+(op_func_bind) @function.instruction
 (op_let) @function.instruction
 
-; Special parametric instructions
+; Special parametric instruction keyword
+"select" @function.instruction
+
+; GC proposal instructions
 [
-  "drop"
-  "select"
-  "unreachable"
-  "nop"
+  "struct.new"
+  "struct.new_default"
+  "struct.get"
+  "struct.get_s"
+  "struct.get_u"
+  "struct.set"
+  "array.new"
+  "array.new_default"
+  "array.new_fixed"
+  "array.new_data"
+  "array.new_elem"
+  "array.get"
+  "array.get_s"
+  "array.get_u"
+  "array.set"
+  "array.len"
+  "array.fill"
+  "array.copy"
+  "array.init_data"
+  "array.init_elem"
+  "ref.test"
+  "ref.cast"
+  "ref.cast_null"
+  "ref.i31"
+  "i31.get_s"
+  "i31.get_u"
+  "br_on_cast"
+  "br_on_cast_fail"
+] @function.instruction
+
+; Bulk memory instructions
+[
+  "memory.init"
+  "memory.copy"
+  "memory.fill"
+  "data.drop"
+  "elem.drop"
+] @function.instruction
+
+; Reference type instructions
+[
+  "ref.null"
+  "ref.func"
+  "ref.extern"
+  "table.get"
+  "table.set"
+  "table.size"
+  "table.grow"
+  "table.fill"
+] @function.instruction
+
+; Exception handling instructions
+[
+  "throw_ref"
 ] @function.instruction
 
 ; Function identifiers (after func keyword)

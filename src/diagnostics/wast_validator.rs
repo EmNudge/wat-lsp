@@ -59,4 +59,28 @@ mod tests {
     fn test_empty_source() {
         assert_eq!(validate_wat("").len(), 0);
     }
+
+    #[test]
+    fn test_try_table_exception_handling() {
+        let source = r#"
+(module
+  (tag $div_error (param i32))
+
+  (func $safe_div (param $a i32) (param $b i32) (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $div_error $caught)
+        (if (i32.eqz (local.get $b))
+          (then (throw $div_error (i32.const 400)))
+        )
+        (i32.div_s (local.get $a) (local.get $b))
+      )
+    )
+  )
+
+  (export "safeDiv" (func $safe_div))
+)
+"#;
+        let diags = validate_wat(source);
+        assert!(diags.is_empty(), "Expected no errors, got: {:?}", diags);
+    }
 }

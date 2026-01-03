@@ -22,6 +22,12 @@ pub enum InstructionContext {
 /// Determine instruction context by walking up the AST tree.
 /// Used by hover, definition, and completion modules.
 pub fn determine_instruction_context(node: Node, document: &str) -> InstructionContext {
+    // First check if we're in a catch_clause - this needs special handling
+    // because catch clauses contain both tag and label references
+    if let Some(context) = determine_catch_clause_context(&node, document) {
+        return context;
+    }
+
     let mut current = node;
 
     loop {
@@ -93,26 +99,29 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
     // Only check instr_plain nodes for instruction context
     if kind == "instr_plain" || kind == "expr1_plain" {
         let instr_text = &document[node.byte_range()];
+        // Extract just the first token (instruction name) to avoid matching nested instructions
+        let first_token = instr_text.split_whitespace().next().unwrap_or("");
 
-        if instr_text.starts_with("br") || instr_text.contains(" br") {
-            return InstructionContext::Branch;
-        } else if instr_text.contains("call") && !instr_text.contains("call_indirect") {
-            return InstructionContext::Call;
-        } else if instr_text.contains("local.") {
-            return InstructionContext::Local;
-        } else if instr_text.contains("global.") {
-            return InstructionContext::Global;
-        } else if instr_text.contains("table.") {
-            return InstructionContext::Table;
-        } else if instr_text.contains("memory.") {
-            return InstructionContext::Memory;
-        } else if instr_text.contains("struct.")
-            || instr_text.contains("array.")
-            || instr_text.contains("ref.cast")
-            || instr_text.contains("ref.test")
+        // Check GC/struct/array instructions first (they take type indices)
+        if first_token.starts_with("struct.")
+            || first_token.starts_with("array.")
+            || first_token == "ref.cast"
+            || first_token == "ref.test"
         {
             return InstructionContext::Type;
-        } else if instr_text.contains("throw") || instr_text.contains("rethrow") {
+        } else if first_token.starts_with("br") {
+            return InstructionContext::Branch;
+        } else if first_token.starts_with("call") && first_token != "call_indirect" {
+            return InstructionContext::Call;
+        } else if first_token.starts_with("local.") {
+            return InstructionContext::Local;
+        } else if first_token.starts_with("global.") {
+            return InstructionContext::Global;
+        } else if first_token.starts_with("table.") {
+            return InstructionContext::Table;
+        } else if first_token.starts_with("memory.") {
+            return InstructionContext::Memory;
+        } else if first_token == "throw" || first_token == "rethrow" {
             return InstructionContext::Tag;
         }
     }
@@ -122,7 +131,77 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
         return InstructionContext::Type;
     }
 
+    // Check for ref type context (e.g., (ref $point) in result/param types)
+    if kind == "ref_type_ref" || kind == "ref_type" {
+        return InstructionContext::Type;
+    }
+
+    // Check for catch_clause context - need to determine if we're on tag or label
+    // Walk up to find if we're inside a catch_clause
+    if let Some(context) = determine_catch_clause_context(node, document) {
+        return context;
+    }
+
     InstructionContext::General
+}
+
+/// Determine the context for a node inside a catch_clause.
+/// For (catch $tag $label): first index is Tag, second is Branch
+/// For (catch_all $label): single index is Branch
+fn determine_catch_clause_context(node: &Node, document: &str) -> Option<InstructionContext> {
+    // Walk up to find the catch_clause and track our position
+    let mut current = *node;
+    let mut index_node: Option<Node> = None;
+
+    loop {
+        let kind = current.kind();
+
+        // Track if we pass through an index node
+        if kind == "index" {
+            index_node = Some(current);
+        }
+
+        if kind == "catch_clause" {
+            // Found the catch_clause, now determine position
+            let text = &document[current.byte_range()];
+
+            // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
+            let has_tag = text.contains("catch_ref")
+                || (text.contains("catch") && !text.contains("catch_all"));
+
+            if let Some(idx_node) = index_node {
+                // Find the position of this index among all index children
+                let mut cursor = current.walk();
+                let indices: Vec<_> = current
+                    .children(&mut cursor)
+                    .filter(|c| c.kind() == "index")
+                    .collect();
+
+                for (i, idx) in indices.iter().enumerate() {
+                    if idx.byte_range() == idx_node.byte_range() {
+                        // Found our index - first index in catch/catch_ref is tag, rest are labels
+                        if has_tag && i == 0 {
+                            return Some(InstructionContext::Tag);
+                        } else {
+                            return Some(InstructionContext::Branch);
+                        }
+                    }
+                }
+            }
+
+            // Inside catch_clause but not in an index - shouldn't happen for identifiers
+            return None;
+        }
+
+        // Walk up the tree
+        if let Some(parent) = current.parent() {
+            current = parent;
+        } else {
+            break;
+        }
+    }
+
+    None
 }
 
 /// Determine context from line text (fallback for incomplete code).

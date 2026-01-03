@@ -122,7 +122,7 @@ module.exports = grammar({
 
     expr: $ => seq("(", $.expr1, ")"),
 
-    expr1: $ => choice($.expr1_plain, $.expr1_call, $.expr1_block, $.expr1_loop, $.expr1_if),
+    expr1: $ => choice($.expr1_plain, $.expr1_call, $.expr1_block, $.expr1_loop, $.expr1_if, $.expr1_try_table),
 
     expr1_block: $ =>
       seq(
@@ -152,6 +152,16 @@ module.exports = grammar({
       ),
 
     expr1_plain: $ => seq($.instr_plain, repeat($.expr)),
+
+    // Folded form of try_table: (try_table (result ...) (catch ...) body)
+    expr1_try_table: $ =>
+      seq(
+        "try_table",
+        optional($.identifier),
+        seq(optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results)),
+        repeat($.catch_clause),
+        optional($.instr_list),
+      ),
 
     float: $ => seq(optional($.sign), choice($.dec_float, $.hex_float, "inf", $.nan)),
 
@@ -903,7 +913,10 @@ module.exports = grammar({
         optional($.identifier),
       ),
 
-    catch_clause: $ => seq("(", choice("catch", "catch_ref", "catch_all", "catch_all_ref"), $.index, $.index, ")"),
+    catch_clause: $ => choice(
+      seq("(", choice("catch", "catch_ref"), $.index, $.index, ")"),
+      seq("(", choice("catch_all", "catch_all_ref"), $.index, ")"),
+    ),
 
     block_try: $ =>
       seq(
