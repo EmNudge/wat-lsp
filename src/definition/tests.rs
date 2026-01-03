@@ -665,3 +665,82 @@ fn test_goto_definition_catch_all_label() {
     // The definition should point to line 2 where $caught block is defined
     assert_eq!(location.range.start.line, 2);
 }
+
+#[test]
+fn test_goto_definition_export_with_array_in_name() {
+    // Test that identifiers containing "array", "memory", or "table" as substrings
+    // don't incorrectly match keyword detection
+    let document = r#"(module
+  (func $sum_f64_array (result f64)
+    f64.const 42.0
+  )
+  (func $edit_memory (result i32)
+    i32.const 1
+  )
+  (func $lookup_table (result i32)
+    i32.const 2
+  )
+  (export "sum_f64_array" (func $sum_f64_array))
+  (export "edit_memory" (func $edit_memory))
+  (export "lookup_table" (func $lookup_table))
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Test $sum_f64_array in export - should go to function definition
+    let line = document.lines().nth(10).unwrap();
+    let col = line
+        .find("$sum_f64_array")
+        .expect("Should find $sum_f64_array");
+    let position = Position::new(10, col as u32);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+    assert!(
+        location.is_some(),
+        "Should find definition for $sum_f64_array in export. Line: '{}'",
+        line
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 1,
+        "$sum_f64_array definition should be on line 1"
+    );
+
+    // Test $edit_memory in export
+    let line = document.lines().nth(11).unwrap();
+    let col = line.find("$edit_memory").expect("Should find $edit_memory");
+    let position = Position::new(11, col as u32);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+    assert!(
+        location.is_some(),
+        "Should find definition for $edit_memory in export. Line: '{}'",
+        line
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 4,
+        "$edit_memory definition should be on line 4"
+    );
+
+    // Test $lookup_table in export
+    let line = document.lines().nth(12).unwrap();
+    let col = line
+        .find("$lookup_table")
+        .expect("Should find $lookup_table");
+    let position = Position::new(12, col as u32);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+    assert!(
+        location.is_some(),
+        "Should find definition for $lookup_table in export. Line: '{}'",
+        line
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 7,
+        "$lookup_table definition should be on line 7"
+    );
+}

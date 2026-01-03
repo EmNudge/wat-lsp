@@ -207,32 +207,72 @@ fn determine_catch_clause_context(node: &Node, document: &str) -> Option<Instruc
     None
 }
 
+/// Check if a line contains a keyword as an instruction or declaration (not as part of an identifier).
+/// Keywords are matched when they appear as:
+/// - An instruction (e.g., "call ", "local.get", "memory.grow")
+/// - A declaration (e.g., "(func ", "(global ", "(memory ")
+fn line_contains_keyword(line: &str, keyword: &str) -> bool {
+    for (i, _) in line.match_indices(keyword) {
+        // Check character before the match (if any)
+        let char_before = if i > 0 { line.chars().nth(i - 1) } else { None };
+
+        // Check character after the match (if any)
+        let char_after = line.chars().nth(i + keyword.len());
+
+        // The keyword should be preceded by non-identifier char or start of string
+        let valid_before = match char_before {
+            None => true,       // Start of line
+            Some('(') => true,  // Declaration like (func
+            Some(' ') => true,  // Instruction
+            Some('\t') => true, // Tab
+            Some(_) => false,   // Part of identifier like $my_array
+        };
+
+        // The keyword should be followed by non-identifier char
+        let valid_after = match char_after {
+            None => true,                          // End of line
+            Some(' ') => true,                     // Keyword followed by space
+            Some('.') => true,                     // Instruction like local.get
+            Some('_') if keyword == "br" => true,  // br_if, br_table
+            Some(')') => true,                     // End of s-expr
+            Some('$') => true,                     // Keyword followed by identifier
+            Some(c) if c.is_ascii_digit() => true, // Like br0, call0
+            Some(_) => false,                      // Part of identifier
+        };
+
+        if valid_before && valid_after {
+            return true;
+        }
+    }
+    false
+}
+
 /// Determine context from line text (fallback for incomplete code).
 /// Used when AST-based detection returns General.
 pub fn determine_context_from_line(line: &str) -> InstructionContext {
-    if line.contains("call") {
+    if line_contains_keyword(line, "call") {
         InstructionContext::Call
-    } else if line.contains("global") {
+    } else if line_contains_keyword(line, "global") {
         InstructionContext::Global
-    } else if line.contains("local") {
+    } else if line_contains_keyword(line, "local") {
         InstructionContext::Local
-    } else if line.contains("br") {
+    } else if line_contains_keyword(line, "br") {
         InstructionContext::Branch
-    } else if line.contains("block") || line.contains("loop") {
+    } else if line_contains_keyword(line, "block") || line_contains_keyword(line, "loop") {
         InstructionContext::Block
-    } else if line.contains("table") {
+    } else if line_contains_keyword(line, "table") {
         InstructionContext::Table
-    } else if line.contains("memory") {
+    } else if line_contains_keyword(line, "memory") {
         InstructionContext::Memory
-    } else if line.contains("type")
-        || line.contains("struct")
-        || line.contains("array")
+    } else if line_contains_keyword(line, "type")
+        || line_contains_keyword(line, "struct")
+        || line_contains_keyword(line, "array")
         || line.contains("ref.")
     {
         InstructionContext::Type
-    } else if line.contains("throw") || line.contains("tag") {
+    } else if line_contains_keyword(line, "throw") || line_contains_keyword(line, "tag") {
         InstructionContext::Tag
-    } else if line.contains("func") {
+    } else if line_contains_keyword(line, "func") {
         InstructionContext::Function
     } else {
         InstructionContext::General
