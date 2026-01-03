@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "wat-lsp-rust"
 path = "src/main.rs"
 
+[[bin]]
+name = "wat-check"
+path = "src/bin/wat-check.rs"
+
 [dependencies]
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "time"] }
@@ -21,6 +25,7 @@ once_cell = "1.19"
 regex = "1.10"
 tree-sitter = "0.26"
 wast = "243.0"
+clap = { version = "4", features = ["derive"] }
 
 [build-dependencies]
 cc = "1.0"

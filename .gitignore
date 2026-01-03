@@ -21,6 +21,11 @@ tree-sitter-wasm/package.json
 tree-sitter-wasm/node_modules/
 tree-sitter-wasm/build/
 
+# may be accidentally created, but should not be commited
+tree-sitter-wasm/Cargo.toml
+tree-sitter-wasm/Cargo.lock
+tree-sitter-wasm/target
+
 # VS Code Extension
 vscode-extension/node_modules/
 vscode-extension/out/

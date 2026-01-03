@@ -208,13 +208,14 @@ export class WatSemanticTokensProvider implements vscode.DocumentSemanticTokensP
                 tokenModifiers: 0,
               });
             } else {
-              // No dot - single instruction like "nop"
+              // No dot - single instruction like "nop", "drop"
+              // Use keyword with controlFlow modifier to match keyword.control.wat scope
               tokens.push({
                 line: startPos.line,
                 startCharacter: startPos.character,
                 length: node.endIndex - node.startIndex,
-                tokenType: TOKEN_OPERATOR,
-                tokenModifiers: 0,
+                tokenType: TOKEN_KEYWORD,
+                tokenModifiers: MOD_CONTROL_FLOW,
               });
             }
             continue;

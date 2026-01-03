@@ -132,21 +132,28 @@ fn check_references(
     diagnostics: &mut Vec<Diagnostic>,
     context: &InstructionContext,
 ) {
+    let text = &source[node.byte_range()];
+    let first_token = text.split_whitespace().next().unwrap_or("");
+
     // For struct.get/struct.set, only the first index is a type reference
     // The second index is a field reference which we don't validate yet
-    if *context == InstructionContext::Type {
-        let text = &source[node.byte_range()];
-        let first_token = text.split_whitespace().next().unwrap_or("");
-        if first_token == "struct.get"
+    if *context == InstructionContext::Type
+        && (first_token == "struct.get"
             || first_token == "struct.get_s"
             || first_token == "struct.get_u"
-            || first_token == "struct.set"
-        {
-            // Only validate the first index child
-            find_first_index_identifier(node, source, symbols, diagnostics, context);
-            return;
-        }
+            || first_token == "struct.set")
+    {
+        // Only validate the first index child
+        find_first_index_identifier(node, source, symbols, diagnostics, context);
+        return;
     }
+
+    // memory.init takes a data segment index, not a memory index
+    // Skip validation since we don't track data segments yet
+    if *context == InstructionContext::Memory && first_token == "memory.init" {
+        return;
+    }
+
     find_undefined_identifiers(node, source, symbols, diagnostics, context);
 }
 

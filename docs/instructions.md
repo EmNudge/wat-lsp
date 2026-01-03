@@ -2113,6 +2113,20 @@ Example:
 ```
 ---
 
+## return_call
+Tail call: calls a function and returns its result directly. The current function's frame is replaced, avoiding stack growth for recursive calls.
+
+Example:
+```wat
+(func $factorial_tail (param $n i32) (param $acc i32) (result i32)
+  (if (result i32) (i32.le_s (local.get $n) (i32.const 1))
+    (then (local.get $acc))
+    (else (return_call $factorial_tail
+      (i32.sub (local.get $n) (i32.const 1))
+      (i32.mul (local.get $n) (local.get $acc))))))
+```
+---
+
 ## drop
 Remove the top value from the stack.
 
@@ -2393,6 +2407,17 @@ Example:
 ```
 ---
 
+## ref.as_non_null
+Assert that a reference is not null and convert it to a non-nullable type. Traps if the reference is null.
+
+Signature: `(param (ref null ht)) (result (ref ht))`
+
+Example:
+```wat
+(ref.as_non_null (local.get $nullable_ref))  ;; Traps if null, otherwise returns non-null ref
+```
+---
+
 ## module
 Declares a WebAssembly module. Top-level container for all declarations.
 
@@ -2593,6 +2618,79 @@ Example:
 ```
 ---
 
+## sub
+Declares a subtype that extends another type, enabling type hierarchies. The subtype must be compatible with its parent type.
+
+Example:
+```wat
+;; Base type
+(type $shape (struct
+  (field $x f32)
+  (field $y f32)))
+
+;; Subtype extending $shape with additional fields
+(type $rectangle (sub $shape (struct
+  (field $x f32)
+  (field $y f32)
+  (field $width f32)
+  (field $height f32))))
+
+;; Sealed subtype (cannot be further extended)
+(type $square (sub final $rectangle (struct
+  (field $x f32)
+  (field $y f32)
+  (field $width f32)
+  (field $height f32))))
+
+;; Subtype without explicit parent (subtypes the top type)
+(type $any_struct (sub (struct (field i32))))
+```
+---
+
+## final
+Modifier for subtypes that prevents further subtyping. A final type is sealed and cannot be extended.
+
+Example:
+```wat
+;; This type cannot be subtyped
+(type $sealed (sub final (struct
+  (field $value i32))))
+
+;; Final subtype of a parent
+(type $leaf (sub final $node (struct
+  (field $data i32))))
+
+;; Error: cannot subtype a final type
+;; (type $invalid (sub $sealed (struct ...)))  ;; not allowed
+```
+---
+
+## rec
+Declares a recursive type group, allowing mutually recursive type definitions.
+
+Example:
+```wat
+;; Mutually recursive types
+(rec
+  (type $tree (struct
+    (field $value i32)
+    (field $left (ref null $tree))
+    (field $right (ref null $tree))))
+
+  (type $forest (struct
+    (field $trees (ref null $tree_list))))
+
+  (type $tree_list (struct
+    (field $head (ref $tree))
+    (field $tail (ref null $tree_list)))))
+
+;; Single recursive type
+(rec
+  (type $node (struct
+    (field $next (ref null $node)))))
+```
+---
+
 ## elem
 Declares elements for a table.
 
@@ -2670,6 +2768,16 @@ Example:
 ```
 ---
 
+## v128
+128-bit vector type for SIMD operations. Can hold 16 i8, 8 i16, 4 i32, 2 i64, 4 f32, or 2 f64 lanes.
+
+Example:
+```wat
+(local $vec v128)
+(global $zeros v128 (v128.const i32x4 0 0 0 0))
+```
+---
+
 ## funcref
 Reference type for functions. Can be null.
 
@@ -2690,6 +2798,24 @@ Example:
 ```
 ---
 
+## null
+Heap type representing the null reference. Used in type annotations to indicate a nullable reference type, or as the heap type for `ref.null` instructions.
+
+Example:
+```wat
+;; Nullable reference to a function type
+(local $callback (ref null func))
+
+;; Nullable reference to a struct type
+(param $obj (ref null $my_struct))
+
+;; Create a null reference
+(ref.null func)
+(ref.null extern)
+(ref.null $my_type)
+```
+---
+
 ## ref
 Declares a reference type, optionally nullable. Used in type annotations for parameters, locals, globals, and fields.
 
@@ -2706,6 +2832,9 @@ Example:
 
 ;; In a field declaration
 (type $node (struct (field $next (ref null $node))))
+
+;; In an array type declaration
+(type $shape_array (array (mut (ref null $shape))))
 ```
 ---
 
@@ -2760,6 +2889,29 @@ Example:
 ;; Using the struct
 (func $create_point (result (ref $point))
   (struct.new $point (f32.const 1.0) (f32.const 2.0)))
+```
+---
+
+## array
+Declares an array type with elements of a specified type. Arrays are heap-allocated reference types with a fixed length determined at creation time. Used with the GC proposal.
+
+Example:
+```wat
+;; Simple array of i32
+(type $int_array (array i32))
+
+;; Mutable array of floats
+(type $float_array (array (mut f32)))
+
+;; Array of nullable references to a struct type
+(type $shape_array (array (mut (ref null $shape))))
+
+;; Immutable array of non-nullable references
+(type $func_table (array (ref $callback)))
+
+;; Using arrays
+(func $create_int_array (result (ref $int_array))
+  (array.new $int_array (i32.const 0) (i32.const 10)))  ;; 10 elements initialized to 0
 ```
 ---
 
@@ -3383,6 +3535,17 @@ Example:
 ```
 ---
 
+## f32x4.mul
+Multiply two f32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.mul (local.get $a) (local.get $b))
+```
+---
+
 ## f64x2.add
 Add two f64x2 vectors lane-wise.
 
@@ -3391,6 +3554,28 @@ Signature: `(param v128 v128) (result v128)`
 Example:
 ```wat
 (f64x2.add (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.trunc_sat_f32x4_s
+Convert an f32x4 vector to i32x4 with signed saturation. Values outside the signed i32 range are clamped.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(i32x4.trunc_sat_f32x4_s (local.get $floats))
+```
+---
+
+## i32x4.trunc_sat_f32x4_u
+Convert an f32x4 vector to i32x4 with unsigned saturation. Values outside the unsigned i32 range are clamped.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(i32x4.trunc_sat_f32x4_u (local.get $floats))
 ```
 ---
 
@@ -3468,6 +3653,18 @@ Signature: `(param v128) (result v128)`
 Example:
 ```wat
 (i32x4.abs (local.get $vec))
+```
+---
+
+## i32x4.bitmask
+Extract the high bit of each lane and combine into an i32 bitmask.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+;; Returns i32 where bit N is the high bit of lane N (0-3)
+(i32x4.bitmask (local.get $vec))
 ```
 ---
 
@@ -3651,5 +3848,842 @@ Example:
 (i8x16.shuffle 0 1 2 3 16 17 18 19 4 5 6 7 20 21 22 23
   (local.get $a)
   (local.get $b))
+```
+---
+
+## i32.atomic.load
+Atomically load a 32-bit integer from memory. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32) (result i32)`
+
+Example:
+```wat
+;; Atomically load i32 from address
+(i32.atomic.load (i32.const 0))
+```
+---
+
+## i64.atomic.load
+Atomically load a 64-bit integer from memory. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+;; Atomically load i64 from address
+(i64.atomic.load (i32.const 0))
+```
+---
+
+## i32.atomic.load8_u
+Atomically load an 8-bit value from memory and zero-extend to i32. Requires shared memory.
+
+Signature: `(param i32) (result i32)`
+
+Example:
+```wat
+;; Atomically load byte and zero-extend to i32
+(i32.atomic.load8_u (i32.const 0))
+```
+---
+
+## i32.atomic.load16_u
+Atomically load a 16-bit value from memory and zero-extend to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32) (result i32)`
+
+Example:
+```wat
+;; Atomically load 16-bit value and zero-extend to i32
+(i32.atomic.load16_u (i32.const 0))
+```
+---
+
+## i64.atomic.load8_u
+Atomically load an 8-bit value from memory and zero-extend to i64. Requires shared memory.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+;; Atomically load byte and zero-extend to i64
+(i64.atomic.load8_u (i32.const 0))
+```
+---
+
+## i64.atomic.load16_u
+Atomically load a 16-bit value from memory and zero-extend to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+;; Atomically load 16-bit value and zero-extend to i64
+(i64.atomic.load16_u (i32.const 0))
+```
+---
+
+## i64.atomic.load32_u
+Atomically load a 32-bit value from memory and zero-extend to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32) (result i64)`
+
+Example:
+```wat
+;; Atomically load 32-bit value and zero-extend to i64
+(i64.atomic.load32_u (i32.const 0))
+```
+---
+
+## i32.atomic.store
+Atomically store a 32-bit integer to memory. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32)`
+
+Example:
+```wat
+;; Atomically store i32 value at address
+(i32.atomic.store (i32.const 0) (i32.const 42))
+```
+---
+
+## i64.atomic.store
+Atomically store a 64-bit integer to memory. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+;; Atomically store i64 value at address
+(i64.atomic.store (i32.const 0) (i64.const 42))
+```
+---
+
+## i32.atomic.store8
+Atomically store the low 8 bits of an i32 to memory. Requires shared memory.
+
+Signature: `(param i32 i32)`
+
+Example:
+```wat
+;; Atomically store low byte of i32 at address
+(i32.atomic.store8 (i32.const 0) (i32.const 255))
+```
+---
+
+## i32.atomic.store16
+Atomically store the low 16 bits of an i32 to memory. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32)`
+
+Example:
+```wat
+;; Atomically store low 16 bits of i32 at address
+(i32.atomic.store16 (i32.const 0) (i32.const 1000))
+```
+---
+
+## i64.atomic.store8
+Atomically store the low 8 bits of an i64 to memory. Requires shared memory.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+;; Atomically store low byte of i64 at address
+(i64.atomic.store8 (i32.const 0) (i64.const 255))
+```
+---
+
+## i64.atomic.store16
+Atomically store the low 16 bits of an i64 to memory. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+;; Atomically store low 16 bits of i64 at address
+(i64.atomic.store16 (i32.const 0) (i64.const 1000))
+```
+---
+
+## i64.atomic.store32
+Atomically store the low 32 bits of an i64 to memory. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64)`
+
+Example:
+```wat
+;; Atomically store low 32 bits of i64 at address
+(i64.atomic.store32 (i32.const 0) (i64.const 100000))
+```
+---
+
+## i32.atomic.rmw.add
+Atomically read a 32-bit value, add to it, and store the result. Returns the original value. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically add 10 to value at address, return old value
+(i32.atomic.rmw.add (i32.const 0) (i32.const 10))
+```
+---
+
+## i32.atomic.rmw.sub
+Atomically read a 32-bit value, subtract from it, and store the result. Returns the original value. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically subtract 5 from value at address, return old value
+(i32.atomic.rmw.sub (i32.const 0) (i32.const 5))
+```
+---
+
+## i32.atomic.rmw.and
+Atomically read a 32-bit value, perform bitwise AND, and store the result. Returns the original value. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically AND with mask, return old value
+(i32.atomic.rmw.and (i32.const 0) (i32.const 0xFF))
+```
+---
+
+## i32.atomic.rmw.or
+Atomically read a 32-bit value, perform bitwise OR, and store the result. Returns the original value. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically OR with flags, return old value
+(i32.atomic.rmw.or (i32.const 0) (i32.const 0x80))
+```
+---
+
+## i32.atomic.rmw.xor
+Atomically read a 32-bit value, perform bitwise XOR, and store the result. Returns the original value. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically XOR with value, return old value
+(i32.atomic.rmw.xor (i32.const 0) (i32.const 0xFF))
+```
+---
+
+## i32.atomic.rmw.xchg
+Atomically exchange (swap) a 32-bit value in memory. Returns the original value. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically swap value at address, return old value
+(i32.atomic.rmw.xchg (i32.const 0) (i32.const 100))
+```
+---
+
+## i64.atomic.rmw.add
+Atomically read a 64-bit value, add to it, and store the result. Returns the original value. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically add 10 to i64 value at address, return old value
+(i64.atomic.rmw.add (i32.const 0) (i64.const 10))
+```
+---
+
+## i64.atomic.rmw.sub
+Atomically read a 64-bit value, subtract from it, and store the result. Returns the original value. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically subtract 5 from i64 value at address, return old value
+(i64.atomic.rmw.sub (i32.const 0) (i64.const 5))
+```
+---
+
+## i64.atomic.rmw.and
+Atomically read a 64-bit value, perform bitwise AND, and store the result. Returns the original value. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically AND with mask, return old value
+(i64.atomic.rmw.and (i32.const 0) (i64.const 0xFF))
+```
+---
+
+## i64.atomic.rmw.or
+Atomically read a 64-bit value, perform bitwise OR, and store the result. Returns the original value. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically OR with flags, return old value
+(i64.atomic.rmw.or (i32.const 0) (i64.const 0x80))
+```
+---
+
+## i64.atomic.rmw.xor
+Atomically read a 64-bit value, perform bitwise XOR, and store the result. Returns the original value. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically XOR with value, return old value
+(i64.atomic.rmw.xor (i32.const 0) (i64.const 0xFF))
+```
+---
+
+## i64.atomic.rmw.xchg
+Atomically exchange (swap) a 64-bit value in memory. Returns the original value. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically swap i64 value at address, return old value
+(i64.atomic.rmw.xchg (i32.const 0) (i64.const 100))
+```
+---
+
+## i32.atomic.rmw8.add_u
+Atomically read an 8-bit value, add to it, and store the result. Returns the original value zero-extended to i32. Requires shared memory.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically add to byte at address, return old value
+(i32.atomic.rmw8.add_u (i32.const 0) (i32.const 1))
+```
+---
+
+## i32.atomic.rmw8.sub_u
+Atomically read an 8-bit value, subtract from it, and store the result. Returns the original value zero-extended to i32. Requires shared memory.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically subtract from byte at address, return old value
+(i32.atomic.rmw8.sub_u (i32.const 0) (i32.const 1))
+```
+---
+
+## i32.atomic.rmw8.and_u
+Atomically read an 8-bit value, perform bitwise AND, and store the result. Returns the original value zero-extended to i32. Requires shared memory.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically AND byte at address with mask, return old value
+(i32.atomic.rmw8.and_u (i32.const 0) (i32.const 0x0F))
+```
+---
+
+## i32.atomic.rmw8.or_u
+Atomically read an 8-bit value, perform bitwise OR, and store the result. Returns the original value zero-extended to i32. Requires shared memory.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically OR byte at address with flags, return old value
+(i32.atomic.rmw8.or_u (i32.const 0) (i32.const 0x80))
+```
+---
+
+## i32.atomic.rmw8.xor_u
+Atomically read an 8-bit value, perform bitwise XOR, and store the result. Returns the original value zero-extended to i32. Requires shared memory.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically XOR byte at address, return old value
+(i32.atomic.rmw8.xor_u (i32.const 0) (i32.const 0xFF))
+```
+---
+
+## i32.atomic.rmw8.xchg_u
+Atomically exchange an 8-bit value in memory. Returns the original value zero-extended to i32. Requires shared memory.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically swap byte at address, return old value
+(i32.atomic.rmw8.xchg_u (i32.const 0) (i32.const 42))
+```
+---
+
+## i32.atomic.rmw16.add_u
+Atomically read a 16-bit value, add to it, and store the result. Returns the original value zero-extended to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically add to 16-bit value at address, return old value
+(i32.atomic.rmw16.add_u (i32.const 0) (i32.const 100))
+```
+---
+
+## i32.atomic.rmw16.sub_u
+Atomically read a 16-bit value, subtract from it, and store the result. Returns the original value zero-extended to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically subtract from 16-bit value at address, return old value
+(i32.atomic.rmw16.sub_u (i32.const 0) (i32.const 100))
+```
+---
+
+## i32.atomic.rmw16.and_u
+Atomically read a 16-bit value, perform bitwise AND, and store the result. Returns the original value zero-extended to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically AND 16-bit value at address with mask, return old value
+(i32.atomic.rmw16.and_u (i32.const 0) (i32.const 0x00FF))
+```
+---
+
+## i32.atomic.rmw16.or_u
+Atomically read a 16-bit value, perform bitwise OR, and store the result. Returns the original value zero-extended to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically OR 16-bit value at address with flags, return old value
+(i32.atomic.rmw16.or_u (i32.const 0) (i32.const 0x8000))
+```
+---
+
+## i32.atomic.rmw16.xor_u
+Atomically read a 16-bit value, perform bitwise XOR, and store the result. Returns the original value zero-extended to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically XOR 16-bit value at address, return old value
+(i32.atomic.rmw16.xor_u (i32.const 0) (i32.const 0xFFFF))
+```
+---
+
+## i32.atomic.rmw16.xchg_u
+Atomically exchange a 16-bit value in memory. Returns the original value zero-extended to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Atomically swap 16-bit value at address, return old value
+(i32.atomic.rmw16.xchg_u (i32.const 0) (i32.const 1000))
+```
+---
+
+## i64.atomic.rmw8.add_u
+Atomically read an 8-bit value, add to it, and store the result. Returns the original value zero-extended to i64. Requires shared memory.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically add to byte at address, return old value as i64
+(i64.atomic.rmw8.add_u (i32.const 0) (i64.const 1))
+```
+---
+
+## i64.atomic.rmw8.sub_u
+Atomically read an 8-bit value, subtract from it, and store the result. Returns the original value zero-extended to i64. Requires shared memory.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically subtract from byte at address, return old value as i64
+(i64.atomic.rmw8.sub_u (i32.const 0) (i64.const 1))
+```
+---
+
+## i64.atomic.rmw8.and_u
+Atomically read an 8-bit value, perform bitwise AND, and store the result. Returns the original value zero-extended to i64. Requires shared memory.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically AND byte at address with mask, return old value as i64
+(i64.atomic.rmw8.and_u (i32.const 0) (i64.const 0x0F))
+```
+---
+
+## i64.atomic.rmw8.or_u
+Atomically read an 8-bit value, perform bitwise OR, and store the result. Returns the original value zero-extended to i64. Requires shared memory.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically OR byte at address with flags, return old value as i64
+(i64.atomic.rmw8.or_u (i32.const 0) (i64.const 0x80))
+```
+---
+
+## i64.atomic.rmw8.xor_u
+Atomically read an 8-bit value, perform bitwise XOR, and store the result. Returns the original value zero-extended to i64. Requires shared memory.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically XOR byte at address, return old value as i64
+(i64.atomic.rmw8.xor_u (i32.const 0) (i64.const 0xFF))
+```
+---
+
+## i64.atomic.rmw8.xchg_u
+Atomically exchange an 8-bit value in memory. Returns the original value zero-extended to i64. Requires shared memory.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically swap byte at address, return old value as i64
+(i64.atomic.rmw8.xchg_u (i32.const 0) (i64.const 42))
+```
+---
+
+## i64.atomic.rmw16.add_u
+Atomically read a 16-bit value, add to it, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically add to 16-bit value at address, return old value as i64
+(i64.atomic.rmw16.add_u (i32.const 0) (i64.const 100))
+```
+---
+
+## i64.atomic.rmw16.sub_u
+Atomically read a 16-bit value, subtract from it, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically subtract from 16-bit value at address, return old value as i64
+(i64.atomic.rmw16.sub_u (i32.const 0) (i64.const 100))
+```
+---
+
+## i64.atomic.rmw16.and_u
+Atomically read a 16-bit value, perform bitwise AND, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically AND 16-bit value at address with mask, return old value as i64
+(i64.atomic.rmw16.and_u (i32.const 0) (i64.const 0x00FF))
+```
+---
+
+## i64.atomic.rmw16.or_u
+Atomically read a 16-bit value, perform bitwise OR, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically OR 16-bit value at address with flags, return old value as i64
+(i64.atomic.rmw16.or_u (i32.const 0) (i64.const 0x8000))
+```
+---
+
+## i64.atomic.rmw16.xor_u
+Atomically read a 16-bit value, perform bitwise XOR, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically XOR 16-bit value at address, return old value as i64
+(i64.atomic.rmw16.xor_u (i32.const 0) (i64.const 0xFFFF))
+```
+---
+
+## i64.atomic.rmw16.xchg_u
+Atomically exchange a 16-bit value in memory. Returns the original value zero-extended to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically swap 16-bit value at address, return old value as i64
+(i64.atomic.rmw16.xchg_u (i32.const 0) (i64.const 1000))
+```
+---
+
+## i64.atomic.rmw32.add_u
+Atomically read a 32-bit value, add to it, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically add to 32-bit value at address, return old value as i64
+(i64.atomic.rmw32.add_u (i32.const 0) (i64.const 1000))
+```
+---
+
+## i64.atomic.rmw32.sub_u
+Atomically read a 32-bit value, subtract from it, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically subtract from 32-bit value at address, return old value as i64
+(i64.atomic.rmw32.sub_u (i32.const 0) (i64.const 1000))
+```
+---
+
+## i64.atomic.rmw32.and_u
+Atomically read a 32-bit value, perform bitwise AND, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically AND 32-bit value at address with mask, return old value as i64
+(i64.atomic.rmw32.and_u (i32.const 0) (i64.const 0xFFFF0000))
+```
+---
+
+## i64.atomic.rmw32.or_u
+Atomically read a 32-bit value, perform bitwise OR, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically OR 32-bit value at address with flags, return old value as i64
+(i64.atomic.rmw32.or_u (i32.const 0) (i64.const 0x80000000))
+```
+---
+
+## i64.atomic.rmw32.xor_u
+Atomically read a 32-bit value, perform bitwise XOR, and store the result. Returns the original value zero-extended to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically XOR 32-bit value at address, return old value as i64
+(i64.atomic.rmw32.xor_u (i32.const 0) (i64.const 0xFFFFFFFF))
+```
+---
+
+## i64.atomic.rmw32.xchg_u
+Atomically exchange a 32-bit value in memory. Returns the original value zero-extended to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64) (result i64)`
+
+Example:
+```wat
+;; Atomically swap 32-bit value at address, return old value as i64
+(i64.atomic.rmw32.xchg_u (i32.const 0) (i64.const 100000))
+```
+---
+
+## i32.atomic.rmw.cmpxchg
+Atomically compare and exchange a 32-bit value. If the value at the address equals the expected value, replace it with the replacement value. Returns the original value. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32 i32) (result i32)`
+
+Example:
+```wat
+;; Compare and exchange: if [addr] == expected, set to replacement
+;; Returns original value at address
+(i32.atomic.rmw.cmpxchg
+  (i32.const 0)       ;; address
+  (i32.const 0)       ;; expected value
+  (i32.const 1))      ;; replacement value
+```
+---
+
+## i64.atomic.rmw.cmpxchg
+Atomically compare and exchange a 64-bit value. If the value at the address equals the expected value, replace it with the replacement value. Returns the original value. Requires shared memory. The address must be 8-byte aligned.
+
+Signature: `(param i32 i64 i64) (result i64)`
+
+Example:
+```wat
+;; Compare and exchange: if [addr] == expected, set to replacement
+;; Returns original value at address
+(i64.atomic.rmw.cmpxchg
+  (i32.const 0)       ;; address
+  (i64.const 0)       ;; expected value
+  (i64.const 1))      ;; replacement value
+```
+---
+
+## i32.atomic.rmw8.cmpxchg_u
+Atomically compare and exchange an 8-bit value. If the value at the address equals the expected value, replace it with the replacement value. Returns the original value zero-extended to i32. Requires shared memory.
+
+Signature: `(param i32 i32 i32) (result i32)`
+
+Example:
+```wat
+;; Compare and exchange byte: if [addr] == expected, set to replacement
+(i32.atomic.rmw8.cmpxchg_u
+  (i32.const 0)       ;; address
+  (i32.const 0)       ;; expected value
+  (i32.const 1))      ;; replacement value
+```
+---
+
+## i32.atomic.rmw16.cmpxchg_u
+Atomically compare and exchange a 16-bit value. If the value at the address equals the expected value, replace it with the replacement value. Returns the original value zero-extended to i32. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i32 i32) (result i32)`
+
+Example:
+```wat
+;; Compare and exchange 16-bit: if [addr] == expected, set to replacement
+(i32.atomic.rmw16.cmpxchg_u
+  (i32.const 0)       ;; address
+  (i32.const 0)       ;; expected value
+  (i32.const 1))      ;; replacement value
+```
+---
+
+## i64.atomic.rmw8.cmpxchg_u
+Atomically compare and exchange an 8-bit value. If the value at the address equals the expected value, replace it with the replacement value. Returns the original value zero-extended to i64. Requires shared memory.
+
+Signature: `(param i32 i64 i64) (result i64)`
+
+Example:
+```wat
+;; Compare and exchange byte: if [addr] == expected, set to replacement
+(i64.atomic.rmw8.cmpxchg_u
+  (i32.const 0)       ;; address
+  (i64.const 0)       ;; expected value
+  (i64.const 1))      ;; replacement value
+```
+---
+
+## i64.atomic.rmw16.cmpxchg_u
+Atomically compare and exchange a 16-bit value. If the value at the address equals the expected value, replace it with the replacement value. Returns the original value zero-extended to i64. Requires shared memory. The address must be 2-byte aligned.
+
+Signature: `(param i32 i64 i64) (result i64)`
+
+Example:
+```wat
+;; Compare and exchange 16-bit: if [addr] == expected, set to replacement
+(i64.atomic.rmw16.cmpxchg_u
+  (i32.const 0)       ;; address
+  (i64.const 0)       ;; expected value
+  (i64.const 1))      ;; replacement value
+```
+---
+
+## i64.atomic.rmw32.cmpxchg_u
+Atomically compare and exchange a 32-bit value. If the value at the address equals the expected value, replace it with the replacement value. Returns the original value zero-extended to i64. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i64 i64) (result i64)`
+
+Example:
+```wat
+;; Compare and exchange 32-bit: if [addr] == expected, set to replacement
+(i64.atomic.rmw32.cmpxchg_u
+  (i32.const 0)       ;; address
+  (i64.const 0)       ;; expected value
+  (i64.const 1))      ;; replacement value
+```
+---
+
+## memory.atomic.wait32
+Suspend the current thread until notified or timeout. The thread waits if the 32-bit value at the address equals the expected value. Returns 0 if woken by notify, 1 if value did not match, 2 if timed out. Requires shared memory. The address must be 4-byte aligned. Timeout is in nanoseconds (-1 for infinite).
+
+Signature: `(param i32 i32 i64) (result i32)`
+
+Example:
+```wat
+;; Wait on address until value changes or timeout
+;; Returns: 0 = woken, 1 = not equal, 2 = timed out
+(memory.atomic.wait32
+  (i32.const 0)       ;; address
+  (i32.const 0)       ;; expected value
+  (i64.const -1))     ;; timeout (-1 = infinite)
+```
+---
+
+## memory.atomic.wait64
+Suspend the current thread until notified or timeout. The thread waits if the 64-bit value at the address equals the expected value. Returns 0 if woken by notify, 1 if value did not match, 2 if timed out. Requires shared memory. The address must be 8-byte aligned. Timeout is in nanoseconds (-1 for infinite).
+
+Signature: `(param i32 i64 i64) (result i32)`
+
+Example:
+```wat
+;; Wait on address until 64-bit value changes or timeout
+;; Returns: 0 = woken, 1 = not equal, 2 = timed out
+(memory.atomic.wait64
+  (i32.const 0)       ;; address
+  (i64.const 0)       ;; expected value
+  (i64.const 1000000000)) ;; timeout in nanoseconds (1 second)
+```
+---
+
+## memory.atomic.notify
+Wake up threads waiting on an address. Returns the number of threads that were woken. Requires shared memory. The address must be 4-byte aligned.
+
+Signature: `(param i32 i32) (result i32)`
+
+Example:
+```wat
+;; Wake up to 1 waiter at address
+(memory.atomic.notify
+  (i32.const 0)       ;; address
+  (i32.const 1))      ;; max waiters to wake
+```
+---
+
+## atomic.fence
+Ensure memory ordering between atomic and non-atomic operations. This is a sequentially consistent fence that prevents reordering of memory accesses across the fence.
+
+Signature: `()`
+
+Example:
+```wat
+;; Memory fence for ordering guarantees
+(atomic.fence)
 ```
 ---

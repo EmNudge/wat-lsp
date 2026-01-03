@@ -110,7 +110,7 @@ module.exports = grammar({
 
     export: $ => seq("(", "export", $.name, ")"),
 
-    export_desc: $ => choice($.export_desc_func, $.export_desc_table, $.export_desc_memory, $.export_desc_global),
+    export_desc: $ => choice($.export_desc_func, $.export_desc_table, $.export_desc_memory, $.export_desc_global, $.export_desc_tag),
 
     export_desc_func: $ => seq("(", "func", $.index, ")"),
 
@@ -119,6 +119,8 @@ module.exports = grammar({
     export_desc_memory: $ => seq("(", "memory", $.index, ")"),
 
     export_desc_table: $ => seq("(", "table", $.index, ")"),
+
+    export_desc_tag: $ => seq("(", "tag", $.index, ")"),
 
     expr: $ => seq("(", $.expr1, ")"),
 
@@ -133,7 +135,7 @@ module.exports = grammar({
 
     expr1_call: $ =>
       seq(
-        "call_indirect",
+        choice("call_indirect", "return_call_indirect"),
         // proposal: reference-types
         optional($.index),
         optional($.type_use),
@@ -222,6 +224,7 @@ module.exports = grammar({
         $.import_desc_table_type,
         $.import_desc_memory_type,
         $.import_desc_global_type,
+        $.import_desc_tag_type,
       ),
 
     import_desc_func_type: $ => seq("(", "func", optional($.identifier), repeat($.func_type), ")"),
@@ -234,6 +237,8 @@ module.exports = grammar({
 
     import_desc_type_use: $ => seq("(", "func", optional($.identifier), $.type_use, ")"),
 
+    import_desc_tag_type: $ => seq("(", "tag", optional($.identifier), optional($.type_use), repeat($.func_type_params), repeat($.func_type_results), ")"),
+
     index: $ => choice($.nat, $.identifier),
 
     instr: $ => choice($.instr_plain, $.instr_call, $.instr_block, $.expr),
@@ -241,14 +246,14 @@ module.exports = grammar({
     instr_block: $ => choice($.block_block, $.block_loop, $.block_if, $.block_try, $.block_try_table),
 
     instr_call: $ =>
-      seq("call_indirect", optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results), $.instr),
+      seq(choice("call_indirect", "return_call_indirect"), optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results), $.instr),
 
     // NOTE: this must be wrapped in "optional"
     instr_list: $ => repeat1(choice($.instr_list_call, $.instr)),
 
     instr_list_call: $ =>
       prec.right(
-        seq("call_indirect", optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results)),
+        seq(choice("call_indirect", "return_call_indirect"), optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results)),
       ),
 
     instr_plain: $ =>
@@ -268,7 +273,7 @@ module.exports = grammar({
         $.op_nullary,
         seq($.op_index, $.index),
         seq($.op_index_opt, optional($.index)),
-        seq($.op_index_opt_offset_opt_align_opt, optional($.offset_value), optional($.align_value)),
+        seq($.op_index_opt_offset_opt_align_opt, optional($.index), optional($.offset_value), optional($.align_value)),
         seq("br_table", $.index, repeat($.index)),
         $.op_const,
         $.op_select,
@@ -338,14 +343,17 @@ module.exports = grammar({
         seq("array.copy", $.index, $.index),
         seq("array.init_data", $.index, $.index),
         seq("array.init_elem", $.index, $.index),
-        seq("ref.test", choice($.ref_kind, $.index)),
-        seq("ref.cast", choice($.ref_kind, $.index)),
-        seq("ref.cast_null", choice($.ref_kind, $.index)),
+        seq("ref.test", $._heap_type_or_ref),
+        seq("ref.cast", $._heap_type_or_ref),
+        seq("ref.cast_null", $._heap_type_or_ref),
         "ref.i31",
         "i31.get_s",
         "i31.get_u",
-        seq("br_on_cast", $.index, choice($.ref_kind, $.index), choice($.ref_kind, $.index)),
-        seq("br_on_cast_fail", $.index, choice($.ref_kind, $.index), choice($.ref_kind, $.index)),
+        seq("br_on_cast", $.index, $._heap_type_or_ref, $._heap_type_or_ref),
+        seq("br_on_cast_fail", $.index, $._heap_type_or_ref, $._heap_type_or_ref),
+        // typed function references
+        seq("call_ref", $.index),
+        seq("return_call_ref", $.index),
       ),
 
     _instruction_exception: $ =>
@@ -573,15 +581,15 @@ module.exports = grammar({
           ),
           new RegExp(
             [
-              "call_ref",
               "drop",
               "memory\\.(atomic\\.(notify|wait(32|64))|copy|fill)",
               "nop",
-              "re(f\\.(as_non_null|is_null)|turn(_call_ref)?)",
+              "ref\\.(as_non_null|is_null)",
+              "return",
               "unreachable",
             ].join("|"),
           ),
-          seq(imm("v128."), imm(/and(not)?|bitselect|not|x?or/)),
+          seq(imm("v128."), imm(/and(not)?|any_true|bitselect|not|x?or/)),
         ),
       ),
 
@@ -597,6 +605,7 @@ module.exports = grammar({
             "local\\.(get|set|tee)",
             "memory\\.init",
             "ref\\.func",
+            "return_call",
           ].join("|"),
         ),
       ),
@@ -853,7 +862,10 @@ module.exports = grammar({
     offset_value: $ => seq("offset", imm("="), $.align_offset_value),
 
     // proposal: reference-types
-    ref_kind: $ => /extern|func|struct|array|i31|any|eq|null/,
+    ref_kind: $ => /extern|func|struct|array|i31|any|eq|null|none|noextern|nofunc/,
+
+    // Helper for instructions that take either a heap type or (ref ...) form
+    _heap_type_or_ref: $ => choice($.ref_kind, $.index, $.ref_type_ref),
 
     // proposal: reference-types
     ref_type: $ => choice($.ref_type_externref, $.ref_type_funcref, $.ref_type_ref, "anyref", "eqref", "i31ref", "structref", "arrayref", "nullref", "nullfuncref", "nullexternref", "nullref"),
@@ -893,13 +905,26 @@ module.exports = grammar({
       seq("(", "func", repeat($.func_type), ")"),
       $.struct_type,
       $.array_type,
+      $.sub_type,
+    ),
+
+    // GC sub-typing
+    sub_type: $ => seq("(", "sub", optional("final"), optional($.index), $.def_type, ")"),
+    def_type: $ => choice(
+      seq("(", "func", repeat($.func_type), ")"),
+      $.struct_type,
+      $.array_type,
     ),
 
     struct_type: $ => seq("(", "struct", repeat($.field_type), ")"),
 
-    array_type: $ => seq("(", "array", $.field_type, ")"),
+    array_type: $ => seq("(", "array", $.storage_type, ")"),
 
-    field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), $.value_type, optional(seq("(", "mut", $.value_type, ")")), ")"), // simplified, need better mut handling
+    field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), $.storage_type, ")"),
+
+    // Storage type can be mutable or immutable
+    storage_type: $ => choice($.value_type, $.mut_storage_type),
+    mut_storage_type: $ => seq("(", "mut", $.value_type, ")"),
 
     // Exception handling blocks
     block_try_table: $ =>
