@@ -151,7 +151,7 @@
           (return (i32.const 200)))
         (return (i32.const 300)))
       (return (i32.const 400)))
-    (i32.const 0)))  ;; default case
+    (i32.const 0))  ;; default case
 
   ;; Complex br_table with fallthrough simulation
   (func $complex_switch (param $x i32) (result i32)
