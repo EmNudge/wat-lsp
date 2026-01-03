@@ -1,7 +1,8 @@
 use crate::symbols::*;
 use crate::utils::{
     determine_context_from_line, determine_instruction_context, find_containing_function,
-    get_line_at_position, get_word_at_position, node_at_position, InstructionContext,
+    get_line_at_position, get_word_at_position, is_inside_comment, node_at_position,
+    InstructionContext,
 };
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
@@ -15,6 +16,11 @@ pub fn provide_hover(
     tree: &Tree,
     position: Position,
 ) -> Option<Hover> {
+    // Don't provide hover for content inside comments
+    if is_inside_comment(tree, document, position) {
+        return None;
+    }
+
     let word = get_word_at_position(document, position)?;
 
     // Check if it's an instruction

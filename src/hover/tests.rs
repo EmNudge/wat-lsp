@@ -1,6 +1,6 @@
 use super::*;
 use crate::tree_sitter_bindings::create_parser;
-use crate::utils::{get_line_at_position, is_word_char};
+use crate::utils::{get_line_at_position, is_inside_comment, is_word_char};
 use tree_sitter::Tree;
 
 fn create_test_tree(document: &str) -> Tree {
@@ -331,4 +331,68 @@ fn test_format_function_signature() {
     assert!(sig.contains("i32"));
     assert!(sig.contains("i64"));
     assert!(sig.contains("f32"));
+}
+
+#[test]
+fn test_no_hover_in_block_comment() {
+    // Block comment containing text that looks like an instruction
+    let document = "(; i32.add ;)";
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    let position = Position::new(0, 5); // On "i32.add" inside comment
+
+    // Verify we're inside a comment
+    assert!(is_inside_comment(&tree, document, position));
+
+    // Hover should return None for content inside comments
+    let hover = provide_hover(document, &symbols, &tree, position);
+    assert!(hover.is_none());
+}
+
+#[test]
+fn test_no_hover_in_block_comment_with_symbol() {
+    // Block comment containing a symbol reference
+    let document = "(; $add ;)";
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    let position = Position::new(0, 4); // On "$add" inside comment
+
+    // Verify we're inside a comment
+    assert!(is_inside_comment(&tree, document, position));
+
+    // Hover should return None for content inside comments
+    let hover = provide_hover(document, &symbols, &tree, position);
+    assert!(hover.is_none());
+}
+
+#[test]
+fn test_no_hover_in_line_comment() {
+    // Line comment containing an instruction
+    let document = ";; i32.add";
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    let position = Position::new(0, 5); // On "i32.add" inside comment
+
+    // Verify we're inside a comment
+    assert!(is_inside_comment(&tree, document, position));
+
+    // Hover should return None for content inside comments
+    let hover = provide_hover(document, &symbols, &tree, position);
+    assert!(hover.is_none());
+}
+
+#[test]
+fn test_hover_outside_comment() {
+    // Verify hover still works outside comments
+    let document = "(; comment ;) i32.add";
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    let position = Position::new(0, 17); // On "i32.add" outside comment
+
+    // Verify we're NOT inside a comment
+    assert!(!is_inside_comment(&tree, document, position));
+
+    // Hover should work for instruction outside comment
+    let hover = provide_hover(document, &symbols, &tree, position);
+    assert!(hover.is_some());
 }
