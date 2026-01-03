@@ -1,13 +1,12 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { workspace, ExtensionContext, window, commands, languages } from 'vscode';
+import { workspace, ExtensionContext, window, commands } from 'vscode';
 import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
   TransportKind
 } from 'vscode-languageclient/node';
-import { WatSemanticTokensProvider, legend } from './semanticTokensProvider';
 
 let client: LanguageClient | undefined;
 let serverPath: string;
@@ -72,20 +71,6 @@ async function startClient(context: ExtensionContext): Promise<void> {
     }
   };
 
-  // Register semantic tokens provider for tree-sitter syntax highlighting
-  const semanticTokensProvider = new WatSemanticTokensProvider();
-  context.subscriptions.push(
-    languages.registerDocumentSemanticTokensProvider(
-      [
-        { language: 'wat' },
-        { pattern: '**/*.wat' },
-        { pattern: '**/*.wast' },
-      ],
-      semanticTokensProvider,
-      legend
-    )
-  );
-
   // Create and start the language client
   client = new LanguageClient(
     'watLsp',
@@ -95,8 +80,11 @@ async function startClient(context: ExtensionContext): Promise<void> {
   );
 
   try {
+    console.log('Starting WAT Language Server...');
     await client.start();
+    console.log('WAT Language Server started successfully');
   } catch (err: any) {
+    console.error('Failed to start WAT Language Server:', err);
     client = undefined;
     window.showErrorMessage(
       `Failed to start WAT Language Server: ${err.message}\n\n` +
@@ -118,7 +106,7 @@ async function stopClient(): Promise<void> {
 export function activate(context: ExtensionContext) {
   console.log('WAT LSP extension activating...');
 
-  // Register toggle command FIRST to ensure it's always available
+  // Register toggle command
   const toggleCommand = commands.registerCommand('watLsp.toggle', async () => {
     const config = workspace.getConfiguration('watLsp');
     const currentlyEnabled = config.get<boolean>('enabled', true);
@@ -149,7 +137,9 @@ export function activate(context: ExtensionContext) {
     // Start the client if enabled
     const config = workspace.getConfiguration('watLsp');
     if (config.get<boolean>('enabled', true)) {
-      startClient(context);
+      startClient(context).catch(err => {
+        console.error('Error starting LSP client:', err);
+      });
     }
   } catch (err: any) {
     console.error('WAT LSP activation error:', err);

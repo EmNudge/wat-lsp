@@ -39,6 +39,9 @@
 ; Heap type keywords (used in ref.null, ref.cast, etc.)
 (ref_kind) @type.builtin
 
+; ref and null keywords in type contexts (e.g., (ref null func))
+["ref" "null"] @type.builtin
+
 ; Control flow keywords
 [
   "block"
@@ -92,10 +95,14 @@
 (op_index) @function.instruction
 (op_index_opt) @function.instruction
 (op_index_opt_offset_opt_align_opt) @function.instruction
-(op_const) @function.instruction
+; For const instructions, only capture the instruction part (pat00/pat01), not the number value
+(op_const (pat00) @function.instruction)
+(op_const (pat01) @function.instruction)
 (op_select) @function.instruction
-(op_simd_const) @function.instruction
-(op_simd_lane) @function.instruction
+; For SIMD const/lane instructions, only capture the instruction name, not the numeric values
+(op_simd_const (instr_name) @function.instruction)
+(op_simd_const (lane_type) @type.builtin)
+(op_simd_lane (instr_name) @function.instruction)
 (op_simd_offset_opt_align_opt) @function.instruction
 (op_table_copy) @function.instruction
 (op_table_init) @function.instruction

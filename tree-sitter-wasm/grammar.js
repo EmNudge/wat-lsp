@@ -669,24 +669,24 @@ module.exports = grammar({
     // proposal: simd
     op_simd_const: $ =>
       seq(
-        "v128.const",
+        alias("v128.const", $.instr_name),
         choice(
-          seq("f32x4", ...Array(4).fill($.float)),
-          seq("f64x2", ...Array(2).fill($.float)),
-          seq("i8x16", ...Array(16).fill($.int)),
-          seq("i16x8", ...Array(8).fill($.int)),
-          seq("i32x4", ...Array(4).fill($.int)),
-          seq("i64x2", ...Array(2).fill($.int)),
+          seq(alias("f32x4", $.lane_type), ...Array(4).fill($.float)),
+          seq(alias("f64x2", $.lane_type), ...Array(2).fill($.float)),
+          seq(alias("i8x16", $.lane_type), ...Array(16).fill($.int)),
+          seq(alias("i16x8", $.lane_type), ...Array(8).fill($.int)),
+          seq(alias("i32x4", $.lane_type), ...Array(4).fill($.int)),
+          seq(alias("i64x2", $.lane_type), ...Array(2).fill($.int)),
         ),
       ),
 
     // proposal: simd
     op_simd_lane: $ =>
       choice(
-        seq(seq("i8x16", imm(".shuffle")), ...Array(16).fill($.float)),
-        seq(seq(choice("i8x16", "i16x8"), imm("."), imm("extract_lane"), imm("_"), imm(alias(/[su]/, $.pat00))), $.int),
-        seq(seq(choice("f32x4", "f64x2", "i32x4", "i64x2"), imm("."), imm("extract_lane")), $.int),
-        seq(seq(choice("f32x4", "f64x2", "i8x16", "i16x8", "i32x4", "i64x2"), imm("."), imm("replace_lane")), $.int),
+        seq(alias(seq("i8x16", imm(".shuffle")), $.instr_name), ...Array(16).fill($.int)),
+        seq(alias(seq(choice("i8x16", "i16x8"), imm("."), imm("extract_lane"), imm("_"), /[su]/), $.instr_name), $.int),
+        seq(alias(seq(choice("f32x4", "f64x2", "i32x4", "i64x2"), imm("."), imm("extract_lane")), $.instr_name), $.int),
+        seq(alias(seq(choice("f32x4", "f64x2", "i8x16", "i16x8", "i32x4", "i64x2"), imm("."), imm("replace_lane")), $.instr_name), $.int),
       ),
 
     // proposal: bulk-memory-operations
