@@ -353,12 +353,12 @@
             {
               "comment": "Control instruction [exception-handling]",
               "name": "keyword.control.wat",
-              "match": "\\b(?:try|catch|throw|rethrow|br_on_exn)\\b"
+              "match": "\\b(?:try|try_table|catch|catch_all|throw|throw_ref|rethrow|br_on_exn)\\b"
             },
             {
               "comment": "Module element [exception-handling]",
               "name": "storage.type.wat",
-              "match": "(?<=\\()event\\b"
+              "match": "(?<=\\()(?:event|tag)\\b"
             }
           ]
         },
@@ -634,6 +634,11 @@
           "comment": "GC Types",
           "patterns": [
             {
+              "comment": "Null modifier for reference types [GC]",
+              "name": "storage.modifier.wat",
+              "match": "(?<=ref\\s)null\\b"
+            },
+            {
               "comment": "Type name [GC]",
               "name": "entity.name.type.wat",
               "match": "\\b(?:i8|i16|ref|funcref|externref|anyref|eqref|i31ref|nullfuncref|nullexternref|structref|arrayref|nullref)\\b(?!\\.)"
@@ -664,7 +669,7 @@
             {
               "comment": "Module element [mvp]",
               "name": "storage.type.wat",
-              "match": "(?<=\\()(?:module|import|export|memory|data|table|elem|start|func|type|param|result|global|local)\\b"
+              "match": "(?<=\\()(?:module|import|export|memory|data|table|elem|start|func|type|param|result|global|local|tag|struct|field|array|rec|sub)\\b"
             },
             {
               "comment": "Mutable global modifier [mvp]",

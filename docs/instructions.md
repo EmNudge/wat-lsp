@@ -1964,6 +1964,41 @@ Example:
 ```
 ---
 
+## then
+Marks the branch of an `if` statement that executes when the condition is non-zero (true).
+
+Example:
+```wat
+(if (i32.gt_s (local.get $x) (i32.const 0))
+  (then
+    (call $log (i32.const 1))
+    (local.set $positive (i32.const 1))))
+
+;; With result type
+(if (result i32) (local.get $condition)
+  (then (i32.const 100))
+  (else (i32.const 0)))
+```
+---
+
+## else
+Marks the branch of an `if` statement that executes when the condition is zero (false).
+
+Example:
+```wat
+(if (result i32) (local.get $flag)
+  (then (i32.const 1))
+  (else (i32.const 0)))
+
+;; Multi-statement else
+(if (i32.eqz (local.get $x))
+  (then (call $handle_zero))
+  (else
+    (call $handle_nonzero)
+    (local.set $processed (i32.const 1))))
+```
+---
+
 ## br
 Unconditional branch to a label. Exits blocks/loops.
 
@@ -2655,6 +2690,79 @@ Example:
 ```
 ---
 
+## ref
+Declares a reference type, optionally nullable. Used in type annotations for parameters, locals, globals, and fields.
+
+Example:
+```wat
+;; Non-nullable reference to a struct type
+(param $p (ref $my_struct))
+
+;; Nullable reference
+(local $obj (ref null $my_struct))
+
+;; Reference to a function type
+(global $callback (ref null $callback_type) (ref.null $callback_type))
+
+;; In a field declaration
+(type $node (struct (field $next (ref null $node))))
+```
+---
+
+## field
+Declares a field within a struct type definition. Fields can be mutable or immutable and have optional names.
+
+Example:
+```wat
+;; Struct with named fields
+(type $point (struct
+  (field $x f32)
+  (field $y f32)))
+
+;; Mutable field
+(type $counter (struct
+  (field $value (mut i32))))
+
+;; Multiple fields with mixed mutability
+(type $person (struct
+  (field $id i32)                    ;; immutable
+  (field $age (mut i32))             ;; mutable
+  (field $name (ref $string))))      ;; reference type
+
+;; Packed field types
+(type $packed (struct
+  (field i8)
+  (field i16)))
+```
+---
+
+## struct
+Declares a struct type with zero or more fields. Structs are heap-allocated reference types used with the GC proposal.
+
+Example:
+```wat
+;; Simple struct type
+(type $point (struct
+  (field $x f32)
+  (field $y f32)))
+
+;; Struct with mixed field types
+(type $object (struct
+  (field $id i32)
+  (field $data (ref null $data_type))
+  (field $flags (mut i32))))
+
+;; Recursive struct (linked list node)
+(type $node (struct
+  (field $value i32)
+  (field $next (ref null $node))))
+
+;; Using the struct
+(func $create_point (result (ref $point))
+  (struct.new $point (f32.const 1.0) (f32.const 2.0)))
+```
+---
+
 ## struct.new
 Create a new structure on the heap.
 
@@ -2974,6 +3082,16 @@ Example:
 ```
 ---
 
+## tag
+Declare an exception tag with a type signature for exception handling.
+
+Example:
+```wat
+(tag $error (param i32))
+(tag $complex_error (param i32 i32 f64))
+```
+---
+
 ## try_table
 Define a block that catches exceptions using a jump table.
 
@@ -2984,6 +3102,72 @@ Example:
 (try_table (catch $tag $handler_label)
   (throw $tag (i32.const 1))
 )
+```
+---
+
+## catch
+Catches exceptions with a specific tag in a `try_table` block. Branches to a label with the exception payload.
+
+Example:
+```wat
+(block $handler (result i32)
+  (try_table (catch $error_tag $handler)
+    (call $may_throw)
+    (i32.const 0)  ;; No error
+  )
+)
+;; $handler receives the i32 payload from $error_tag
+
+;; Multiple catch clauses
+(try_table
+  (catch $error1 $handle_error1)
+  (catch $error2 $handle_error2)
+  (catch_all $handle_any)
+  (call $risky_operation))
+```
+---
+
+## catch_all
+Catches any exception in a `try_table` block, regardless of tag.
+
+Example:
+```wat
+(block $fallback
+  (try_table (catch_all $fallback)
+    (call $may_throw_anything)
+  )
+)
+;; $fallback receives exnref
+```
+---
+
+## catch_ref
+Catches exceptions with a specific tag and provides the exception reference.
+
+Example:
+```wat
+(block $handler (result i32 exnref)
+  (try_table (catch_ref $error_tag $handler)
+    (call $may_throw)
+    (unreachable)
+  )
+)
+;; $handler receives payload and exnref for rethrowing
+```
+---
+
+## catch_all_ref
+Catches any exception and provides the exception reference.
+
+Example:
+```wat
+(block $handler (result exnref)
+  (try_table (catch_all_ref $handler)
+    (call $may_throw)
+    (unreachable)
+  )
+)
+;; Can rethrow with throw_ref
 ```
 ---
 
@@ -3284,5 +3468,188 @@ Signature: `(param v128) (result v128)`
 Example:
 ```wat
 (i32x4.abs (local.get $vec))
+```
+---
+
+## i8x16.extract_lane_s
+Extract a signed 8-bit lane from an i8x16 vector and sign-extend to i32.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+;; Extract lane 5 (0-15) as signed i32
+(i8x16.extract_lane_s 5 (local.get $vec))
+```
+---
+
+## i8x16.extract_lane_u
+Extract an unsigned 8-bit lane from an i8x16 vector and zero-extend to i32.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+;; Extract lane 5 (0-15) as unsigned i32
+(i8x16.extract_lane_u 5 (local.get $vec))
+```
+---
+
+## i16x8.extract_lane_s
+Extract a signed 16-bit lane from an i16x8 vector and sign-extend to i32.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+;; Extract lane 3 (0-7) as signed i32
+(i16x8.extract_lane_s 3 (local.get $vec))
+```
+---
+
+## i16x8.extract_lane_u
+Extract an unsigned 16-bit lane from an i16x8 vector and zero-extend to i32.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+;; Extract lane 3 (0-7) as unsigned i32
+(i16x8.extract_lane_u 3 (local.get $vec))
+```
+---
+
+## i32x4.extract_lane
+Extract a 32-bit lane from an i32x4 vector.
+
+Signature: `(param v128) (result i32)`
+
+Example:
+```wat
+;; Extract lane 2 (0-3)
+(i32x4.extract_lane 2 (local.get $vec))
+```
+---
+
+## i64x2.extract_lane
+Extract a 64-bit lane from an i64x2 vector.
+
+Signature: `(param v128) (result i64)`
+
+Example:
+```wat
+;; Extract lane 1 (0-1)
+(i64x2.extract_lane 1 (local.get $vec))
+```
+---
+
+## f32x4.extract_lane
+Extract a 32-bit float lane from an f32x4 vector.
+
+Signature: `(param v128) (result f32)`
+
+Example:
+```wat
+;; Extract lane 0 (0-3)
+(f32x4.extract_lane 0 (local.get $vec))
+```
+---
+
+## f64x2.extract_lane
+Extract a 64-bit float lane from an f64x2 vector.
+
+Signature: `(param v128) (result f64)`
+
+Example:
+```wat
+;; Extract lane 0 (0-1)
+(f64x2.extract_lane 0 (local.get $vec))
+```
+---
+
+## i8x16.replace_lane
+Replace an 8-bit lane in an i8x16 vector.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+```wat
+;; Replace lane 5 (0-15) with value 42
+(i8x16.replace_lane 5 (local.get $vec) (i32.const 42))
+```
+---
+
+## i16x8.replace_lane
+Replace a 16-bit lane in an i16x8 vector.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+```wat
+;; Replace lane 3 (0-7) with value 1000
+(i16x8.replace_lane 3 (local.get $vec) (i32.const 1000))
+```
+---
+
+## i32x4.replace_lane
+Replace a 32-bit lane in an i32x4 vector.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+```wat
+;; Replace lane 2 (0-3) with value
+(i32x4.replace_lane 2 (local.get $vec) (i32.const 123456))
+```
+---
+
+## i64x2.replace_lane
+Replace a 64-bit lane in an i64x2 vector.
+
+Signature: `(param v128 i64) (result v128)`
+
+Example:
+```wat
+;; Replace lane 1 (0-1) with value
+(i64x2.replace_lane 1 (local.get $vec) (i64.const 9876543210))
+```
+---
+
+## f32x4.replace_lane
+Replace a 32-bit float lane in an f32x4 vector.
+
+Signature: `(param v128 f32) (result v128)`
+
+Example:
+```wat
+;; Replace lane 0 (0-3) with value
+(f32x4.replace_lane 0 (local.get $vec) (f32.const 3.14))
+```
+---
+
+## f64x2.replace_lane
+Replace a 64-bit float lane in an f64x2 vector.
+
+Signature: `(param v128 f64) (result v128)`
+
+Example:
+```wat
+;; Replace lane 0 (0-1) with value
+(f64x2.replace_lane 0 (local.get $vec) (f64.const 2.71828))
+```
+---
+
+## i8x16.shuffle
+Shuffle bytes from two i8x16 vectors using 16 lane indices.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Shuffle lanes from two vectors
+;; Indices 0-15 select from first vector, 16-31 from second
+(i8x16.shuffle 0 1 2 3 16 17 18 19 4 5 6 7 20 21 22 23
+  (local.get $a)
+  (local.get $b))
 ```
 ---

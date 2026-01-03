@@ -1454,25 +1454,19 @@ fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
 
     let mut params = Vec::new();
 
+    // func_type_params is a direct child of module_field_tag (no tag_type wrapper)
     let mut cursor = tag_node.walk();
     for child in tag_node.children(&mut cursor) {
-        if child.kind() == "tag_type" {
-            // tag_type contains func_type_params
-            let mut type_cursor = child.walk();
-            for type_child in child.children(&mut type_cursor) {
-                if type_child.kind() == "func_type_params" {
-                    // Reuse extract_parameters logic but we only need types
-                    let mut params_cursor = type_child.walk();
-                    for param_child in type_child.children(&mut params_cursor) {
-                        if param_child.kind() == "func_type_params_one"
-                            || param_child.kind() == "func_type_params_many"
-                        {
-                            let mut param_type_cursor = param_child.walk();
-                            for child in param_child.children(&mut param_type_cursor) {
-                                if child.kind() == "value_type" {
-                                    params.push(extract_value_type(&child, source));
-                                }
-                            }
+        if child.kind() == "func_type_params" {
+            let mut params_cursor = child.walk();
+            for param_child in child.children(&mut params_cursor) {
+                if param_child.kind() == "func_type_params_one"
+                    || param_child.kind() == "func_type_params_many"
+                {
+                    let mut param_type_cursor = param_child.walk();
+                    for type_child in param_child.children(&mut param_type_cursor) {
+                        if type_child.kind() == "value_type" {
+                            params.push(extract_value_type(&type_child, source));
                         }
                     }
                 }

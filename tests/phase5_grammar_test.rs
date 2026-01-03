@@ -74,8 +74,18 @@ fn test_parse_exception_handling_tag() {
 
     // Verify tags were parsed
     assert_eq!(symbols.tags.len(), 2);
-    assert!(symbols.get_tag_by_name("$error").is_some());
-    assert!(symbols.get_tag_by_name("$overflow").is_some());
+
+    // Verify tag with param
+    let error_tag = symbols.get_tag_by_name("$error").unwrap();
+    assert_eq!(error_tag.params.len(), 1, "Tag $error should have 1 param");
+
+    // Verify tag without param
+    let overflow_tag = symbols.get_tag_by_name("$overflow").unwrap();
+    assert_eq!(
+        overflow_tag.params.len(),
+        0,
+        "Tag $overflow should have 0 params"
+    );
 }
 
 #[test]

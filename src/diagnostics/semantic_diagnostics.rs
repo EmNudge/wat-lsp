@@ -26,15 +26,26 @@ fn walk_tree_for_undefined_references(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Special handling for catch_clause: first index is tag, second is label
+    if node.kind() == "catch_clause" {
+        check_catch_clause_references(&node, source, symbols, diagnostics);
+        return;
+    }
+
     // Determine if this node is a reference instruction
     let context = determine_instruction_context_at_node(&node, source);
 
     if context != InstructionContext::General {
-        // Check for undefined references in this instruction
+        // Check for undefined references in this instruction's direct indices only
         check_references(&node, source, symbols, diagnostics, &context);
-        // Don't recurse to avoid checking the same identifier multiple times
-        // Nested instructions (like local.get inside br_if) will be checked
-        // when we visit their nodes directly
+        // Only recurse into nested expr nodes (which contain nested instructions)
+        // Don't recurse into other children to avoid double-checking
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "expr" {
+                walk_tree_for_undefined_references(child, source, symbols, diagnostics);
+            }
+        }
         return;
     }
 
@@ -42,6 +53,74 @@ fn walk_tree_for_undefined_references(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         walk_tree_for_undefined_references(child, source, symbols, diagnostics);
+    }
+}
+
+/// Check references in a catch_clause node
+/// For (catch $tag $label) and (catch_ref $tag $label): first index is tag, second is label
+/// For (catch_all $label) and (catch_all_ref $label): single index is label
+fn check_catch_clause_references(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let text = &source[node.byte_range()];
+
+    // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
+    let has_tag =
+        text.contains("catch_ref") || (text.contains("catch") && !text.contains("catch_all"));
+
+    // Collect all index children
+    let mut cursor = node.walk();
+    let indices: Vec<_> = node
+        .children(&mut cursor)
+        .filter(|c| c.kind() == "index")
+        .collect();
+
+    for (i, index_node) in indices.iter().enumerate() {
+        // Find the identifier within the index
+        let mut idx_cursor = index_node.walk();
+        for child in index_node.children(&mut idx_cursor) {
+            if child.kind() == "identifier" {
+                let identifier_name = &source[child.byte_range()];
+                if !identifier_name.starts_with('$') {
+                    continue;
+                }
+
+                let start_point = child.start_position();
+                let position = Position {
+                    line: start_point.row as u32,
+                    character: start_point.column as u32,
+                };
+
+                // First index in catch/catch_ref is a tag, everything else is a label
+                let (is_defined, context) = if has_tag && i == 0 {
+                    // This is the tag reference
+                    (
+                        symbols.get_tag_by_name(identifier_name).is_some(),
+                        InstructionContext::Tag,
+                    )
+                } else {
+                    // This is the label reference
+                    let defined = if let Some(func) = find_containing_function(symbols, position) {
+                        func.blocks.iter().any(|block| {
+                            format!("${}", block.label) == identifier_name
+                                || block.label == identifier_name
+                        })
+                    } else {
+                        false
+                    };
+                    (defined, InstructionContext::Branch)
+                };
+
+                if !is_defined {
+                    let diagnostic =
+                        create_undefined_reference_diagnostic(&child, identifier_name, &context);
+                    diagnostics.push(diagnostic);
+                }
+            }
+        }
     }
 }
 
@@ -53,7 +132,46 @@ fn check_references(
     diagnostics: &mut Vec<Diagnostic>,
     context: &InstructionContext,
 ) {
+    // For struct.get/struct.set, only the first index is a type reference
+    // The second index is a field reference which we don't validate yet
+    if *context == InstructionContext::Type {
+        let text = &source[node.byte_range()];
+        let first_token = text.split_whitespace().next().unwrap_or("");
+        if first_token == "struct.get"
+            || first_token == "struct.get_s"
+            || first_token == "struct.get_u"
+            || first_token == "struct.set"
+        {
+            // Only validate the first index child
+            find_first_index_identifier(node, source, symbols, diagnostics, context);
+            return;
+        }
+    }
     find_undefined_identifiers(node, source, symbols, diagnostics, context);
+}
+
+/// Find and validate only the first index identifier in a node
+/// Used for instructions like struct.get where only the first index is a type
+fn find_first_index_identifier(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+    context: &InstructionContext,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" {
+            // Found the first index, check its identifier
+            find_undefined_identifiers(&child, source, symbols, diagnostics, context);
+            return; // Only check the first one
+        }
+        // Recurse into instr_plain to find the index
+        if child.kind() == "instr_plain" {
+            find_first_index_identifier(&child, source, symbols, diagnostics, context);
+            return;
+        }
+    }
 }
 
 /// Recursively find identifier nodes and check if they're defined
@@ -139,15 +257,13 @@ fn find_undefined_identifiers(
         return;
     }
 
-    // For branch instructions, only check the index node (the label argument),
-    // not identifiers in nested expressions (like local.get inside br_if condition)
-    if *context == InstructionContext::Branch && node.kind() == "expr" {
-        // Don't recurse into expr nodes for branch instructions
-        // The label is in the index node which is a sibling, not a child of expr
+    // Don't recurse into nested expr nodes - they contain nested instructions
+    // that will be checked separately with their own context
+    if node.kind() == "expr" {
         return;
     }
 
-    // Recursively check children
+    // Recursively check children (but not nested expressions)
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         find_undefined_identifiers(&child, source, symbols, diagnostics, context);
@@ -780,6 +896,34 @@ mod tests {
     }
 
     #[test]
+    fn test_ref_type_in_result() {
+        // Regression test: (ref $type) in result/param types should not be flagged as undefined
+        let document = r#"(module
+  (type $point (struct (field $x i32) (field $y i32)))
+
+  (func $make_point (param $x i32) (param $y i32) (result (ref $point))
+    (struct.new $point (local.get $x) (local.get $y))
+  )
+
+  (func $get_x (param $p (ref $point)) (result i32)
+    (struct.get $point $x (local.get $p))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Valid type references in (ref $type) should not produce diagnostics, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_br_if_with_local_get() {
         // Regression test: local.get inside br_if condition should not be flagged as undefined label
         let document = r#"(func $test (param $n i32)
@@ -1121,6 +1265,212 @@ mod tests {
             param_errors.len(),
             0,
             "All instructions have correct parameter counts, should have no errors"
+        );
+    }
+
+    #[test]
+    fn test_throw_with_correct_operand_count() {
+        // Tag with 1 param, throw with 1 operand - should be valid
+        let document = r#"(module
+  (tag $div_error (param i32))
+
+  (func $test
+    (throw $div_error (i32.const 400))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        // Verify tag params were extracted correctly
+        let tag = symbols.get_tag_by_name("$div_error").unwrap();
+        assert_eq!(tag.params.len(), 1, "Tag should have 1 param");
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("operand"))
+            .collect();
+        assert_eq!(
+            operand_errors.len(),
+            0,
+            "throw with correct operand count should have no errors, got: {:?}",
+            operand_errors
+                .iter()
+                .map(|d| &d.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_throw_with_wrong_operand_count() {
+        // Tag with 0 params, throw with 1 operand - should be invalid
+        let document = r#"(module
+  (tag $empty_error)
+
+  (func $test
+    (throw $empty_error (i32.const 400))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        // Verify tag params were extracted correctly
+        let tag = symbols.get_tag_by_name("$empty_error").unwrap();
+        assert_eq!(tag.params.len(), 0, "Tag should have 0 params");
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("operand"))
+            .collect();
+        assert_eq!(
+            operand_errors.len(),
+            1,
+            "throw with wrong operand count should produce an error"
+        );
+    }
+
+    #[test]
+    fn test_try_table_catch_clause_valid() {
+        // Test that catch clause correctly distinguishes tag vs label references
+        let document = r#"(module
+  (tag $div_error (param i32))
+
+  (func $safe_div (param $a i32) (param $b i32) (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $div_error $caught)
+        ;; throw if b is zero
+        (if (i32.eqz (local.get $b))
+          (then (throw $div_error (i32.const 400)))
+        )
+        ;; otherwise return a / b
+        (i32.div_s (local.get $a) (local.get $b))
+      )
+    )
+  )
+
+  (export "safeDiv" (func $safe_div))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        // Filter out any errors about the catch clause
+        let catch_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("$caught") || d.message.contains("$div_error"))
+            .collect();
+
+        assert_eq!(
+            catch_errors.len(),
+            0,
+            "Valid catch clause should not produce errors for tag or label, got: {:?}",
+            catch_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_try_table_catch_undefined_tag() {
+        // Test that undefined tag in catch clause is reported correctly
+        let document = r#"(module
+  (func $test (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $undefined_tag $caught)
+        (i32.const 42)
+      )
+    )
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let tag_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined tag") && d.message.contains("$undefined_tag"))
+            .collect();
+
+        assert_eq!(
+            tag_errors.len(),
+            1,
+            "Undefined tag in catch clause should produce one error"
+        );
+    }
+
+    #[test]
+    fn test_try_table_catch_undefined_label() {
+        // Test that undefined label in catch clause is reported correctly
+        let document = r#"(module
+  (tag $my_error)
+
+  (func $test (result i32)
+    (block $other (result i32)
+      (try_table (result i32) (catch $my_error $undefined_label)
+        (i32.const 42)
+      )
+    )
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let label_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.message.contains("Undefined label") && d.message.contains("$undefined_label")
+            })
+            .collect();
+
+        assert_eq!(
+            label_errors.len(),
+            1,
+            "Undefined label in catch clause should produce one error"
+        );
+    }
+
+    #[test]
+    fn test_try_table_catch_all_valid() {
+        // Test that catch_all clause (no tag, just label) works correctly
+        let document = r#"(module
+  (func $test (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch_all $caught)
+        (i32.const 42)
+      )
+    )
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let catch_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("$caught"))
+            .collect();
+
+        assert_eq!(
+            catch_errors.len(),
+            0,
+            "Valid catch_all clause should not produce errors, got: {:?}",
+            catch_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
 }

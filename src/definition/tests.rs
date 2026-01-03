@@ -487,3 +487,181 @@ fn test_goto_definition_on_loop_label_definition() {
     let location = location.unwrap();
     assert_eq!(location.range.start.line, 2);
 }
+
+#[test]
+fn test_goto_definition_catch_clause_tag() {
+    let document = r#"(module
+  (tag $div_error (param i32))
+
+  (func $safe_div (param $a i32) (param $b i32) (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $div_error $caught)
+        (i32.div_s (local.get $a) (local.get $b))
+      )
+    )
+  )
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Find the exact position of $div_error in the catch clause
+    let line5 = document.lines().nth(5).unwrap();
+    let col = line5
+        .find("$div_error")
+        .expect("Should find $div_error on line 5");
+    let position = Position::new(5, col as u32);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for tag in catch clause at position ({}, {}), line: '{}'",
+        position.line,
+        position.character,
+        line5
+    );
+    let location = location.unwrap();
+    // The definition should point to line 1 where $div_error tag is defined
+    assert_eq!(location.range.start.line, 1);
+}
+
+#[test]
+fn test_goto_definition_catch_clause_tag_full_example() {
+    // Exact document from user's issue
+    let document = r#"(module
+  (tag $div_error (param i32))
+
+  (func $safe_div (param $a i32) (param $b i32) (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $div_error $caught)
+        ;; throw if b is zero
+        (if (i32.eqz (local.get $b))
+          (then (throw $div_error (i32.const 400)))
+        )
+        ;; otherwise return a / b
+        (i32.div_s (local.get $a) (local.get $b))
+      )
+    )
+  )
+
+  (export "safeDiv" (func $safe_div))
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Verify tag was parsed
+    assert!(
+        symbols.get_tag_by_name("$div_error").is_some(),
+        "Tag $div_error should be in symbol table"
+    );
+
+    // Test go-to-definition on $div_error in catch clause (line 5)
+    let line5 = document.lines().nth(5).unwrap();
+    let col = line5
+        .find("$div_error")
+        .expect("Should find $div_error on line 5");
+    let position = Position::new(5, col as u32);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for tag in catch clause. Position: ({}, {}), Line: '{}'",
+        position.line,
+        position.character,
+        line5
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 1,
+        "Definition should be on line 1"
+    );
+
+    // Test go-to-definition on $div_error in throw (line 8)
+    let line8 = document.lines().nth(8).unwrap();
+    let col = line8
+        .find("$div_error")
+        .expect("Should find $div_error on line 8");
+    let position = Position::new(8, col as u32);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for tag in throw. Position: ({}, {}), Line: '{}'",
+        position.line,
+        position.character,
+        line8
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 1,
+        "Definition should be on line 1"
+    );
+}
+
+#[test]
+fn test_goto_definition_catch_clause_label() {
+    let document = r#"(module
+  (tag $div_error (param i32))
+
+  (func $safe_div (param $a i32) (param $b i32) (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch $div_error $caught)
+        (i32.div_s (local.get $a) (local.get $b))
+      )
+    )
+  )
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position at "$caught" in the catch clause (line 5, col ~51)
+    let position = Position::new(5, 51);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for label in catch clause"
+    );
+    let location = location.unwrap();
+    // The definition should point to line 4 where $caught block is defined
+    assert_eq!(location.range.start.line, 4);
+}
+
+#[test]
+fn test_goto_definition_catch_all_label() {
+    let document = r#"(module
+  (func $test (result i32)
+    (block $caught (result i32)
+      (try_table (result i32) (catch_all $caught)
+        (i32.const 42)
+      )
+    )
+  )
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position at "$caught" in the catch_all clause (line 3, col ~42)
+    let position = Position::new(3, 42);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for label in catch_all clause"
+    );
+    let location = location.unwrap();
+    // The definition should point to line 2 where $caught block is defined
+    assert_eq!(location.range.start.line, 2);
+}
