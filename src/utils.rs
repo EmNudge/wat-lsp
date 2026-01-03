@@ -242,6 +242,41 @@ pub fn node_at_position<'a>(tree: &'a Tree, source: &str, position: Position) ->
     find_deepest_node(root, byte_offset)
 }
 
+/// Check if the given position is inside a comment (block or line)
+pub fn is_inside_comment(tree: &Tree, source: &str, position: Position) -> bool {
+    let byte_offset = position_to_byte(source, position);
+    let root = tree.root_node();
+
+    is_inside_comment_node(root, byte_offset)
+}
+
+/// Recursively check if byte_offset is inside a comment node
+fn is_inside_comment_node(node: Node, byte_offset: usize) -> bool {
+    let range = node.byte_range();
+    if !(range.start <= byte_offset && byte_offset < range.end) {
+        return false;
+    }
+
+    let kind = node.kind();
+    if kind == "comment_block"
+        || kind == "comment_line"
+        || kind == "comment_block_annot"
+        || kind == "comment_line_annot"
+    {
+        return true;
+    }
+
+    // Check children (including extra nodes like comments)
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if is_inside_comment_node(child, byte_offset) {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Recursively find the deepest (most specific) node containing the byte offset
 fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
     let range = node.byte_range();
