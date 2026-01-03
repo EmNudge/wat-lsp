@@ -175,69 +175,39 @@ pub fn provide_completion(
 
     // Instruction prefix completions
     if line_prefix.ends_with("local.") {
-        completions.push(make_completion(
-            "get",
-            "local.get",
-            "Get local variable value",
-        ));
-        completions.push(make_completion(
-            "set",
-            "local.set",
-            "Set local variable value",
-        ));
-        completions.push(make_completion(
-            "tee",
-            "local.tee",
-            "Set local and return value",
-        ));
+        completions.push(make_completion("get", "Get local variable value"));
+        completions.push(make_completion("set", "Set local variable value"));
+        completions.push(make_completion("tee", "Set local and return value"));
         return completions;
     }
 
     if line_prefix.ends_with("global.") {
-        completions.push(make_completion(
-            "get",
-            "global.get",
-            "Get global variable value",
-        ));
-        completions.push(make_completion(
-            "set",
-            "global.set",
-            "Set global variable value",
-        ));
+        completions.push(make_completion("get", "Get global variable value"));
+        completions.push(make_completion("set", "Set global variable value"));
         return completions;
     }
 
     if line_prefix.ends_with("memory.") {
-        completions.push(make_completion(
-            "size",
-            "memory.size",
-            "Get memory size in pages",
-        ));
-        completions.push(make_completion(
-            "grow",
-            "memory.grow",
-            "Grow memory by delta pages",
-        ));
-        completions.push(make_completion("fill", "memory.fill", "Fill memory region"));
-        completions.push(make_completion("copy", "memory.copy", "Copy memory region"));
+        completions.push(make_completion("size", "Get memory size in pages"));
+        completions.push(make_completion("grow", "Grow memory by delta pages"));
+        completions.push(make_completion("fill", "Fill memory region"));
+        completions.push(make_completion("copy", "Copy memory region"));
         completions.push(make_completion(
             "init",
-            "memory.init",
             "Initialize memory from data segment",
         ));
         return completions;
     }
 
     if line_prefix.ends_with("table.") {
-        completions.push(make_completion("get", "table.get", "Get table element"));
-        completions.push(make_completion("set", "table.set", "Set table element"));
-        completions.push(make_completion("size", "table.size", "Get table size"));
-        completions.push(make_completion("grow", "table.grow", "Grow table"));
-        completions.push(make_completion("fill", "table.fill", "Fill table entries"));
-        completions.push(make_completion("copy", "table.copy", "Copy table elements"));
+        completions.push(make_completion("get", "Get table element"));
+        completions.push(make_completion("set", "Set table element"));
+        completions.push(make_completion("size", "Get table size"));
+        completions.push(make_completion("grow", "Grow table"));
+        completions.push(make_completion("fill", "Fill table entries"));
+        completions.push(make_completion("copy", "Copy table elements"));
         completions.push(make_completion(
             "init",
-            "table.init",
             "Initialize table from element segment",
         ));
         return completions;
@@ -388,18 +358,10 @@ pub fn provide_completion(
 
     // JSDoc tag completions
     if line_prefix.ends_with("@") {
-        completions.push(make_completion(
-            "param",
-            "@param",
-            "Parameter documentation",
-        ));
-        completions.push(make_completion("result", "@result", "Result documentation"));
-        completions.push(make_completion(
-            "function",
-            "@function",
-            "Function documentation",
-        ));
-        completions.push(make_completion("todo", "@todo", "TODO marker"));
+        completions.push(make_completion("param", "Parameter documentation"));
+        completions.push(make_completion("result", "Result documentation"));
+        completions.push(make_completion("function", "Function documentation"));
+        completions.push(make_completion("todo", "TODO marker"));
         return completions;
     }
 
@@ -426,11 +388,7 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
     ];
 
     for (name, desc) in common {
-        completions.push(make_completion(
-            name,
-            &format!("{}.{}", type_prefix, name),
-            desc,
-        ));
+        completions.push(make_completion(name, desc));
     }
 
     if type_prefix.starts_with('i') {
@@ -462,11 +420,7 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
             ("ge_u", "Unsigned greater or equal"),
         ];
         for (name, desc) in int_ops {
-            completions.push(make_completion(
-                name,
-                &format!("{}.{}", type_prefix, name),
-                desc,
-            ));
+            completions.push(make_completion(name, desc));
         }
     } else {
         // Float-specific instructions
@@ -488,11 +442,7 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
             ("ge", "Greater or equal"),
         ];
         for (name, desc) in float_ops {
-            completions.push(make_completion(
-                name,
-                &format!("{}.{}", type_prefix, name),
-                desc,
-            ));
+            completions.push(make_completion(name, desc));
         }
     }
 
@@ -501,26 +451,25 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
 
 fn get_keyword_completions() -> Vec<CompletionItem> {
     vec![
-        make_completion("func", "func", "Function declaration"),
-        make_completion("param", "param", "Function parameter"),
-        make_completion("result", "result", "Function result"),
-        make_completion("local", "local", "Local variable"),
-        make_completion("global", "global", "Global variable"),
-        make_completion("block", "block", "Block statement"),
-        make_completion("loop", "loop", "Loop statement"),
-        make_completion("if", "if", "Conditional statement"),
-        make_completion("call", "call", "Call function"),
-        make_completion("return", "return", "Return from function"),
-        make_completion("drop", "drop", "Drop value from stack"),
+        make_completion("func", "Function declaration"),
+        make_completion("param", "Function parameter"),
+        make_completion("result", "Function result"),
+        make_completion("local", "Local variable"),
+        make_completion("global", "Global variable"),
+        make_completion("block", "Block statement"),
+        make_completion("loop", "Loop statement"),
+        make_completion("if", "Conditional statement"),
+        make_completion("call", "Call function"),
+        make_completion("return", "Return from function"),
+        make_completion("drop", "Drop value from stack"),
     ]
 }
 
-fn make_completion(label: &str, insert_text: &str, detail: &str) -> CompletionItem {
+fn make_completion(label: &str, detail: &str) -> CompletionItem {
     CompletionItem {
         label: label.to_string(),
         kind: Some(CompletionItemKind::KEYWORD),
         detail: Some(detail.to_string()),
-        insert_text: Some(insert_text.to_string()),
         ..Default::default()
     }
 }
