@@ -1,149 +1,58 @@
 # WAT LSP Server
 
-A Language Server Protocol (LSP) implementation for WebAssembly Text Format (`.wat` files) written in Rust. Works with any editor that supports LSP.
+[![CI](https://github.com/EmNudge/wat-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/EmNudge/wat-lsp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/EmNudge/wat-lsp)](https://github.com/EmNudge/wat-lsp/stargazers)
+
+A Language Server Protocol implementation for WebAssembly Text Format (`.wat` files) written in Rust.
 
 ## Features
 
-### 🎯 Hover Information
-- **Functions**: Complete signature with parameters and return types
-- **Global Variables**: Type, mutability status, and initial values
-- **Local Variables & Parameters**: Type and scope information
-- **Tables**: Size limits and reference types
-- **Type Definitions**: Complete function type signatures
-- **Block/Loop Labels**: Label type and line number
-- **Instructions**: Comprehensive WebAssembly instruction documentation
-- **Numeric Indices**: Resolution of indexed variable access
-- **Phase 5 Support**: WasmGC, Relaxed SIMD, Exception Handling, Reference Types
+- **Hover**: Documentation for instructions, functions, globals, locals, types, tables, and block labels
+- **Completion**: Type-prefixed instructions (`i32.`, `local.`, etc.), emmet-like expansions (`5i32` → `(i32.const 5)`, `l$var` → `(local.get $var)`), context-aware suggestions
+- **Signature Help**: Parameter info during function calls
+- **Go to Definition**: Jump to functions, globals, types, tables, locals, and block labels
+- **Find References**: Scope-aware reference finding for all symbol types
+- **Rename**: Rename symbols across the file (updates both named and numeric references)
 
-### ✨ Code Completion
-
-#### Type-Prefixed Instructions
-- `i32.` → shows add, sub, mul, eq, load, store, etc.
-- `i64.` → 64-bit integer operations
-- `f32.` → 32-bit float operations
-- `f64.` → 64-bit float operations
-- `local.` → get, set, tee
-- `global.` → get, set
-- `memory.` → size, grow, fill, copy
-- `table.` → get, set, size, grow, fill, copy
-
-#### Emmet-like Expansions
-Transform shorthand into full WebAssembly instructions:
-
-- **Constants**:
-  - `5i32` → `(i32.const 5)`
-  - `30.12f64` → `(f64.const 30.12)`
-  - `100_000i64` → `(i64.const 100000)`
-
-- **Local Variables**:
-  - `l$varName` → `(local.get $varName)`
-  - `l=$varName` → `(local.set $varName )`
-
-- **Global Variables**:
-  - `g$varName` → `(global.get $varName)`
-  - `g=$varName` → `(global.set $varName )`
-
-#### Context-Aware Suggestions
-- Function names after `call`
-- Variable names after `$`
-- Block labels for branch instructions
-- JSDoc tags: `@param`, `@result`, `@function`, `@todo`
-
-### 📝 Signature Help
-Shows parameter information during function calls:
-- Displays function signature
-- Highlights current parameter position
-- Works with both named and indexed parameters
-
-### 🔍 Go to Definition
-Jump to symbol definitions:
-- Functions, globals, types, tables
-- Local variables and parameters
-- Block labels
-- Works with both named (`$symbol`) and numeric indices
-
-### 🔎 Find References
-Find all references to a symbol:
-- Functions, globals, locals, parameters
-- Block labels (including numeric depth like `br 0`)
-- Types and tables
-- Scope-aware for locals/parameters
-- Option to include/exclude declaration
-
-### ✏️ Rename Symbol
-Rename symbols across the file:
-- Functions, globals, locals, parameters
-- Updates both named references (`$var`) and numeric indices (`0`)
-- Validates that new names start with `$`
+Supports WasmGC, Relaxed SIMD, Exception Handling, and Reference Types.
 
 ## Building
 
-### Prerequisites
-
-This project requires `tree-sitter-cli` to be installed for generating the WAT parser at build time.
-
-Install it with:
+Requires `tree-sitter-cli`:
 ```bash
-npm install -g tree-sitter-cli
-# or
-cargo install tree-sitter-cli
+npm install -g tree-sitter-cli  # or: cargo install tree-sitter-cli
 ```
 
-### Build
-
+Build:
 ```bash
 cargo build --release
 ```
 
-The compiled binary will be at `target/release/wat-lsp-rust`.
+Binary outputs to `target/release/wat-lsp-rust`.
 
-### Build-Time Documentation Generation
-
-The LSP server uses a build script to parse instruction documentation from `docs/instructions.md` at compile time. This means:
-
-- Documentation is maintained in a readable Markdown format
-- Examples can be easily added or updated without touching Rust code
-- The documentation is embedded in the binary for fast lookup
-- No runtime file I/O is needed for instruction docs
-
-To add or modify instruction documentation, edit `docs/instructions.md` and rebuild. See `docs/README.md` for the documentation format.
+Instruction documentation is parsed from `docs/instructions.md` at compile time—edit that file to update hover docs.
 
 ## Usage
 
-The server can be integrated with any LSP-compatible editor (VS Code, Neovim, Helix, Emacs, etc.).
+### VS Code
 
-### VS Code Extension
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/EmNudge.wat-lsp)](https://marketplace.visualstudio.com/items?itemName=EmNudge.wat-lsp)
+[![Open VSX](https://img.shields.io/open-vsx/v/EmNudge/wat-lsp)](https://open-vsx.org/extension/EmNudge/wat-lsp)
 
-For VS Code users, we provide a ready-to-use extension:
+Or build manually:
 
 ```bash
-# Build the extension (includes building the Rust server)
-./build-extension.sh        # Linux/macOS
-# or
-build-extension.bat         # Windows
-
-# Package the extension (optional)
-cd vscode-extension
-npm run package
-
-# Install the extension
+./build-extension.sh
+cd vscode-extension && npm run package
 code --install-extension wat-lsp-*.vsix
 ```
 
-For development, open this project in VS Code and press `F5` to launch the extension in debug mode.
-
-See [vscode-extension/README.md](vscode-extension/README.md) for detailed instructions.
+See [vscode-extension/README.md](vscode-extension/README.md) for details.
 
 ### Other Editors
 
-Configure your editor to launch the `wat-lsp-rust` binary for `.wat` files. See your editor's LSP documentation for specific setup instructions.
-
-## Future Enhancements
-
-- [ ] Document symbols for outline view
-- [ ] Code formatting
-- [ ] Inlay hints for types
-- [ ] Code actions and quick fixes
+Configure your editor to launch `wat-lsp-rust` for `.wat` files.
 
 ## License
 
