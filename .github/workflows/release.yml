@@ -100,7 +100,7 @@ jobs:
           node-version: '20'
 
       - name: Download all server binaries
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           path: server-binaries
 
