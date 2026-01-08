@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use tower_lsp::lsp_types::Range;
+
+use crate::core::types::Range;
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +27,33 @@ pub enum ValueType {
     Ref(u32),     // Typed reference to a type index
     RefNull(u32), // Nullable typed reference
     Unknown,
+}
+
+impl std::fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValueType::I32 => write!(f, "i32"),
+            ValueType::I64 => write!(f, "i64"),
+            ValueType::F32 => write!(f, "f32"),
+            ValueType::F64 => write!(f, "f64"),
+            ValueType::V128 => write!(f, "v128"),
+            ValueType::I8 => write!(f, "i8"),
+            ValueType::I16 => write!(f, "i16"),
+            ValueType::Funcref => write!(f, "funcref"),
+            ValueType::Externref => write!(f, "externref"),
+            ValueType::Structref => write!(f, "structref"),
+            ValueType::Arrayref => write!(f, "arrayref"),
+            ValueType::I31ref => write!(f, "i31ref"),
+            ValueType::Anyref => write!(f, "anyref"),
+            ValueType::Eqref => write!(f, "eqref"),
+            ValueType::Nullref => write!(f, "nullref"),
+            ValueType::NullFuncref => write!(f, "nullfuncref"),
+            ValueType::NullExternref => write!(f, "nullexternref"),
+            ValueType::Ref(idx) => write!(f, "(ref {})", idx),
+            ValueType::RefNull(idx) => write!(f, "(ref null {})", idx),
+            ValueType::Unknown => write!(f, "unknown"),
+        }
+    }
 }
 
 impl ValueType {

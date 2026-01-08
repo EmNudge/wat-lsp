@@ -11,8 +11,37 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      playground: ${{ steps.filter.outputs.playground }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check for changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - 'docs/**'
+              - 'tree-sitter-wasm/**'
+            playground:
+              - 'playground/**'
+              - 'tree-sitter-wasm/**'
+              - 'src/**'
+
   test:
     name: Test
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -59,14 +88,16 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Run tests (native)
+        run: cargo test --features native --verbose
 
-      - name: Run tests (release mode)
-        run: cargo test --release --verbose
+      - name: Run tests (native, release mode)
+        run: cargo test --features native --release --verbose
 
   clippy:
     name: Clippy
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -87,15 +118,16 @@ jobs:
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
 
-      - name: Add npm global bin to PATH (Windows)
-        if: runner.os == 'Windows'
-        run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Run clippy (native)
+        run: cargo clippy --features native --all-targets -- -D warnings
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run clippy (wasm)
+        run: cargo clippy --features wasm --no-default-features --lib -- -D warnings
 
   fmt:
     name: Format
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -110,7 +142,9 @@ jobs:
         run: cargo fmt --all -- --check
 
   build:
-    name: Build
+    name: Build Native
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -147,7 +181,7 @@ jobs:
         run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --features native --release --target ${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -156,8 +190,42 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/wat-lsp-rust${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
+  build-wasm:
+    name: Build WASM
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Build WASM package
+        run: wasm-pack build --target web --features wasm --no-default-features
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: wat-lsp-wasm
+          path: |
+            pkg/wat_lsp_rust.js
+            pkg/wat_lsp_rust.d.ts
+            pkg/wat_lsp_rust_bg.wasm
+            pkg/package.json
+
   security-audit:
     name: Security Audit
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -176,12 +244,65 @@ jobs:
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
 
-      - name: Add npm global bin to PATH (Windows)
-        if: runner.os == 'Windows'
-        run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
       - name: Install cargo-audit
         run: cargo install cargo-audit
 
       - name: Run security audit
         run: cargo audit
+
+  playground:
+    name: Playground
+    needs: [changes, build-wasm]
+    if: needs.changes.outputs.playground == 'true' || needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Build WASM LSP module
+        run: wasm-pack build --target web --features wasm --no-default-features
+
+      - name: Copy WASM files to playground
+        run: |
+          mkdir -p playground/public
+          cp pkg/wat_lsp_rust.js playground/
+          cp pkg/wat_lsp_rust_bg.wasm playground/public/
+
+      - name: Install playground dependencies
+        working-directory: playground
+        run: npm install
+
+      - name: Build playground
+        working-directory: playground
+        run: npm run build
+
+      - name: Install Playwright browsers
+        working-directory: playground
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        working-directory: playground
+        run: npm test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: playwright-report
+          path: playground/playwright-report/
+          retention-days: 7

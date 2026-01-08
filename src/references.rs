@@ -1135,7 +1135,7 @@ fn get_definition_location(
 
     Some(Location {
         uri: lsp_uri,
-        range: *range,
+        range: (*range).into(),
     })
 }
 

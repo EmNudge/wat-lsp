@@ -58,7 +58,7 @@ fn provide_definition_at_cursor(
             if position.line == range.start.line {
                 return Some(Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -70,7 +70,7 @@ fn provide_definition_at_cursor(
             if position.line == range.start.line {
                 return Some(Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -87,7 +87,7 @@ fn provide_definition_at_cursor(
                     if position.line == range.start.line {
                         return Some(Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }
@@ -99,7 +99,7 @@ fn provide_definition_at_cursor(
                     if position.line == range.start.line {
                         return Some(Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }
@@ -111,7 +111,7 @@ fn provide_definition_at_cursor(
                     if position.line == range.start.line {
                         return Some(Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }
@@ -125,7 +125,7 @@ fn provide_definition_at_cursor(
             if position.line == range.start.line {
                 return Some(Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -137,7 +137,7 @@ fn provide_definition_at_cursor(
             if position.line == range.start.line {
                 return Some(Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -149,7 +149,7 @@ fn provide_definition_at_cursor(
             if position.line == range.start.line {
                 return Some(Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -161,7 +161,7 @@ fn provide_definition_at_cursor(
             if position.line == range.start.line {
                 return Some(Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -210,7 +210,7 @@ fn provide_symbol_definition(
             if let Some(func) = symbols.get_function_by_name(word) {
                 return func.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -219,7 +219,7 @@ fn provide_symbol_definition(
             if let Some(global) = symbols.get_global_by_name(word) {
                 return global.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -231,7 +231,7 @@ fn provide_symbol_definition(
                     if param.name.as_ref() == Some(&word.to_string()) {
                         return param.range.as_ref().map(|range| Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }
@@ -240,7 +240,7 @@ fn provide_symbol_definition(
                     if local.name.as_ref() == Some(&word.to_string()) {
                         return local.range.as_ref().map(|range| Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }
@@ -253,7 +253,7 @@ fn provide_symbol_definition(
                     if block.label == word {
                         return block.range.as_ref().map(|range| Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }
@@ -264,7 +264,7 @@ fn provide_symbol_definition(
             if let Some(table) = symbols.get_table_by_name(word) {
                 return table.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -273,7 +273,7 @@ fn provide_symbol_definition(
             if let Some(memory) = symbols.get_memory_by_name(word) {
                 return memory.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -282,7 +282,7 @@ fn provide_symbol_definition(
             if let Some(type_def) = symbols.get_type_by_name(word) {
                 return type_def.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -291,7 +291,7 @@ fn provide_symbol_definition(
             if let Some(tag) = symbols.get_tag_by_name(word) {
                 return tag.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -300,7 +300,7 @@ fn provide_symbol_definition(
             if let Some(func) = symbols.get_function_by_name(word) {
                 return func.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -311,7 +311,7 @@ fn provide_symbol_definition(
                     if block.label == word {
                         return block.range.as_ref().map(|range| Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }
@@ -323,42 +323,42 @@ fn provide_symbol_definition(
             if let Some(func) = symbols.get_function_by_name(word) {
                 return func.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
             // Try global
             if let Some(global) = symbols.get_global_by_name(word) {
                 return global.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
             // Try table
             if let Some(table) = symbols.get_table_by_name(word) {
                 return table.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
             // Try memory
             if let Some(memory) = symbols.get_memory_by_name(word) {
                 return memory.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
             // Try type
             if let Some(type_def) = symbols.get_type_by_name(word) {
                 return type_def.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
             // Try tag
             if let Some(tag) = symbols.get_tag_by_name(word) {
                 return tag.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -407,7 +407,7 @@ fn provide_index_definition(
             if let Some(func) = symbols.get_function_by_index(index) {
                 return func.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -416,7 +416,7 @@ fn provide_index_definition(
             if let Some(global) = symbols.get_global_by_index(index) {
                 return global.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -425,7 +425,7 @@ fn provide_index_definition(
             if let Some(type_def) = symbols.get_type_by_index(index) {
                 return type_def.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -434,7 +434,7 @@ fn provide_index_definition(
             if let Some(tag) = symbols.get_tag_by_index(index) {
                 return tag.range.as_ref().map(|range| Location {
                     uri: lsp_uri.clone(),
-                    range: *range,
+                    range: (*range).into(),
                 });
             }
         }
@@ -449,7 +449,7 @@ fn provide_index_definition(
                     if let Some(param) = func.parameters.get(index) {
                         return param.range.as_ref().map(|range| Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 } else {
@@ -458,7 +458,7 @@ fn provide_index_definition(
                     if let Some(local) = func.locals.get(local_index) {
                         return local.range.as_ref().map(|range| Location {
                             uri: lsp_uri.clone(),
-                            range: *range,
+                            range: (*range).into(),
                         });
                     }
                 }

@@ -1,12 +1,8 @@
-mod completion;
-mod definition;
-mod diagnostics;
-mod hover;
-mod parser;
-mod references;
-mod signature;
-mod symbols;
-mod utils;
+// Use modules from the library crate
+use wat_lsp_rust::{
+    completion, definition, diagnostics, hover, parser, references, signature, symbols,
+    tree_sitter_bindings, utils,
+};
 
 use dashmap::DashMap;
 use tokio::sync::watch;
@@ -15,7 +11,6 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::Tree;
-use wat_lsp_rust::tree_sitter_bindings;
 
 const DEBOUNCE_DURATION_MS: u64 = 500;
 

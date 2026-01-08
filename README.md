@@ -17,7 +17,18 @@ A Language Server Protocol implementation for WebAssembly Text Format (`.wat` fi
 
 Supports WasmGC, Relaxed SIMD, Exception Handling, and Reference Types.
 
+## Architecture
+
+The LSP server supports two build targets:
+
+- **Native**: Uses tree-sitter for fast, incremental parsing. Runs as a standalone LSP server.
+- **WASM**: Uses the `wast` crate for pure-Rust parsing. Runs in the browser for the playground.
+
+Both targets share the same core code for symbol table construction and LSP features.
+
 ## Building
+
+### Native LSP Server
 
 Requires `tree-sitter-cli`:
 ```bash
@@ -26,10 +37,19 @@ npm install -g tree-sitter-cli  # or: cargo install tree-sitter-cli
 
 Build:
 ```bash
-cargo build --release
+cargo build --features native --release
 ```
 
 Binary outputs to `target/release/wat-lsp-rust`.
+
+### WASM Module
+
+For browser usage:
+```bash
+wasm-pack build --target web --features wasm --no-default-features
+```
+
+Outputs to `pkg/` directory.
 
 Instruction documentation is parsed from `docs/instructions.md` at compile time—edit that file to update hover docs.
 
@@ -53,6 +73,30 @@ See [vscode-extension/README.md](vscode-extension/README.md) for details.
 ### Other Editors
 
 Configure your editor to launch `wat-lsp-rust` for `.wat` files.
+
+## Playground
+
+Try the LSP in your browser:
+
+```bash
+# Build the WASM module
+wasm-pack build --target web --features wasm --no-default-features
+
+# Set up the playground
+cd playground
+npm install
+
+# Copy WASM files
+cp ../pkg/wat_lsp_rust.js .
+cp ../pkg/wat_lsp_rust_bg.wasm public/
+
+# Run dev server
+npm run dev
+```
+
+Open the URL shown by Vite. Use F12 for Go to Definition, Shift+F12 for Find References.
+
+The playground uses the same Rust LSP code as the native server, compiled to WebAssembly.
 
 ## License
 
