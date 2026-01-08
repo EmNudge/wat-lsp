@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WAT LSP Playground</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>WAT LSP Playground</h1>
+      <p>WebAssembly Text Format editor with Language Server features</p>
+    </header>
+
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <select id="examples">
+          <option value="">Load Example...</option>
+          <option value="hello">Hello World (Add)</option>
+          <option value="factorial">Factorial</option>
+          <option value="fibonacci">Fibonacci</option>
+          <option value="memory">Memory Operations</option>
+          <option value="imports">Imports & Exports</option>
+        </select>
+      </div>
+      <div class="toolbar-right">
+        <button id="compile-btn" class="btn btn-primary">Compile</button>
+        <button id="run-btn" class="btn btn-success" disabled>Run</button>
+        <button id="download-btn" class="btn btn-secondary" disabled>Download .wasm</button>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="editor-panel">
+        <div class="panel-header">
+          <span>WAT Source</span>
+          <div class="lsp-status">
+            <span class="lsp-indicator" id="lsp-indicator"></span>
+            <span id="lsp-status-text">LSP Loading...</span>
+          </div>
+        </div>
+        <div id="editor"></div>
+      </div>
+
+      <div class="output-panel">
+        <div class="tabs">
+          <button class="tab active" data-tab="module-info">Module Info</button>
+          <button class="tab" data-tab="console">Console</button>
+          <button class="tab" data-tab="hex">Hex View</button>
+          <button class="tab" data-tab="lsp-debug">LSP Debug</button>
+        </div>
+
+        <div class="tab-content">
+          <div id="module-info" class="tab-pane active">
+            <div class="info-section">
+              <h3>Imports</h3>
+              <div id="imports-list" class="info-list">
+                <p class="placeholder">Compile to see imports</p>
+              </div>
+            </div>
+            <div class="info-section">
+              <h3>Exports</h3>
+              <div id="exports-list" class="info-list">
+                <p class="placeholder">Compile to see exports</p>
+              </div>
+            </div>
+            <div class="info-section">
+              <h3>Run Function</h3>
+              <div class="run-controls">
+                <select id="export-fn-select" disabled>
+                  <option value="">Select function...</option>
+                </select>
+                <input type="text" id="fn-args" placeholder="Arguments (comma-separated)" disabled>
+                <button id="call-fn-btn" class="btn btn-small" disabled>Call</button>
+              </div>
+              <div id="fn-result" class="fn-result"></div>
+            </div>
+          </div>
+
+          <div id="console" class="tab-pane">
+            <div id="console-output"></div>
+          </div>
+
+          <div id="hex" class="tab-pane">
+            <pre id="hex-view"></pre>
+          </div>
+
+          <div id="lsp-debug" class="tab-pane">
+            <div class="info-section">
+              <h3>Diagnostics</h3>
+              <div id="diagnostics-view" class="diagnostics-list">
+                <p class="placeholder">No errors</p>
+              </div>
+            </div>
+            <div class="info-section">
+              <h3>Symbol Table</h3>
+              <div id="symbol-table-view" class="info-list">
+                <p class="placeholder">Parse document to see symbols</p>
+              </div>
+            </div>
+            <div class="info-section">
+              <h3>Last Hover</h3>
+              <div id="hover-debug" class="lsp-debug-output">
+                <p class="placeholder">Hover over code to see debug info</p>
+              </div>
+            </div>
+            <div class="info-section">
+              <h3>Manual Test</h3>
+              <div class="lsp-test-controls">
+                <input type="number" id="test-line" placeholder="Line (0-based)" min="0" value="0">
+                <input type="number" id="test-col" placeholder="Column" min="0" value="0">
+                <button id="test-hover-btn" class="btn btn-small">Test Hover</button>
+              </div>
+              <pre id="test-result" class="lsp-debug-output"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <span>WAT LSP Playground - Hover, Go to Definition (F12), Find References (Shift+F12)</span>
+      <span id="status">Ready</span>
+    </footer>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

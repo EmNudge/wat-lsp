@@ -1,6 +1,6 @@
+use crate::core::types::{Position, Range};
 use crate::symbols::*;
 use crate::tree_sitter_bindings::create_parser;
-use tower_lsp::lsp_types::{Position, Range};
 use tree_sitter::{Node, Tree};
 
 #[cfg(test)]

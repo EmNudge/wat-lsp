@@ -18,8 +18,11 @@ fn main() {
 
     fs::write(&dest_path, generated_code).expect("Failed to write generated code");
 
-    // NEW: Tree-sitter grammar compilation
-    compile_tree_sitter_grammar();
+    // Tree-sitter grammar compilation - only for native targets (not WASM)
+    let target = env::var("TARGET").unwrap_or_default();
+    if !target.contains("wasm") {
+        compile_tree_sitter_grammar();
+    }
 }
 
 fn compile_tree_sitter_grammar() {

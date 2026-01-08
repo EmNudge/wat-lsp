@@ -26,6 +26,12 @@ tree-sitter-wasm/Cargo.toml
 tree-sitter-wasm/Cargo.lock
 tree-sitter-wasm/target
 
+# Playground
+playground/*.wasm
+playground/public/*.wasm
+playground/node_modules/
+playground/dist/
+
 # VS Code Extension
 vscode-extension/node_modules/
 vscode-extension/out/
