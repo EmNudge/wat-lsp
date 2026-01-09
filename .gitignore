@@ -31,6 +31,7 @@ playground/*.wasm
 playground/public/*.wasm
 playground/node_modules/
 playground/dist/
+playground/test-results/
 
 # VS Code Extension
 vscode-extension/node_modules/

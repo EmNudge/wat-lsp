@@ -76,22 +76,22 @@ Configure your editor to launch `wat-lsp-rust` for `.wat` files.
 
 ## Playground
 
-Try the LSP in your browser:
+Try the LSP in your browser: **[wat-lsp-playground.emnudge.dev](https://wat-lsp-playground.emnudge.dev)**
+
+To build locally:
 
 ```bash
-# Build the WASM module
-wasm-pack build --target web --features wasm --no-default-features
-
-# Set up the playground
+./build-docs.sh        # Build the playground site
 cd playground
-npm install
+npm run preview        # Preview the built site
+```
 
-# Copy WASM files
-cp ../pkg/wat_lsp_rust.js .
-cp ../pkg/wat_lsp_rust_bg.wasm public/
+For development with hot reload:
 
-# Run dev server
-npm run dev
+```bash
+./build-docs.sh        # Initial build (needed for WASM files)
+cd playground
+npm run dev            # Start dev server
 ```
 
 Open the URL shown by Vite. Use F12 for Go to Definition, Shift+F12 for Find References.
