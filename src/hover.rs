@@ -92,7 +92,7 @@ fn provide_symbol_hover(
         }
     }
 
-    // Check for global
+    // Check for global (both usage and declaration)
     if context == InstructionContext::Global {
         if let Some(global) = symbols.get_global_by_name(word) {
             let mut info = format!(
@@ -114,8 +114,8 @@ fn provide_symbol_hover(
         }
     }
 
-    // Check for local/param
-    if context == InstructionContext::Local {
+    // Check for local/param (both usage and declaration in Function context)
+    if context == InstructionContext::Local || context == InstructionContext::Function {
         if let Some(func) = find_containing_function(symbols, position) {
             // Check params
             for param in &func.parameters {
@@ -152,7 +152,7 @@ fn provide_symbol_hover(
         }
     }
 
-    // Check for block labels
+    // Check for block labels (both usage and declaration)
     if context == InstructionContext::Branch || context == InstructionContext::Block {
         if let Some(func) = find_containing_function(symbols, position) {
             for block in &func.blocks {
@@ -174,18 +174,39 @@ fn provide_symbol_hover(
         }
     }
 
-    // Check for table
-    if context == InstructionContext::Table {
+    // Check for table (including call_indirect context)
+    if context == InstructionContext::Table || context == InstructionContext::Call {
         if let Some(table) = symbols.get_table_by_name(word) {
+            let limits_str = match table.limits.1 {
+                Some(max) => format!("{} {}", table.limits.0, max),
+                None => table.limits.0.to_string(),
+            };
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
                     value: format!(
                         "```wat\n(table {} {} {})\n```",
                         word,
-                        table.limits.0,
+                        limits_str,
                         table.ref_type.to_str()
                     ),
+                }),
+                range: None,
+            });
+        }
+    }
+
+    // Check for memory (both declaration and references)
+    if context == InstructionContext::Memory || context == InstructionContext::General {
+        if let Some(memory) = symbols.get_memory_by_name(word) {
+            let limits_str = match memory.limits.1 {
+                Some(max) => format!("{} {}", memory.limits.0, max),
+                None => memory.limits.0.to_string(),
+            };
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("```wat\n(memory {} {})\n```", word, limits_str),
                 }),
                 range: None,
             });
@@ -241,6 +262,163 @@ fn provide_symbol_hover(
                 }),
                 range: None,
             });
+        }
+    }
+
+    // Fallback: try all symbol types when context is General
+    // This handles declaration sites and other edge cases
+    if context == InstructionContext::General {
+        // Try function
+        if let Some(func) = symbols.get_function_by_name(word) {
+            let signature = format_function_signature(func);
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("```wat\n{}\n```", signature),
+                }),
+                range: None,
+            });
+        }
+
+        // Try global
+        if let Some(global) = symbols.get_global_by_name(word) {
+            let mut info = format!(
+                "```wat\n(global {} {}{})\n```",
+                word,
+                if global.is_mutable { "mut " } else { "" },
+                global.var_type.to_str()
+            );
+            if let Some(ref val) = global.initial_value {
+                info.push_str(&format!("\n\nInitial value: `{}`", val));
+            }
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: info,
+                }),
+                range: None,
+            });
+        }
+
+        // Try table
+        if let Some(table) = symbols.get_table_by_name(word) {
+            let limits_str = match table.limits.1 {
+                Some(max) => format!("{} {}", table.limits.0, max),
+                None => table.limits.0.to_string(),
+            };
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!(
+                        "```wat\n(table {} {} {})\n```",
+                        word,
+                        limits_str,
+                        table.ref_type.to_str()
+                    ),
+                }),
+                range: None,
+            });
+        }
+
+        // Try type
+        if let Some(type_def) = symbols.get_type_by_name(word) {
+            let sig = match &type_def.kind {
+                TypeKind::Func { params, results } => {
+                    let p_str = params
+                        .iter()
+                        .map(|t| t.to_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let r_str = results
+                        .iter()
+                        .map(|t| t.to_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+
+                    let mut s = format!("(type {}", word);
+                    if !p_str.is_empty() {
+                        s.push_str(&format!(" (param {})", p_str));
+                    }
+                    if !r_str.is_empty() {
+                        s.push_str(&format!(" (result {})", r_str));
+                    }
+                    s.push(')');
+                    s
+                }
+                TypeKind::Struct { fields } => {
+                    format!("(type {} (struct ... {} fields))", word, fields.len())
+                }
+                TypeKind::Array {
+                    element_type,
+                    mutable,
+                } => {
+                    format!(
+                        "(type {} (array {} {}))",
+                        word,
+                        if *mutable { "(mut ...)" } else { "..." },
+                        element_type.to_str()
+                    )
+                }
+            };
+
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("```wat\n{}\n```", sig),
+                }),
+                range: None,
+            });
+        }
+
+        // Try local/param in containing function
+        if let Some(func) = find_containing_function(symbols, position) {
+            for param in &func.parameters {
+                if param.name.as_deref() == Some(word) {
+                    return Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: format!(
+                                "```wat\n(param {} {})\n```",
+                                word,
+                                param.param_type.to_str()
+                            ),
+                        }),
+                        range: None,
+                    });
+                }
+            }
+            for local in &func.locals {
+                if local.name.as_deref() == Some(word) {
+                    return Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: format!(
+                                "```wat\n(local {} {})\n```",
+                                word,
+                                local.var_type.to_str()
+                            ),
+                        }),
+                        range: None,
+                    });
+                }
+            }
+            // Try block labels
+            for block in &func.blocks {
+                if block.label == word {
+                    return Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: format!(
+                                "```wat\n({} {})\n```\nDefined at line {}",
+                                block.block_type,
+                                block.label,
+                                block.line + 1
+                            ),
+                        }),
+                        range: None,
+                    });
+                }
+            }
         }
     }
 
