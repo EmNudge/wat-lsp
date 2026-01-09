@@ -34,7 +34,11 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
         let kind = current.kind();
 
         // Check for instruction contexts
-        if kind == "instr_plain" || kind == "expr1_plain" {
+        if kind == "instr_plain"
+            || kind == "expr1_plain"
+            || kind == "instr_call"
+            || kind == "expr1_call"
+        {
             let instr_text = &document[current.byte_range()];
 
             if instr_text.contains("call") {
@@ -47,7 +51,10 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
                 return InstructionContext::Branch;
             } else if instr_text.contains("table.") {
                 return InstructionContext::Table;
-            } else if instr_text.contains("memory.") {
+            } else if instr_text.contains("memory.")
+                || instr_text.contains(".load")
+                || instr_text.contains(".store")
+            {
                 return InstructionContext::Memory;
             } else if instr_text.contains("struct.")
                 || instr_text.contains("array.")
@@ -60,8 +67,19 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
             }
         }
 
-        // Check for block/loop contexts
-        if kind == "instr_block" || kind == "instr_loop" {
+        // Check for block/loop contexts (both instr_* and block_* variants)
+        if kind == "instr_block"
+            || kind == "instr_loop"
+            || kind == "block_block"
+            || kind == "block_loop"
+            || kind == "block_if"
+            || kind == "block_try"
+            || kind == "block_try_table"
+            || kind == "expr1_block"
+            || kind == "expr1_loop"
+            || kind == "expr1_if"
+            || kind == "expr1_try"
+        {
             return InstructionContext::Block;
         }
 
