@@ -722,7 +722,6 @@ async function init() {
   document.getElementById('call-fn-btn').addEventListener('click', callExportedFunction);
   document.getElementById('examples').addEventListener('change', (e) => {
     loadExample(e.target.value);
-    e.target.value = '';
   });
 
   // LSP Debug test hover button
