@@ -5,8 +5,10 @@
 use wasm_bindgen::prelude::*;
 
 use crate::core::types::{HoverResult, Position, Range};
+use crate::hover::provide_hover_core;
+use crate::parser::parse_document_from_tree;
 use crate::symbols::SymbolTable;
-use crate::wast_parser;
+use crate::ts_facade::{self, Parser, Tree};
 
 /// Initialize panic hook for better error messages in the browser console
 #[wasm_bindgen(start)]
@@ -19,6 +21,8 @@ pub fn init() {
 pub struct WatLSP {
     document: String,
     symbols: Option<SymbolTable>,
+    tree: Option<Tree>,
+    parser: Option<Parser>,
     ready: bool,
 }
 
@@ -30,14 +34,32 @@ impl WatLSP {
         Self {
             document: String::new(),
             symbols: None,
+            tree: None,
+            parser: None,
             ready: false,
         }
     }
 
-    /// Initialize the LSP. Returns true if successful.
+    /// Initialize the LSP (initializes tree-sitter). Returns true if successful.
     pub async fn initialize(&mut self) -> bool {
-        self.ready = true;
-        true
+        // Initialize tree-sitter runtime
+        if let Err(e) = ts_facade::init().await {
+            web_sys::console::error_1(&format!("Failed to init tree-sitter: {:?}", e).into());
+            return false;
+        }
+
+        // Create parser
+        match ts_facade::create_parser().await {
+            Ok(parser) => {
+                self.parser = Some(parser);
+                self.ready = true;
+                true
+            }
+            Err(e) => {
+                web_sys::console::error_1(&format!("Failed to create parser: {}", e).into());
+                false
+            }
+        }
     }
 
     /// Check if the LSP is ready
@@ -46,16 +68,30 @@ impl WatLSP {
         self.ready
     }
 
-    /// Parse a WAT document and build symbol table
+    /// Parse a WAT document and build symbol table using tree-sitter
     pub fn parse(&mut self, document: &str) {
         self.document = document.to_string();
 
-        match wast_parser::parse_document(document) {
-            Ok(symbols) => {
-                self.symbols = Some(symbols);
-            }
-            Err(_) => {
-                // Parse failed - keep empty symbol table
+        // Parse with tree-sitter if parser is available
+        if let Some(parser) = &mut self.parser {
+            if let Some(tree) = parser.parse(document, None) {
+                // Extract symbols from tree
+                match parse_document_from_tree(&tree, document) {
+                    Ok(symbols) => {
+                        self.symbols = Some(symbols);
+                        self.tree = Some(tree);
+                    }
+                    Err(_) => {
+                        // Symbol extraction failed, but tree is still valid
+                        self.tree = Some(tree);
+                        if self.symbols.is_none() {
+                            self.symbols = Some(SymbolTable::new());
+                        }
+                    }
+                }
+            } else {
+                // Parse failed
+                self.tree = None;
                 if self.symbols.is_none() {
                     self.symbols = Some(SymbolTable::new());
                 }
@@ -74,7 +110,7 @@ impl WatLSP {
         js_array.into()
     }
 
-    /// Provide hover information at the given position
+    /// Provide hover information at the given position (uses tree-sitter based hover)
     #[wasm_bindgen(js_name = provideHover)]
     pub fn provide_hover(&self, line: u32, col: u32) -> JsValue {
         let symbols = match &self.symbols {
@@ -82,34 +118,18 @@ impl WatLSP {
             None => return JsValue::NULL,
         };
 
-        let position = Position::new(line, col);
-
-        // Get word at position
-        let word = match get_word_at_position(&self.document, position) {
-            Some(w) => w,
+        let tree = match &self.tree {
+            Some(t) => t,
             None => return JsValue::NULL,
         };
 
-        // Check if it's an instruction
-        if let Some(doc) = get_instruction_doc(&word) {
-            return hover_to_js(&HoverResult::new(doc));
-        }
+        let position = Position::new(line, col);
 
-        // Check if it's a symbol reference
-        if word.starts_with('$') {
-            if let Some(hover) = provide_symbol_hover(&word, symbols, &self.document, position) {
-                return hover_to_js(&hover);
-            }
+        // Use the shared tree-sitter based hover implementation
+        match provide_hover_core(&self.document, symbols, tree, position) {
+            Some(hover) => hover_to_js(&hover),
+            None => JsValue::NULL,
         }
-
-        // Check numeric index
-        if let Ok(index) = word.parse::<usize>() {
-            if let Some(hover) = provide_index_hover(index, symbols, &self.document, position) {
-                return hover_to_js(&hover);
-            }
-        }
-
-        JsValue::NULL
     }
 
     /// Provide go-to-definition at the given position
@@ -364,132 +384,6 @@ fn reference_to_js(range: &Range) -> JsValue {
     obj.into()
 }
 
-fn provide_symbol_hover(
-    word: &str,
-    symbols: &SymbolTable,
-    _document: &str,
-    position: Position,
-) -> Option<HoverResult> {
-    // Check functions
-    if let Some(func) = symbols.get_function_by_name(word) {
-        let params: Vec<String> = func
-            .parameters
-            .iter()
-            .map(|p| {
-                if let Some(name) = &p.name {
-                    format!("{} {}", name, p.param_type)
-                } else {
-                    format!("{}", p.param_type)
-                }
-            })
-            .collect();
-        let results: Vec<String> = func.results.iter().map(|r| format!("{}", r)).collect();
-
-        return Some(HoverResult::new(format!(
-            "### Function `{}`\n\n**Index:** {}\n\n**Signature:** ({}) -> ({})",
-            word,
-            func.index,
-            params.join(", "),
-            results.join(", ")
-        )));
-    }
-
-    // Check globals
-    if let Some(global) = symbols.get_global_by_name(word) {
-        let mutability = if global.is_mutable {
-            "(mutable)"
-        } else {
-            "(immutable)"
-        };
-        return Some(HoverResult::new(format!(
-            "### Global `{}`\n\n**Index:** {}\n\n**Type:** {} {}",
-            word, global.index, global.var_type, mutability
-        )));
-    }
-
-    // Check locals within containing function
-    if let Some(func) = find_containing_function(symbols, position) {
-        // Check parameters
-        for param in &func.parameters {
-            if param.name.as_ref() == Some(&word.to_string()) {
-                return Some(HoverResult::new(format!(
-                    "### Parameter `{}`\n\n**Index:** {}\n\n**Type:** {}",
-                    word, param.index, param.param_type
-                )));
-            }
-        }
-
-        // Check locals
-        for local in &func.locals {
-            if local.name.as_ref() == Some(&word.to_string()) {
-                return Some(HoverResult::new(format!(
-                    "### Local `{}`\n\n**Index:** {}\n\n**Type:** {}",
-                    word,
-                    local.index + func.parameters.len(),
-                    local.var_type
-                )));
-            }
-        }
-    }
-
-    None
-}
-
-fn provide_index_hover(
-    index: usize,
-    symbols: &SymbolTable,
-    document: &str,
-    position: Position,
-) -> Option<HoverResult> {
-    // Determine context from line
-    let lines: Vec<&str> = document.lines().collect();
-    let line = lines.get(position.line as usize)?;
-
-    if line.contains("call") {
-        // Function index
-        if let Some(func) = symbols.get_function_by_index(index) {
-            let name = func.name.as_deref().unwrap_or("(anonymous)");
-            return Some(HoverResult::new(format!(
-                "### Function {}\n\n**Name:** {}",
-                index, name
-            )));
-        }
-    } else if line.contains("global") {
-        // Global index
-        if let Some(global) = symbols.get_global_by_index(index) {
-            let name = global.name.as_deref().unwrap_or("(anonymous)");
-            return Some(HoverResult::new(format!(
-                "### Global {}\n\n**Name:** {}\n\n**Type:** {}",
-                index, name, global.var_type
-            )));
-        }
-    } else if line.contains("local") {
-        // Local index within function
-        if let Some(func) = find_containing_function(symbols, position) {
-            let total_params = func.parameters.len();
-            if index < total_params {
-                let param = &func.parameters[index];
-                let name = param.name.as_deref().unwrap_or("(anonymous)");
-                return Some(HoverResult::new(format!(
-                    "### Parameter {}\n\n**Name:** {}\n\n**Type:** {}",
-                    index, name, param.param_type
-                )));
-            } else {
-                let local_idx = index - total_params;
-                if let Some(local) = func.locals.get(local_idx) {
-                    let name = local.name.as_deref().unwrap_or("(anonymous)");
-                    return Some(HoverResult::new(format!(
-                        "### Local {}\n\n**Name:** {}\n\n**Type:** {}",
-                        index, name, local.var_type
-                    )));
-                }
-            }
-        }
-    }
-
-    None
-}
-
 fn find_symbol_definition(
     word: &str,
     symbols: &SymbolTable,
@@ -690,10 +584,3 @@ fn diagnostic_to_js(diag: &WasmDiagnostic) -> JsValue {
 
     obj.into()
 }
-
-fn get_instruction_doc(word: &str) -> Option<String> {
-    INSTRUCTION_DOCS.get(word).map(|s| s.to_string())
-}
-
-// Include the auto-generated instruction documentation
-include!(concat!(env!("OUT_DIR"), "/instruction_docs.rs"));

@@ -103,14 +103,15 @@ fn check_catch_clause_references(
                     )
                 } else {
                     // This is the label reference
-                    let defined = if let Some(func) = find_containing_function(symbols, position) {
-                        func.blocks.iter().any(|block| {
-                            format!("${}", block.label) == identifier_name
-                                || block.label == identifier_name
-                        })
-                    } else {
-                        false
-                    };
+                    let defined =
+                        if let Some(func) = find_containing_function(symbols, position.into()) {
+                            func.blocks.iter().any(|block| {
+                                format!("${}", block.label) == identifier_name
+                                    || block.label == identifier_name
+                            })
+                        } else {
+                            false
+                        };
                     (defined, InstructionContext::Branch)
                 };
 
@@ -207,7 +208,7 @@ fn find_undefined_identifiers(
         let is_defined = match context {
             InstructionContext::Branch | InstructionContext::Block => {
                 // Check if label exists in containing function
-                if let Some(func) = find_containing_function(symbols, position) {
+                if let Some(func) = find_containing_function(symbols, position.into()) {
                     func.blocks.iter().any(|block| {
                         format!("${}", block.label) == identifier_name
                             || block.label == identifier_name
@@ -222,7 +223,7 @@ fn find_undefined_identifiers(
             }
             InstructionContext::Local => {
                 // Check if local or parameter exists in containing function
-                if let Some(func) = find_containing_function(symbols, position) {
+                if let Some(func) = find_containing_function(symbols, position.into()) {
                     func.parameters
                         .iter()
                         .any(|p| p.name.as_ref() == Some(&identifier_name.to_string()))

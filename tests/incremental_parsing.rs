@@ -44,10 +44,15 @@ fn test_incremental_vs_full_parsing() {
     let end_pos = Position::new(1, 2);
     let edit_text = "  ;; comment\n";
 
-    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos);
+    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos.into());
     let old_end_byte = start_byte;
 
-    apply_text_edit(&mut modified_doc, start_pos, end_pos, edit_text);
+    apply_text_edit(
+        &mut modified_doc,
+        start_pos.into(),
+        end_pos.into(),
+        edit_text,
+    );
     let new_end_byte = start_byte + edit_text.len();
     let new_end = Position::new(2, 0);
 
@@ -110,10 +115,15 @@ fn test_incremental_parsing_correctness() {
     let end_pos = Position::new(1, 2);
     let edit_text = "(i32.add ";
 
-    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos);
+    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos.into());
     let old_end_byte = start_byte;
 
-    apply_text_edit(&mut modified_doc, start_pos, end_pos, edit_text);
+    apply_text_edit(
+        &mut modified_doc,
+        start_pos.into(),
+        end_pos.into(),
+        edit_text,
+    );
     let new_end_byte = start_byte + edit_text.len();
     let new_end = Position::new(1, 2 + edit_text.len() as u32);
 
@@ -181,10 +191,10 @@ fn test_multiple_incremental_edits() {
     ];
 
     for (start, end, text) in edits {
-        let start_byte = wat_lsp_rust::utils::position_to_byte(&document, start);
-        let old_end_byte = wat_lsp_rust::utils::position_to_byte(&document, end);
+        let start_byte = wat_lsp_rust::utils::position_to_byte(&document, start.into());
+        let old_end_byte = wat_lsp_rust::utils::position_to_byte(&document, end.into());
 
-        let new_end = apply_text_edit(&mut document, start, end, text);
+        let new_end = apply_text_edit(&mut document, start.into(), end.into(), text);
         let new_end_byte = start_byte + text.len();
 
         // Create and apply tree edit

@@ -36,8 +36,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -60,6 +58,10 @@ jobs:
       - name: Add npm global bin to PATH (Windows)
         if: runner.os == 'Windows'
         run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}

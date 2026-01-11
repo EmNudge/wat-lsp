@@ -198,10 +198,10 @@ pub fn identify_symbol_at_position(
     tree: &Tree,
     position: Position,
 ) -> Option<ReferenceTarget> {
-    let word = get_word_at_position(document, position)?;
+    let word = get_word_at_position(document, position.into())?;
 
     // Determine context using AST, with fallback to line matching
-    let context = if let Some(node) = node_at_position(tree, document, position) {
+    let context = if let Some(node) = node_at_position(tree, document, position.into()) {
         let ast_context = determine_instruction_context_at_node(&node, document);
         if ast_context == InstructionContext::General {
             // Fallback to line-based detection for incomplete code
@@ -280,7 +280,7 @@ fn identify_named_symbol(
             }
         }
         InstructionContext::Local => {
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 // Check parameters first
                 for param in &func.parameters {
                     if param.name.as_ref() == Some(&word.to_string()) {
@@ -304,7 +304,7 @@ fn identify_named_symbol(
             }
         }
         InstructionContext::Branch | InstructionContext::Block => {
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 for block in &func.blocks {
                     if block.label == word {
                         return Some(ReferenceTarget::BlockLabel {
@@ -328,7 +328,7 @@ fn identify_named_symbol(
             }
 
             // Try locals/parameters (user might be on the definition)
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 // Check parameters
                 for param in &func.parameters {
                     if param.name.as_ref() == Some(&word.to_string()) {
@@ -470,7 +470,7 @@ fn identify_indexed_symbol(
             }
         }
         InstructionContext::Local => {
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 let total_params = func.parameters.len();
 
                 if index < total_params {
@@ -513,7 +513,7 @@ fn identify_indexed_symbol(
         }
         InstructionContext::Branch => {
             // For branch instructions with numeric depth, resolve the block at that depth
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 // Build block stack at the current position
                 let block_stack = build_block_stack_at_position(tree, document, position);
 

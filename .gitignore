@@ -12,19 +12,17 @@
 # LSP
 .claude/
 
-# Tree-sitter generated files
+# Tree-sitter-wasm - only source files are checked in, rest is generated
 tree-sitter-wasm/src/
-tree-sitter-wasm/binding.gyp
 tree-sitter-wasm/bindings/
+tree-sitter-wasm/binding.gyp
 tree-sitter-wasm/*.wasm
-tree-sitter-wasm/package.json
 tree-sitter-wasm/node_modules/
 tree-sitter-wasm/build/
-
-# may be accidentally created, but should not be commited
 tree-sitter-wasm/Cargo.toml
 tree-sitter-wasm/Cargo.lock
 tree-sitter-wasm/target
+tree-sitter-wasm/vscode-extension/
 
 # Playground
 playground/*.wasm

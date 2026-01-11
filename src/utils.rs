@@ -1,6 +1,12 @@
+use crate::core::types::Position;
 use crate::symbols::{Function, SymbolTable};
-use tower_lsp::lsp_types::Position;
+
+// Use the appropriate tree-sitter types based on feature
+#[cfg(feature = "native")]
 use tree_sitter::{Node, Tree};
+
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+use crate::ts_facade::{Node, Tree};
 
 /// Unified context for instruction type identification.
 /// Used across hover, definition, references, completion, and diagnostics.
@@ -186,6 +192,7 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
 /// Determine the context for a node inside a catch_clause.
 /// For (catch $tag $label): first index is Tag, second is Branch
 /// For (catch_all $label): single index is Branch
+#[cfg(feature = "native")]
 fn determine_catch_clause_context(node: &Node, document: &str) -> Option<InstructionContext> {
     // Walk up to find the catch_clause and track our position
     let mut current = *node;
@@ -197,6 +204,64 @@ fn determine_catch_clause_context(node: &Node, document: &str) -> Option<Instruc
         // Track if we pass through an index node
         if kind == "index" {
             index_node = Some(current);
+        }
+
+        if kind == "catch_clause" {
+            // Found the catch_clause, now determine position
+            let text = &document[current.byte_range()];
+
+            // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
+            let has_tag = text.contains("catch_ref")
+                || (text.contains("catch") && !text.contains("catch_all"));
+
+            if let Some(idx_node) = index_node {
+                // Find the position of this index among all index children
+                let mut cursor = current.walk();
+                let indices: Vec<_> = current
+                    .children(&mut cursor)
+                    .filter(|c| c.kind() == "index")
+                    .collect();
+
+                for (i, idx) in indices.iter().enumerate() {
+                    if idx.byte_range() == idx_node.byte_range() {
+                        // Found our index - first index in catch/catch_ref is tag, rest are labels
+                        if has_tag && i == 0 {
+                            return Some(InstructionContext::Tag);
+                        } else {
+                            return Some(InstructionContext::Branch);
+                        }
+                    }
+                }
+            }
+
+            // Inside catch_clause but not in an index - shouldn't happen for identifiers
+            return None;
+        }
+
+        // Walk up the tree
+        if let Some(parent) = current.parent() {
+            current = parent;
+        } else {
+            break;
+        }
+    }
+
+    None
+}
+
+/// Determine the context for a node inside a catch_clause (WASM version)
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn determine_catch_clause_context(node: &Node, document: &str) -> Option<InstructionContext> {
+    // Walk up to find the catch_clause and track our position
+    let mut current = node.clone();
+    let mut index_node: Option<Node> = None;
+
+    loop {
+        let kind = current.kind();
+
+        // Track if we pass through an index node
+        if kind == "index" {
+            index_node = Some(current.clone());
         }
 
         if kind == "catch_clause" {
@@ -405,8 +470,18 @@ pub fn position_to_byte(source: &str, position: Position) -> usize {
     byte_offset
 }
 
-/// Find the AST node at the given position
+/// Find the AST node at the given position (native version)
+#[cfg(feature = "native")]
 pub fn node_at_position<'a>(tree: &'a Tree, source: &str, position: Position) -> Option<Node<'a>> {
+    let byte_offset = position_to_byte(source, position);
+    let root = tree.root_node();
+
+    find_deepest_node(root, byte_offset)
+}
+
+/// Find the AST node at the given position (WASM version)
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+pub fn node_at_position(tree: &Tree, source: &str, position: Position) -> Option<Node> {
     let byte_offset = position_to_byte(source, position);
     let root = tree.root_node();
 
@@ -448,7 +523,8 @@ fn is_inside_comment_node(node: Node, byte_offset: usize) -> bool {
     false
 }
 
-/// Recursively find the deepest (most specific) node containing the byte offset
+/// Recursively find the deepest (most specific) node containing the byte offset (native version)
+#[cfg(feature = "native")]
 fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
     let range = node.byte_range();
     // Check if byte_offset is within the node (inclusive of start, exclusive of end)
@@ -472,6 +548,39 @@ fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
                         // If offset is properly inside, return immediately
                         return Some(found);
                     }
+                }
+            }
+        }
+    }
+
+    if let Some(child) = best_child {
+        return Some(child);
+    }
+
+    Some(node)
+}
+
+/// Recursively find the deepest (most specific) node containing the byte offset (WASM version)
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
+    let range = node.byte_range();
+    if !(range.start <= byte_offset && byte_offset <= range.end) {
+        return None;
+    }
+
+    let mut cursor = node.walk();
+    let mut best_child: Option<Node> = None;
+    for child in node.children(&mut cursor) {
+        let child_range = child.byte_range();
+        let contains_or_adjacent =
+            child_range.start <= byte_offset && byte_offset <= child_range.end;
+        if contains_or_adjacent {
+            if let Some(found) = find_deepest_node(child, byte_offset) {
+                if byte_offset < child_range.end {
+                    // If offset is properly inside, return immediately
+                    return Some(found);
+                } else if best_child.is_none() {
+                    best_child = Some(found);
                 }
             }
         }
@@ -527,6 +636,7 @@ fn calculate_position_after_edit(_text: &str, start: Position, inserted_text: &s
 }
 
 #[cfg(test)]
+#[cfg(feature = "native")]
 mod tests {
     use super::*;
 

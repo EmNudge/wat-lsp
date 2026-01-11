@@ -29,6 +29,7 @@ native = [
     "dep:tower-lsp",
     "dep:tokio",
     "dep:tree-sitter",
+    "dep:tree-sitter-language",
     "dep:dashmap",
     "dep:clap",
 ]
@@ -36,8 +37,10 @@ wasm = [
     "dep:wasm-bindgen",
     "dep:serde-wasm-bindgen",
     "dep:js-sys",
+    "dep:web-sys",
     "dep:console_error_panic_hook",
     "dep:wasm-bindgen-futures",
+    "dep:web-tree-sitter-sg",
 ]
 
 [dependencies]
@@ -51,7 +54,8 @@ wast = "243.0"
 # Native-only dependencies
 tower-lsp = { version = "0.20", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "time"], optional = true }
-tree-sitter = { version = "0.26", optional = true }
+tree-sitter = { version = "0.25.3", optional = true }
+tree-sitter-language = { version = "0.1", optional = true }
 dashmap = { version = "6.1", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 
@@ -60,7 +64,9 @@ wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", features = ["console"], optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
+web-tree-sitter-sg = { version = "0.25.3", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.build-dependencies]
 cc = "1.0"

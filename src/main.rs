@@ -223,12 +223,16 @@ impl LanguageServer for Backend {
         for change in params.content_changes {
             if let Some(range) = change.range {
                 // Incremental change
-                let start_byte = utils::position_to_byte(&text, range.start);
-                let old_end_byte = utils::position_to_byte(&text, range.end);
+                let start_byte = utils::position_to_byte(&text, range.start.into());
+                let old_end_byte = utils::position_to_byte(&text, range.end.into());
 
                 // Apply the text edit and get new end position
-                let new_end =
-                    utils::apply_text_edit(&mut text, range.start, range.end, &change.text);
+                let new_end = utils::apply_text_edit(
+                    &mut text,
+                    range.start.into(),
+                    range.end.into(),
+                    &change.text,
+                );
                 let new_end_byte = start_byte + change.text.len();
 
                 // Apply the edit to the tree if we have one
@@ -436,7 +440,7 @@ impl LanguageServer for Backend {
             if references::identify_symbol_at_position(&doc, &syms, &tree, position).is_some() {
                 // The symbol logic deems this a valid symbol.
                 // Now find the range to select.
-                if let Some(node) = utils::node_at_position(&tree, &doc, position) {
+                if let Some(node) = utils::node_at_position(&tree, &doc, position.into()) {
                     // If it's an identifier (e.g. $foo), return its full range.
                     if node.kind() == "identifier" {
                         let range = Range {

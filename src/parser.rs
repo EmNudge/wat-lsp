@@ -1,12 +1,22 @@
 use crate::core::types::{Position, Range};
 use crate::symbols::*;
-use crate::tree_sitter_bindings::create_parser;
+
+// Use the appropriate tree-sitter types based on feature
+#[cfg(feature = "native")]
 use tree_sitter::{Node, Tree};
+
+#[cfg(feature = "native")]
+use crate::tree_sitter_bindings::create_parser;
+
+// For WASM, we'll use the facade types
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+use crate::ts_facade::{Node, Tree};
 
 #[cfg(test)]
 mod tests;
 
 /// Parse a WAT document and extract symbols (PUBLIC API - unchanged)
+#[cfg(feature = "native")]
 pub fn parse_document(text: &str) -> Result<SymbolTable, String> {
     let mut parser = create_parser();
     let tree = parser
@@ -14,6 +24,11 @@ pub fn parse_document(text: &str) -> Result<SymbolTable, String> {
         .ok_or_else(|| "Failed to parse document".to_string())?;
 
     extract_symbols(&tree, text)
+}
+
+/// Parse a WAT document from a pre-parsed tree (works for both native and WASM)
+pub fn parse_document_from_tree(tree: &Tree, text: &str) -> Result<SymbolTable, String> {
+    extract_symbols(tree, text)
 }
 
 /// Extract all symbols from the parse tree
@@ -103,7 +118,10 @@ fn extract_single_import(
             // Look inside import_desc for the specific import type
             let mut desc_cursor = child.walk();
             for desc_child in child.children(&mut desc_cursor) {
-                match desc_child.kind() {
+                let kind = desc_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let kind = kind.as_str();
+                match kind {
                     "import_desc_func_type" | "import_desc_type_use" => {
                         // Imported function: (func $name? ...)
                         if let Some(func) =
@@ -436,7 +454,21 @@ fn node_to_range(node: &Node) -> Range {
 }
 
 /// Find identifier child node (returns the node itself, not just text)
+#[cfg(feature = "native")]
 fn find_identifier_node<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
+    let mut cursor = node.walk();
+    #[allow(clippy::manual_find)]
+    for child in node.children(&mut cursor) {
+        if child.kind() == "identifier" {
+            return Some(child);
+        }
+    }
+    None
+}
+
+/// Find identifier child node (WASM version - no lifetime parameter needed)
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn find_identifier_node(node: &Node) -> Option<Node> {
     let mut cursor = node.walk();
     #[allow(clippy::manual_find)]
     for child in node.children(&mut cursor) {
@@ -729,6 +761,8 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
         // Check if it has a label
         if let Some(id_node) = find_identifier_node(node) {
             let label = node_text(&id_node, source);
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let kind = kind.as_str();
             let block_type = match kind {
                 "block_block" | "expr1_block" => "block",
                 "block_loop" | "expr1_loop" => "loop",
@@ -967,7 +1001,10 @@ fn extract_type_from_single_node(
         results: Vec::new(),
     };
 
-    match type_node.kind() {
+    let type_kind = type_node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let type_kind = type_kind.as_str();
+    match type_kind {
         "struct_type" => {
             // Extract struct fields
             let mut fields = Vec::new();
@@ -1578,7 +1615,10 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
 
     let mut cursor = value_type_node.walk();
     for child in value_type_node.children(&mut cursor) {
-        match child.kind() {
+        let child_kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let child_kind = child_kind.as_str();
+        match child_kind {
             "value_type_num_type" => {
                 let text = node_text(&child, source);
                 // Handle i8/i16 which might be direct children or nested
@@ -1591,7 +1631,10 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
 
                 let mut num_cursor = child.walk();
                 for num_child in child.children(&mut num_cursor) {
-                    match num_child.kind() {
+                    let num_kind = num_child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let num_kind = num_kind.as_str();
+                    match num_kind {
                         "num_type_i32" => return ValueType::I32,
                         "num_type_i64" => return ValueType::I64,
                         "num_type_f32" => return ValueType::F32,
@@ -1659,7 +1702,10 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
 
     let mut cursor = ref_type_node.walk();
     for child in ref_type_node.children(&mut cursor) {
-        match child.kind() {
+        let child_kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let child_kind = child_kind.as_str();
+        match child_kind {
             "ref_type_funcref" => return ValueType::Funcref,
             "ref_type_externref" => return ValueType::Externref,
             "ref_type_concrete" => {

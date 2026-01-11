@@ -17,7 +17,7 @@ pub fn provide_definition(
     position: Position,
     uri: &str,
 ) -> Option<Location> {
-    let word = get_word_at_position(document, position)?;
+    let word = get_word_at_position(document, position.into())?;
 
     // Check if it's a symbol reference (starts with $)
     if word.starts_with('$') {
@@ -78,7 +78,7 @@ fn provide_definition_at_cursor(
 
     // Check if we're on a local/parameter definition (omitted for brevity, assume existing logic covers locals)
     // Actually reusing existing function body finding logic
-    if let Some(func) = find_containing_function(symbols, position) {
+    if let Some(func) = find_containing_function(symbols, position.into()) {
         // ... (locals check logic) ...
         // Re-implementing logic here for safety
         for param in &func.parameters {
@@ -183,7 +183,7 @@ fn provide_symbol_definition(
     let lsp_uri = Url::parse(uri).ok()?;
 
     // Determine context using AST, with fallback to line matching
-    let context = if let Some(node) = node_at_position(tree, document, position) {
+    let context = if let Some(node) = node_at_position(tree, document, position.into()) {
         let ast_context = determine_instruction_context(node, document);
         if ast_context == InstructionContext::General {
             // Fallback to line-based detection for incomplete code
@@ -225,7 +225,7 @@ fn provide_symbol_definition(
         }
         InstructionContext::Local => {
             // Jump to local/parameter definition
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 // Check parameters first
                 for param in &func.parameters {
                     if param.name.as_ref() == Some(&word.to_string()) {
@@ -248,7 +248,7 @@ fn provide_symbol_definition(
         }
         InstructionContext::Branch => {
             // Jump to block label definition
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 for block in &func.blocks {
                     if block.label == word {
                         return block.range.as_ref().map(|range| Location {
@@ -306,7 +306,7 @@ fn provide_symbol_definition(
         }
         InstructionContext::Block => {
             // Block context - same as Branch for definition lookup
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 for block in &func.blocks {
                     if block.label == word {
                         return block.range.as_ref().map(|range| Location {
@@ -412,7 +412,7 @@ fn provide_index_definition(
     let lsp_uri = Url::parse(uri).ok()?;
 
     // Determine context using AST, with fallback to line matching
-    let context = if let Some(node) = node_at_position(tree, document, position) {
+    let context = if let Some(node) = node_at_position(tree, document, position.into()) {
         let ast_context = determine_instruction_context(node, document);
         if ast_context == InstructionContext::General {
             // Fallback to line-based detection for incomplete code
@@ -472,7 +472,7 @@ fn provide_index_definition(
         }
         InstructionContext::Local => {
             // Jump to local/parameter by index
-            if let Some(func) = find_containing_function(symbols, position) {
+            if let Some(func) = find_containing_function(symbols, position.into()) {
                 // Parameters come first, then locals
                 let total_params = func.parameters.len();
 
