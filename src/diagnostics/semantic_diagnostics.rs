@@ -254,6 +254,14 @@ fn find_undefined_identifiers(
                 // Check if tag exists
                 symbols.get_tag_by_name(identifier_name).is_some()
             }
+            InstructionContext::Data => {
+                // Check if data segment exists
+                symbols.get_data_by_name(identifier_name).is_some()
+            }
+            InstructionContext::Elem => {
+                // Check if elem segment exists
+                symbols.get_elem_by_name(identifier_name).is_some()
+            }
             InstructionContext::Function | InstructionContext::General => true, // Don't flag function definitions or unknowns
         };
 
@@ -296,6 +304,8 @@ fn create_undefined_reference_diagnostic(
         InstructionContext::Memory => format!("Undefined memory '{}'", identifier_name),
         InstructionContext::Type => format!("Undefined type '{}'", identifier_name),
         InstructionContext::Tag => format!("Undefined tag '{}'", identifier_name),
+        InstructionContext::Data => format!("Undefined data segment '{}'", identifier_name),
+        InstructionContext::Elem => format!("Undefined elem segment '{}'", identifier_name),
         InstructionContext::Function | InstructionContext::General => {
             format!("Undefined reference '{}'", identifier_name)
         }

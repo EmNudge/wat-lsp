@@ -430,6 +430,14 @@ fn identify_named_symbol(
                 });
             }
         }
+        InstructionContext::Data => {
+            // Data segment references - return None for now as we don't have a Data ReferenceTarget
+            // Could be added in the future
+        }
+        InstructionContext::Elem => {
+            // Elem segment references - return None for now as we don't have an Elem ReferenceTarget
+            // Could be added in the future
+        }
     }
 
     None
