@@ -144,6 +144,7 @@ select:hover {
 
 .editor-panel {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-color);
@@ -151,9 +152,30 @@ select:hover {
 
 .output-panel {
   width: 400px;
+  min-width: 200px;
+  max-width: 80vw;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   background: var(--bg-secondary);
+  position: relative;
+}
+
+.resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 10;
+}
+
+.resize-handle:hover,
+.resize-handle.active {
+  background: var(--accent-blue);
 }
 
 .panel-header {
