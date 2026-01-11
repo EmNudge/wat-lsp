@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   optimizeDeps: {
-    include: ['monaco-editor', 'wabt'],
+    include: ['monaco-editor', 'wabt', 'web-tree-sitter'],
     exclude: ['wat_lsp_rust']
   },
   build: {

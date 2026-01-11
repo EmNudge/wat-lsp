@@ -7,7 +7,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: process.env.DEV_MODE ? 'http://localhost:5173' : 'http://localhost:4173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -18,8 +18,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run preview',
-    url: 'http://localhost:4173',
+    command: process.env.DEV_MODE ? 'npm run dev' : 'npm run preview',
+    url: process.env.DEV_MODE ? 'http://localhost:5173' : 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
   },

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "setup": "cp ../pkg/wat_lsp_rust.js . && cp ../pkg/wat_lsp_rust.d.ts . && mkdir -p public && cp ../pkg/wat_lsp_rust_bg.wasm public/ && cp node_modules/web-tree-sitter/tree-sitter.wasm public/ && cp node_modules/vscode-oniguruma/release/onig.wasm public/ && cp ../vscode-extension/syntaxes/wat.tmLanguage.json public/",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -12,6 +13,9 @@
   },
   "dependencies": {
     "monaco-editor": "^0.45.0",
+    "monaco-editor-textmate": "^4.0.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.1",
     "wabt": "^1.0.36",
     "web-tree-sitter": "^0.25.3"
   },
