@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "monaco-editor": "^0.45.0",
-    "wabt": "^1.0.36"
+    "wabt": "^1.0.36",
+    "web-tree-sitter": "^0.25.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",

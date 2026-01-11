@@ -127,12 +127,12 @@ fn main() -> ExitCode {
         );
 
         // Show word at position
-        if let Some(word) = get_word_at_position(&source, position) {
+        if let Some(word) = get_word_at_position(&source, position.into()) {
             eprintln!("Word at position: {:?}", word);
         }
 
         // Show context detection
-        if let Some(node) = node_at_position(&tree, &source, position) {
+        if let Some(node) = node_at_position(&tree, &source, position.into()) {
             eprintln!("Node kind: {:?}", node.kind());
             eprintln!("Node text: {:?}", &source[node.byte_range()]);
             // Walk up tree

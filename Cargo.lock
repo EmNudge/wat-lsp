@@ -932,9 +932,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.26.3"
+version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "974d205cc395652cfa8b37daa053fe56eebd429acf8dc055503fee648dae981e"
+checksum = "78f873475d258561b06f1c595d93308a7ed124d9977cb26b148c2084a4a3cc87"
 dependencies = [
  "cc",
  "regex",
@@ -1095,9 +1095,12 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "tree-sitter",
+ "tree-sitter-language",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wast",
+ "web-sys",
+ "web-tree-sitter-sg",
 ]
 
 [[package]]
@@ -1108,6 +1111,17 @@ checksum = "9b32828d774c412041098d182a8b38b16ea816958e07cf40eec2bc080ae137ac"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "web-tree-sitter-sg"
+version = "0.25.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c769bd29dd6612783fffb7090d29ed8b390672fb9e968b9e76bbc07bf78600c"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

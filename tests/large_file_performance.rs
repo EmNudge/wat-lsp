@@ -146,8 +146,13 @@ fn test_15k_line_incremental_edit_performance() {
     let end_pos = Position::new(5, 2);
     let edit_text = " ";
 
-    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos);
-    apply_text_edit(&mut modified_doc, start_pos, end_pos, edit_text);
+    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos.into());
+    apply_text_edit(
+        &mut modified_doc,
+        start_pos.into(),
+        end_pos.into(),
+        edit_text,
+    );
     let new_end_byte = start_byte + edit_text.len();
 
     let tree_edit = tree_sitter::InputEdit {
@@ -187,8 +192,13 @@ fn test_15k_line_incremental_edit_performance() {
     let end_pos = Position::new(7500, 4);
     let edit_text = ";; comment\n";
 
-    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos);
-    apply_text_edit(&mut modified_doc, start_pos, end_pos, edit_text);
+    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos.into());
+    apply_text_edit(
+        &mut modified_doc,
+        start_pos.into(),
+        end_pos.into(),
+        edit_text,
+    );
     let new_end_byte = start_byte + edit_text.len();
 
     let tree_edit = tree_sitter::InputEdit {
@@ -229,8 +239,13 @@ fn test_15k_line_incremental_edit_performance() {
     let end_pos = Position::new(edit_line, 2);
     let edit_text = "x";
 
-    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos);
-    apply_text_edit(&mut modified_doc, start_pos, end_pos, edit_text);
+    let start_byte = wat_lsp_rust::utils::position_to_byte(&modified_doc, start_pos.into());
+    apply_text_edit(
+        &mut modified_doc,
+        start_pos.into(),
+        end_pos.into(),
+        edit_text,
+    );
     let new_end_byte = start_byte + edit_text.len();
 
     let tree_edit = tree_sitter::InputEdit {

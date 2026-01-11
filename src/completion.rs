@@ -44,7 +44,7 @@ pub fn provide_completion(
 
     // Emmet-like local.get expansion (e.g., l$var -> (local.get $var))
     if line_prefix.ends_with("l$") {
-        if let Some(func) = find_containing_function(symbols, position) {
+        if let Some(func) = find_containing_function(symbols, position.into()) {
             for param in &func.parameters {
                 if let Some(ref name) = param.name {
                     let insert_text = format!("(local.get {})", name);
@@ -83,7 +83,7 @@ pub fn provide_completion(
 
     // Emmet-like local.set expansion (e.g., l=$var -> (local.set $var ))
     if line_prefix.ends_with("l=$") {
-        if let Some(func) = find_containing_function(symbols, position) {
+        if let Some(func) = find_containing_function(symbols, position.into()) {
             for param in &func.parameters {
                 if let Some(ref name) = param.name {
                     let insert_text = format!("(local.set {} $0)", name);
@@ -216,7 +216,7 @@ pub fn provide_completion(
     // Dollar sign completions (variables and functions)
     if line_prefix.ends_with("$") {
         // Try AST-based context detection, but fall back to string matching for incomplete code
-        let context = if let Some(node) = node_at_position(tree, document, position) {
+        let context = if let Some(node) = node_at_position(tree, document, position.into()) {
             let ast_context = determine_dollar_context(node);
             // If AST gives us General context, fall back to string matching
             if ast_context == InstructionContext::General {
@@ -287,7 +287,7 @@ pub fn provide_completion(
             }
             InstructionContext::Local => {
                 // Local variable completions
-                if let Some(func) = find_containing_function(symbols, position) {
+                if let Some(func) = find_containing_function(symbols, position.into()) {
                     for param in &func.parameters {
                         if let Some(ref name) = param.name {
                             completions.push(CompletionItem {
@@ -312,7 +312,7 @@ pub fn provide_completion(
             }
             InstructionContext::Branch => {
                 // Block label completions
-                if let Some(func) = find_containing_function(symbols, position) {
+                if let Some(func) = find_containing_function(symbols, position.into()) {
                     for block in &func.blocks {
                         completions.push(CompletionItem {
                             label: block.label[1..].to_string(), // Remove $ prefix

@@ -50,8 +50,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -69,6 +67,10 @@ jobs:
       - name: Add npm global bin to PATH (Windows)
         if: runner.os == 'Windows'
         run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -102,8 +104,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -117,6 +117,14 @@ jobs:
 
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
+
+      - name: Build tree-sitter WASM
+        working-directory: tree-sitter-wasm
+        run: tree-sitter build --wasm
 
       - name: Run clippy (native)
         run: cargo clippy --features native --all-targets -- -D warnings
@@ -160,8 +168,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -179,6 +185,10 @@ jobs:
       - name: Add npm global bin to PATH (Windows)
         if: runner.os == 'Windows'
         run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
 
       - name: Build release binary
         run: cargo build --features native --release --target ${{ matrix.target }}
@@ -198,8 +208,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -209,8 +217,24 @@ jobs:
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
 
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
+
+      - name: Build tree-sitter WASM
+        working-directory: tree-sitter-wasm
+        run: tree-sitter build --wasm
+
       - name: Build WASM package
-        run: wasm-pack build --target web --features wasm --no-default-features
+        run: wasm-pack build --target web --no-pack -- --features wasm --no-default-features
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v6
@@ -230,8 +254,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -243,6 +265,10 @@ jobs:
 
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
 
       - name: Install cargo-audit
         run: cargo install cargo-audit
@@ -258,8 +284,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -274,8 +298,19 @@ jobs:
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
 
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
+
+      - name: Build tree-sitter WASM
+        working-directory: tree-sitter-wasm
+        run: tree-sitter build --wasm
+
       - name: Build WASM LSP module
-        run: wasm-pack build --target web --features wasm --no-default-features
+        run: wasm-pack build --target web --no-pack -- --features wasm --no-default-features
 
       - name: Copy WASM files to playground
         run: |

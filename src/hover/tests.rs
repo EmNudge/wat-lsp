@@ -100,7 +100,7 @@ fn test_hover_on_instruction() {
     let tree = create_test_tree(document);
     let position = Position::new(0, 3); // On "i32"
 
-    let hover = provide_hover(document, &symbols, &tree, position);
+    let hover = provide_hover(document, &symbols, &tree, position.into());
     assert!(hover.is_some());
 
     if let Some(h) = hover {
@@ -119,7 +119,12 @@ fn test_hover_on_function() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 6); // On "$add"
 
-    let hover = provide_hover(document, &symbols, &create_test_tree(document), position);
+    let hover = provide_hover(
+        document,
+        &symbols,
+        &create_test_tree(document),
+        position.into(),
+    );
     assert!(hover.is_some());
 
     if let Some(h) = hover {
@@ -139,7 +144,12 @@ fn test_hover_on_global() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 12); // On "$counter"
 
-    let hover = provide_hover(document, &symbols, &create_test_tree(document), position);
+    let hover = provide_hover(
+        document,
+        &symbols,
+        &create_test_tree(document),
+        position.into(),
+    );
     assert!(hover.is_some());
 
     if let Some(h) = hover {
@@ -160,7 +170,12 @@ fn test_hover_on_local_parameter() {
     let symbols = create_test_symbols();
     let position = Position::new(1, 14); // On "$a" in local.get
 
-    let hover = provide_hover(document, &symbols, &create_test_tree(document), position);
+    let hover = provide_hover(
+        document,
+        &symbols,
+        &create_test_tree(document),
+        position.into(),
+    );
     assert!(hover.is_some());
 
     if let Some(h) = hover {
@@ -180,7 +195,12 @@ fn test_hover_on_block_label() {
     let symbols = create_test_symbols();
     let position = Position::new(1, 7); // On "$exit" in br
 
-    let hover = provide_hover(document, &symbols, &create_test_tree(document), position);
+    let hover = provide_hover(
+        document,
+        &symbols,
+        &create_test_tree(document),
+        position.into(),
+    );
     assert!(hover.is_some());
 
     if let Some(h) = hover {
@@ -199,7 +219,12 @@ fn test_hover_on_table() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 11); // On "$funcs"
 
-    let hover = provide_hover(document, &symbols, &create_test_tree(document), position);
+    let hover = provide_hover(
+        document,
+        &symbols,
+        &create_test_tree(document),
+        position.into(),
+    );
     assert!(hover.is_some());
 
     if let Some(h) = hover {
@@ -219,7 +244,12 @@ fn test_hover_on_type() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 7); // On "$binop"
 
-    let hover = provide_hover(document, &symbols, &create_test_tree(document), position);
+    let hover = provide_hover(
+        document,
+        &symbols,
+        &create_test_tree(document),
+        position.into(),
+    );
     assert!(hover.is_some());
 
     if let Some(h) = hover {
@@ -239,7 +269,12 @@ fn test_hover_on_nonexistent_symbol() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 6);
 
-    let hover = provide_hover(document, &symbols, &create_test_tree(document), position);
+    let hover = provide_hover(
+        document,
+        &symbols,
+        &create_test_tree(document),
+        position.into(),
+    );
     // Should return None for nonexistent symbols
     assert!(hover.is_none());
 }
@@ -345,7 +380,7 @@ fn test_no_hover_in_block_comment() {
     assert!(is_inside_comment(&tree, document, position));
 
     // Hover should return None for content inside comments
-    let hover = provide_hover(document, &symbols, &tree, position);
+    let hover = provide_hover(document, &symbols, &tree, position.into());
     assert!(hover.is_none());
 }
 
@@ -361,7 +396,7 @@ fn test_no_hover_in_block_comment_with_symbol() {
     assert!(is_inside_comment(&tree, document, position));
 
     // Hover should return None for content inside comments
-    let hover = provide_hover(document, &symbols, &tree, position);
+    let hover = provide_hover(document, &symbols, &tree, position.into());
     assert!(hover.is_none());
 }
 
@@ -377,7 +412,7 @@ fn test_no_hover_in_line_comment() {
     assert!(is_inside_comment(&tree, document, position));
 
     // Hover should return None for content inside comments
-    let hover = provide_hover(document, &symbols, &tree, position);
+    let hover = provide_hover(document, &symbols, &tree, position.into());
     assert!(hover.is_none());
 }
 
@@ -393,6 +428,6 @@ fn test_hover_outside_comment() {
     assert!(!is_inside_comment(&tree, document, position));
 
     // Hover should work for instruction outside comment
-    let hover = provide_hover(document, &symbols, &tree, position);
+    let hover = provide_hover(document, &symbols, &tree, position.into());
     assert!(hover.is_some());
 }

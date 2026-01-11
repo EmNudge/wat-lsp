@@ -13,7 +13,7 @@ pub fn provide_signature_help(
     position: Position,
 ) -> Option<SignatureHelp> {
     // Try AST-based approach first
-    let call_info = if let Some(node) = node_at_position(tree, document, position) {
+    let call_info = if let Some(node) = node_at_position(tree, document, position.into()) {
         find_function_call_ast(node, document)
     } else {
         None
