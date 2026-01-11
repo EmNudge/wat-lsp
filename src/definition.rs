@@ -361,6 +361,38 @@ fn provide_symbol_definition(
                     range: (*range).into(),
                 });
             }
+            // Try data segment
+            if let Some(data) = symbols.get_data_by_name(word) {
+                return data.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: (*range).into(),
+                });
+            }
+            // Try elem segment
+            if let Some(elem) = symbols.get_elem_by_name(word) {
+                return elem.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: (*range).into(),
+                });
+            }
+        }
+        InstructionContext::Data => {
+            // Jump to data segment definition
+            if let Some(data) = symbols.get_data_by_name(word) {
+                return data.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: (*range).into(),
+                });
+            }
+        }
+        InstructionContext::Elem => {
+            // Jump to elem segment definition
+            if let Some(elem) = symbols.get_elem_by_name(word) {
+                return elem.range.as_ref().map(|range| Location {
+                    uri: lsp_uri.clone(),
+                    range: (*range).into(),
+                });
+            }
         }
     }
 

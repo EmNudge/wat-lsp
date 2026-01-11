@@ -239,6 +239,35 @@ pub struct Tag {
     pub range: Option<Range>,
 }
 
+#[derive(Debug, Clone)]
+pub struct DataSegment {
+    pub name: Option<String>,
+    #[allow(dead_code)] // Useful for numeric data references
+    pub index: usize,
+    pub content: String,    // The string content (for display)
+    pub byte_length: usize, // Length in bytes
+    #[allow(dead_code)] // Useful for active segments
+    pub is_passive: bool, // true for passive segments (those with names)
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ElemSegment {
+    pub name: Option<String>,
+    #[allow(dead_code)] // Useful for numeric elem references
+    pub index: usize,
+    pub func_names: Vec<String>, // Function names/indices in this elem
+    #[allow(dead_code)] // Useful for active segments
+    pub table_name: Option<String>, // Target table if specified
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub line: u32,
+    #[allow(dead_code)] // Useful for go-to-definition
+    pub range: Option<Range>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
     pub functions: Vec<Function>,
@@ -247,6 +276,8 @@ pub struct SymbolTable {
     pub memories: Vec<Memory>,
     pub types: Vec<TypeDef>,
     pub tags: Vec<Tag>,
+    pub data_segments: Vec<DataSegment>,
+    pub elem_segments: Vec<ElemSegment>,
 
     // Maps for quick lookup by name
     pub function_map: HashMap<String, usize>,
@@ -255,6 +286,8 @@ pub struct SymbolTable {
     pub memory_map: HashMap<String, usize>,
     pub type_map: HashMap<String, usize>,
     pub tag_map: HashMap<String, usize>,
+    pub data_map: HashMap<String, usize>,
+    pub elem_map: HashMap<String, usize>,
 }
 
 impl SymbolTable {
@@ -364,5 +397,41 @@ impl SymbolTable {
 
     pub fn get_tag_by_index(&self, index: usize) -> Option<&Tag> {
         self.tags.get(index)
+    }
+
+    pub fn add_data(&mut self, data: DataSegment) {
+        let index = self.data_segments.len();
+        if let Some(ref name) = data.name {
+            self.data_map.insert(name.clone(), index);
+        }
+        self.data_segments.push(data);
+    }
+
+    pub fn get_data_by_name(&self, name: &str) -> Option<&DataSegment> {
+        self.data_map
+            .get(name)
+            .and_then(|&idx| self.data_segments.get(idx))
+    }
+
+    pub fn get_data_by_index(&self, index: usize) -> Option<&DataSegment> {
+        self.data_segments.get(index)
+    }
+
+    pub fn add_elem(&mut self, elem: ElemSegment) {
+        let index = self.elem_segments.len();
+        if let Some(ref name) = elem.name {
+            self.elem_map.insert(name.clone(), index);
+        }
+        self.elem_segments.push(elem);
+    }
+
+    pub fn get_elem_by_name(&self, name: &str) -> Option<&ElemSegment> {
+        self.elem_map
+            .get(name)
+            .and_then(|&idx| self.elem_segments.get(idx))
+    }
+
+    pub fn get_elem_by_index(&self, index: usize) -> Option<&ElemSegment> {
+        self.elem_segments.get(index)
     }
 }

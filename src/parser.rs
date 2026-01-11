@@ -35,6 +35,10 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     extract_tags_with_offset(&root, source, &mut symbol_table, import_counts.tags);
     extract_functions_with_offset(&root, source, &mut symbol_table, import_counts.functions);
 
+    // Extract data and elem segments
+    extract_data_segments(&root, source, &mut symbol_table);
+    extract_elem_segments(&root, source, &mut symbol_table);
+
     Ok(symbol_table)
 }
 
@@ -1727,4 +1731,198 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
     }
 
     ValueType::Funcref // Default to funcref logic if all else fails
+}
+
+/// Extract data segments from the module
+fn extract_data_segments(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+    let mut cursor = root.walk();
+    let mut data_index = 0;
+
+    for child in root.children(&mut cursor) {
+        if child.kind() == "module" {
+            let mut module_cursor = child.walk();
+            for module_child in child.children(&mut module_cursor) {
+                if module_child.kind() == "module_field" {
+                    let mut field_cursor = module_child.walk();
+                    for field_child in module_child.children(&mut field_cursor) {
+                        if field_child.kind() == "module_field_data" {
+                            if let Some(data) =
+                                extract_data_segment(&field_child, source, data_index)
+                            {
+                                symbol_table.add_data(data);
+                                data_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if child.kind() == "module_field" {
+            let mut field_cursor = child.walk();
+            for field_child in child.children(&mut field_cursor) {
+                if field_child.kind() == "module_field_data" {
+                    if let Some(data) = extract_data_segment(&field_child, source, data_index) {
+                        symbol_table.add_data(data);
+                        data_index += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Extract a single data segment
+fn extract_data_segment(data_node: &Node, source: &str, index: usize) -> Option<DataSegment> {
+    // Data segment identifiers are wrapped in an "index" node
+    let (name, name_range) = find_identifier_in_data_or_elem(data_node, source);
+
+    // Extract string content - look for string literals
+    let mut content = String::new();
+    let mut byte_length = 0;
+    let text = node_text(data_node, source);
+
+    // Find quoted strings in the data segment
+    let mut in_string = false;
+    let mut escape_next = false;
+    for c in text.chars() {
+        if escape_next {
+            content.push(c);
+            byte_length += 1;
+            escape_next = false;
+        } else if c == '\\' && in_string {
+            escape_next = true;
+            content.push(c);
+        } else if c == '"' {
+            in_string = !in_string;
+        } else if in_string {
+            content.push(c);
+            byte_length += 1;
+        }
+    }
+
+    // Passive segments have names
+    let is_passive = name.is_some();
+
+    Some(DataSegment {
+        name,
+        index,
+        content,
+        byte_length,
+        is_passive,
+        line: data_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
+/// Extract elem segments from the module
+fn extract_elem_segments(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
+    let mut cursor = root.walk();
+    let mut elem_index = 0;
+
+    for child in root.children(&mut cursor) {
+        if child.kind() == "module" {
+            let mut module_cursor = child.walk();
+            for module_child in child.children(&mut module_cursor) {
+                if module_child.kind() == "module_field" {
+                    let mut field_cursor = module_child.walk();
+                    for field_child in module_child.children(&mut field_cursor) {
+                        if field_child.kind() == "module_field_elem" {
+                            if let Some(elem) =
+                                extract_elem_segment(&field_child, source, elem_index)
+                            {
+                                symbol_table.add_elem(elem);
+                                elem_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if child.kind() == "module_field" {
+            let mut field_cursor = child.walk();
+            for field_child in child.children(&mut field_cursor) {
+                if field_child.kind() == "module_field_elem" {
+                    if let Some(elem) = extract_elem_segment(&field_child, source, elem_index) {
+                        symbol_table.add_elem(elem);
+                        elem_index += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Extract a single elem segment
+fn extract_elem_segment(elem_node: &Node, source: &str, index: usize) -> Option<ElemSegment> {
+    // Elem segment identifiers are wrapped in an "index" node
+    let (name, name_range) = find_identifier_in_data_or_elem(elem_node, source);
+
+    // Extract function names from elem segment
+    let mut func_names = Vec::new();
+    let mut table_name = None;
+
+    // Look for index nodes which could be function references
+    let text = node_text(elem_node, source);
+
+    // Find table name if present (table $name)
+    if let Some(table_pos) = text.find("(table ") {
+        let after_table = &text[table_pos + 7..];
+        if let Some(dollar_pos) = after_table.find('$') {
+            let name_start = dollar_pos;
+            let name_end = after_table[name_start + 1..]
+                .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+                .map(|i| name_start + i + 1)
+                .unwrap_or(after_table.len());
+            table_name = Some(after_table[name_start..name_end].to_string());
+        }
+    }
+
+    // Find function references after "func" keyword
+    if let Some(func_pos) = text.find(" func ") {
+        let after_func = &text[func_pos + 6..];
+        // Extract all $identifiers
+        let mut remaining = after_func;
+        while let Some(dollar_pos) = remaining.find('$') {
+            let name_start = dollar_pos;
+            let name_end = remaining[name_start + 1..]
+                .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+                .map(|i| name_start + i + 1)
+                .unwrap_or(remaining.len());
+            let func_name = &remaining[name_start..name_end];
+            func_names.push(func_name.to_string());
+            remaining = &remaining[name_end..];
+        }
+    }
+
+    Some(ElemSegment {
+        name,
+        index,
+        func_names,
+        table_name,
+        line: elem_node.range().start_point.row as u32,
+        range: name_range,
+    })
+}
+
+/// Find identifier in data or elem segment nodes.
+/// These have identifiers wrapped in an "index" node, unlike other constructs.
+fn find_identifier_in_data_or_elem(node: &Node, source: &str) -> (Option<String>, Option<Range>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        // Direct identifier (shouldn't happen, but handle it)
+        if child.kind() == "identifier" {
+            return (Some(node_text(&child, source)), Some(node_to_range(&child)));
+        }
+        // Index node that contains the identifier
+        if child.kind() == "index" {
+            let mut index_cursor = child.walk();
+            for index_child in child.children(&mut index_cursor) {
+                if index_child.kind() == "identifier" {
+                    return (
+                        Some(node_text(&index_child, source)),
+                        Some(node_to_range(&index_child)),
+                    );
+                }
+            }
+        }
+    }
+    (None, None)
 }

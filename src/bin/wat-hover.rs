@@ -170,6 +170,22 @@ fn main() -> ExitCode {
         for mem in &symbols.memories {
             eprintln!("  {:?}", mem.name);
         }
+        eprintln!("Data segments ({}):", symbols.data_segments.len());
+        for data in &symbols.data_segments {
+            eprintln!(
+                "  {:?}: {:?}",
+                data.name,
+                &data.content.chars().take(20).collect::<String>()
+            );
+        }
+        eprintln!("Elem segments ({}):", symbols.elem_segments.len());
+        for elem in &symbols.elem_segments {
+            eprintln!("  {:?}", elem.name);
+        }
+        eprintln!("Tags ({}):", symbols.tags.len());
+        for tag in &symbols.tags {
+            eprintln!("  {:?}", tag.name);
+        }
         eprintln!("==================");
     }
 

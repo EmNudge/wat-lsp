@@ -113,6 +113,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
             wast::core::ModuleField::Func(func) => {
                 let name = func.id.map(|id| format!("${}", id.name()));
                 let line = span_to_line(func.span, source);
+                let end_line = find_func_end_line(func.span, source);
 
                 // Extract parameters and results from type annotation
                 let (parameters, results) = extract_func_type_info(func, source);
@@ -128,7 +129,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                     locals,
                     blocks: Vec::new(),
                     line,
-                    end_line: line,
+                    end_line,
                     start_byte: func.span.offset(),
                     end_byte: func.span.offset(),
                     range: func.id.map(|id| id_to_range(id, source)),
@@ -202,6 +203,35 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
 fn span_to_line(span: wast::token::Span, source: &str) -> u32 {
     let (line, _col) = span.linecol_in(source);
     line as u32
+}
+
+/// Find the end line of a function by counting matching parentheses from the span offset
+fn find_func_end_line(span: wast::token::Span, source: &str) -> u32 {
+    let start_offset = span.offset();
+    let bytes = source.as_bytes();
+    let mut paren_depth = 0;
+    let mut end_offset = start_offset;
+
+    for (i, &byte) in bytes.iter().enumerate().skip(start_offset) {
+        match byte {
+            b'(' => paren_depth += 1,
+            b')' => {
+                paren_depth -= 1;
+                if paren_depth == 0 {
+                    end_offset = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Count newlines up to end_offset
+    let end_line = source[..=end_offset.min(source.len() - 1)]
+        .chars()
+        .filter(|&c| c == '\n')
+        .count();
+    end_line as u32
 }
 
 /// Convert Id to Range

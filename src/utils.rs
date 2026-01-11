@@ -16,6 +16,8 @@ pub enum InstructionContext {
     Type,     // type definitions/uses
     Tag,      // throw/try
     Function, // function definition
+    Data,     // data segment operations (memory.init, data.drop)
+    Elem,     // elem segment operations (elem, table.init, elem.drop)
     General,  // fallback
 }
 
@@ -49,6 +51,11 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
                 return InstructionContext::Global;
             } else if instr_text.starts_with("br") || instr_text.contains(" br") {
                 return InstructionContext::Branch;
+            // Check data/elem segment operations BEFORE general table/memory
+            } else if instr_text.contains("memory.init") || instr_text.contains("data.drop") {
+                return InstructionContext::Data;
+            } else if instr_text.contains("table.init") || instr_text.contains("elem.drop") {
+                return InstructionContext::Elem;
             } else if instr_text.contains("table.") {
                 return InstructionContext::Table;
             } else if instr_text.contains("memory.")
@@ -96,6 +103,16 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
         // Check for tag definition
         if kind == "module_field_tag" {
             return InstructionContext::Tag;
+        }
+
+        // Check for data segment definition
+        if kind == "module_field_data" {
+            return InstructionContext::Data;
+        }
+
+        // Check for elem segment definition
+        if kind == "module_field_elem" {
+            return InstructionContext::Elem;
         }
 
         // Walk up the tree
@@ -278,6 +295,17 @@ pub fn determine_context_from_line(line: &str) -> InstructionContext {
         InstructionContext::Branch
     } else if line_contains_keyword(line, "block") || line_contains_keyword(line, "loop") {
         InstructionContext::Block
+    // Check data/elem before general table/memory
+    } else if line.contains("memory.init")
+        || line.contains("data.drop")
+        || line_contains_keyword(line, "data")
+    {
+        InstructionContext::Data
+    } else if line.contains("table.init")
+        || line.contains("elem.drop")
+        || line_contains_keyword(line, "elem")
+    {
+        InstructionContext::Elem
     } else if line_contains_keyword(line, "table") {
         InstructionContext::Table
     } else if line_contains_keyword(line, "memory") {
@@ -288,7 +316,10 @@ pub fn determine_context_from_line(line: &str) -> InstructionContext {
         || line.contains("ref.")
     {
         InstructionContext::Type
-    } else if line_contains_keyword(line, "throw") || line_contains_keyword(line, "tag") {
+    } else if line_contains_keyword(line, "throw")
+        || line_contains_keyword(line, "tag")
+        || line_contains_keyword(line, "catch")
+    {
         InstructionContext::Tag
     } else if line_contains_keyword(line, "func") {
         InstructionContext::Function
