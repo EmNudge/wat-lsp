@@ -1,9 +1,17 @@
 // WAT Playground - Main Application with LSP Integration
 import * as monaco from 'monaco-editor';
 import wabtInit from 'wabt';
+import { Parser } from 'web-tree-sitter';
 import { watLanguage } from './wat-language.js';
 import { watExamples } from './examples.js';
 import initWasm, { WatLSP } from './wat_lsp_rust.js';
+import * as vsctm from 'vscode-textmate';
+import * as oniguruma from 'vscode-oniguruma';
+
+// Pre-initialize web-tree-sitter with correct WASM path before our module loads
+await Parser.init({
+  locateFile: (file) => `/tree-sitter.wasm`
+});
 
 let editor;
 let wabt;
@@ -59,8 +67,39 @@ function setLSPStatus(ready, message) {
   text.textContent = message;
 }
 
+// Global TextMate grammar instance
+let watGrammar = null;
+
 // Initialize Monaco Editor with LSP features
 async function initMonaco() {
+  // Load oniguruma WASM for TextMate grammar support
+  const onigResponse = await fetch('/onig.wasm');
+  const onigBuffer = await onigResponse.arrayBuffer();
+  await oniguruma.loadWASM(onigBuffer);
+
+  // Create oniguruma library interface for vscode-textmate
+  const onigLib = {
+    createOnigScanner: (patterns) => new oniguruma.OnigScanner(patterns),
+    createOnigString: (s) => new oniguruma.OnigString(s)
+  };
+
+  // Create TextMate registry
+  const registry = new vsctm.Registry({
+    onigLib: Promise.resolve(onigLib),
+    loadGrammar: async (scopeName) => {
+      if (scopeName === 'source.wat') {
+        const response = await fetch('/wat.tmLanguage.json');
+        const grammar = await response.json();
+        return vsctm.parseRawGrammar(JSON.stringify(grammar), 'wat.tmLanguage.json');
+      }
+      return null;
+    }
+  });
+
+  // Load the WAT grammar
+  watGrammar = await registry.loadGrammar('source.wat');
+  console.log('TextMate grammar loaded:', watGrammar ? 'success' : 'failed');
+
   // Register WAT language
   monaco.languages.register({
     id: 'wat',
@@ -71,8 +110,77 @@ async function initMonaco() {
   // Set language configuration
   monaco.languages.setLanguageConfiguration('wat', watLanguage.languageConfiguration);
 
-  // Set tokenizer
-  monaco.languages.setMonarchTokensProvider('wat', watLanguage.monarchTokensProvider);
+  // Map TextMate scopes to Monaco token types
+  const scopeToToken = (scope) => {
+    if (scope.startsWith('comment')) return 'comment';
+    if (scope.startsWith('string')) return 'string';
+    if (scope.startsWith('constant.character.escape')) return 'string.escape';
+    if (scope.startsWith('constant.numeric')) return 'number';
+    if (scope.startsWith('support.class.type')) return 'type';  // instruction prefix type
+    if (scope.startsWith('support.class')) return 'keyword';     // other instruction prefix
+    if (scope.startsWith('keyword.operator')) return 'delimiter'; // instruction suffix - white
+    if (scope.startsWith('storage.type')) return 'keyword';
+    if (scope.startsWith('keyword.control')) return 'keyword.control';
+    if (scope.startsWith('storage.modifier')) return 'keyword';
+    if (scope.startsWith('entity.name.type')) return 'type';
+    if (scope.startsWith('entity.other.attribute-name')) return 'attribute';
+    if (scope.startsWith('variable')) return 'variable';
+    return '';
+  };
+
+  // TextMate tokenizer state class
+  class TMState {
+    constructor(ruleStack) {
+      this.ruleStack = ruleStack;
+    }
+    clone() {
+      return new TMState(this.ruleStack);
+    }
+    equals(other) {
+      if (!other || !(other instanceof TMState)) return false;
+      if (!this.ruleStack && !other.ruleStack) return true;
+      if (!this.ruleStack || !other.ruleStack) return false;
+      return this.ruleStack.equals(other.ruleStack);
+    }
+  }
+
+  // Register TextMate-based token provider
+  monaco.languages.setTokensProvider('wat', {
+    getInitialState: () => new TMState(vsctm.INITIAL),
+
+    tokenize: (line, state) => {
+      if (!watGrammar) {
+        return { tokens: [], endState: state };
+      }
+
+      const result = watGrammar.tokenizeLine(line, state.ruleStack);
+      const tokens = [];
+
+      for (const token of result.tokens) {
+        // Get the most specific scope (last one)
+        const scopes = token.scopes;
+        let tokenType = '';
+        for (let i = scopes.length - 1; i >= 0; i--) {
+          const mapped = scopeToToken(scopes[i]);
+          if (mapped) {
+            tokenType = mapped;
+            break;
+          }
+        }
+        tokens.push({
+          startIndex: token.startIndex,
+          scopes: tokenType
+        });
+      }
+
+      return {
+        tokens,
+        endState: new TMState(result.ruleStack)
+      };
+    }
+  });
+
+  console.log('TextMate token provider registered');
 
   // Register completion provider
   monaco.languages.registerCompletionItemProvider('wat', {
@@ -179,11 +287,47 @@ async function initMonaco() {
     }
   });
 
+  // Define custom theme matching VS Code Dark+ colors
+  monaco.editor.defineTheme('wat-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      // Comments - green
+      { token: 'comment', foreground: '6A9955' },
+      // Strings - orange
+      { token: 'string', foreground: 'CE9178' },
+      { token: 'string.escape', foreground: 'D7BA7D' },
+      // Numbers - light green
+      { token: 'number', foreground: 'B5CEA8' },
+      // Types (i32, f64, etc.) - teal
+      { token: 'type', foreground: '4EC9B0' },
+      // Keywords - blue
+      { token: 'keyword', foreground: '569CD6' },
+      // Control flow keywords - purple
+      { token: 'keyword.control', foreground: 'C586C0' },
+      // Variables ($name) - light blue
+      { token: 'variable', foreground: '9CDCFE' },
+      // Attributes - light blue
+      { token: 'attribute', foreground: '9CDCFE' },
+      // Instruction suffix (.add, .get) - light gray (white-ish)
+      { token: 'delimiter', foreground: 'D4D4D4' },
+    ],
+    colors: {
+      // Use standard punctuation color for brackets
+      'editorBracketHighlight.foreground1': '#D4D4D4',
+      'editorBracketHighlight.foreground2': '#D4D4D4',
+      'editorBracketHighlight.foreground3': '#D4D4D4',
+      'editorBracketHighlight.foreground4': '#D4D4D4',
+      'editorBracketHighlight.foreground5': '#D4D4D4',
+      'editorBracketHighlight.foreground6': '#D4D4D4',
+    }
+  });
+
   // Create editor
   editor = monaco.editor.create(document.getElementById('editor'), {
     value: watExamples.hello,
     language: 'wat',
-    theme: 'vs-dark',
+    theme: 'wat-dark',
     fontSize: 14,
     fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
     minimap: { enabled: false },
@@ -193,10 +337,41 @@ async function initMonaco() {
     renderWhitespace: 'selection',
     lineNumbers: 'on',
     folding: true,
-    bracketPairColorization: { enabled: true },
+    bracketPairColorization: { enabled: false },
+    'semanticHighlighting.enabled': true,  // Tree-sitter semantic tokens enhance TextMate
     'editor.gotoLocation.multipleDefinitions': 'goto',
     'editor.gotoLocation.multipleReferences': 'goto'
   });
+
+  // Override theme's getTokenStyleMetadata for semantic token coloring
+  // This is required for Monaco standalone to properly style semantic tokens
+  // See: https://github.com/microsoft/monaco-editor/issues/1833
+  try {
+    const theme = editor._themeService._theme;
+
+    // Inject CSS for semantic token colors that enhance TextMate
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      .monaco-editor .mtk100 { color: #DCDCAA !important; }  /* yellow - function calls */
+      .monaco-editor .mtk101 { color: #569CD6 !important; }  /* blue - keywords */
+      .monaco-editor .mtk102 { color: #9CDCFE !important; }  /* light blue - variables */
+    `;
+    document.head.appendChild(styleEl);
+
+    theme.getTokenStyleMetadata = (type, modifiers, modelLanguage) => {
+      // Semantic tokens enhance TextMate highlighting
+      // Only override specific types where tree-sitter provides better context
+      const colorMapping = {
+        'variable': { foreground: 102 },  // light blue - variables
+        // 'function' intentionally NOT mapped - let TextMate handle instructions
+        // so that prefix (i32, local) and suffix (.add, .get) have different colors
+      };
+      return colorMapping[type];
+    };
+    console.log('Semantic token styling configured');
+  } catch (e) {
+    console.warn('Could not override theme token metadata:', e);
+  }
 
   // Parse on content change (debounced)
   let parseTimeout;
@@ -305,6 +480,50 @@ function goToLine(line, col) {
 }
 window.goToLine = goToLine; // Expose for onclick handlers
 
+// Register semantic tokens provider for tree-sitter based syntax highlighting
+function registerSemanticTokensProvider() {
+  if (!watLSP) {
+    console.warn('registerSemanticTokensProvider: watLSP not available');
+    return;
+  }
+
+  try {
+    // Get the legend from the LSP
+    const legend = watLSP.getSemanticTokensLegend();
+
+    monaco.languages.registerDocumentSemanticTokensProvider('wat', {
+      getLegend: () => legend,
+
+      provideDocumentSemanticTokens: (model, lastResultId, token) => {
+        if (!watLSP || !watLSP.ready) {
+          console.log('provideDocumentSemanticTokens: LSP not ready');
+          return { data: new Uint32Array(0) };
+        }
+
+        // Ensure document is parsed with latest content
+        watLSP.parse(model.getValue());
+
+        // Get semantic tokens from the LSP
+        const tokens = watLSP.provideSemanticTokens();
+
+        return {
+          data: tokens,
+          resultId: String(Date.now())
+        };
+      },
+
+      releaseDocumentSemanticTokens: (resultId) => {
+        // Nothing to clean up
+      }
+    });
+
+    consoleOutput.info('Semantic tokens provider registered');
+  } catch (e) {
+    console.error('Failed to register semantic tokens provider:', e);
+    consoleOutput.error('Failed to register semantic tokens: ' + e.message);
+  }
+}
+
 // Initialize LSP
 async function initLSP() {
   setLSPStatus(false, 'Loading WASM LSP...');
@@ -320,7 +539,10 @@ async function initLSP() {
     if (success) {
       setLSPStatus(true, 'LSP Ready (Rust WASM)');
       consoleOutput.info('LSP initialized with Rust WASM module');
-      consoleOutput.info('Features: Hover, Go to Definition (F12), Find References (Shift+F12)');
+      consoleOutput.info('Features: Hover, Go to Definition (F12), Find References (Shift+F12), Semantic Highlighting');
+
+      // Register semantic tokens provider for syntax highlighting
+      registerSemanticTokensProvider();
 
       // Initial parse
       if (editor) {

@@ -8,7 +8,10 @@ use crate::core::types::{HoverResult, Position, Range};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
 use crate::symbols::SymbolTable;
-use crate::ts_facade::{self, Parser, Tree};
+use crate::ts_facade::{self, Language, Parser, Query, Tree};
+
+/// The highlights.scm query for syntax highlighting
+const HIGHLIGHTS_QUERY: &str = include_str!("../../tree-sitter-wasm/queries/highlights.scm");
 
 /// Initialize panic hook for better error messages in the browser console
 #[wasm_bindgen(start)]
@@ -23,6 +26,8 @@ pub struct WatLSP {
     symbols: Option<SymbolTable>,
     tree: Option<Tree>,
     parser: Option<Parser>,
+    language: Option<Language>,
+    highlight_query: Option<Query>,
     ready: bool,
 }
 
@@ -36,6 +41,8 @@ impl WatLSP {
             symbols: None,
             tree: None,
             parser: None,
+            language: None,
+            highlight_query: None,
             ready: false,
         }
     }
@@ -48,10 +55,23 @@ impl WatLSP {
             return false;
         }
 
-        // Create parser
+        // Create parser and get language
         match ts_facade::create_parser().await {
-            Ok(parser) => {
+            Ok((parser, language)) => {
+                // Create highlight query from the language
+                match language.query(HIGHLIGHTS_QUERY) {
+                    Ok(query) => {
+                        self.highlight_query = Some(query);
+                    }
+                    Err(e) => {
+                        web_sys::console::warn_1(
+                            &format!("Failed to create highlight query: {}", e).into(),
+                        );
+                    }
+                }
+
                 self.parser = Some(parser);
+                self.language = Some(language);
                 self.ready = true;
                 true
             }
@@ -292,6 +312,162 @@ impl WatLSP {
         } else {
             html
         }
+    }
+
+    /// Provide semantic tokens for syntax highlighting
+    /// Returns a flat array of u32 values in Monaco's delta-encoded format:
+    /// [deltaLine, deltaStartChar, length, tokenType, tokenModifiers, ...]
+    #[wasm_bindgen(js_name = provideSemanticTokens)]
+    pub fn provide_semantic_tokens(&self) -> js_sys::Uint32Array {
+        let empty = js_sys::Uint32Array::new_with_length(0);
+
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return empty,
+        };
+
+        let query = match &self.highlight_query {
+            Some(q) => q,
+            None => return empty,
+        };
+
+        // Run the query on the root node
+        let root = tree.root_node();
+        let captures = query.captures(&root);
+
+        // Collect all tokens with their positions
+        let mut tokens: Vec<(u32, u32, u32, u32, u32)> = Vec::new();
+
+        for capture in captures {
+            let name = capture.name();
+            let node = capture.node();
+
+            let start_pos = node.start_position();
+            let end_pos = node.end_position();
+
+            // Calculate length (handle multi-line tokens)
+            let length = if start_pos.row == end_pos.row {
+                (end_pos.column - start_pos.column) as u32
+            } else {
+                // For multi-line tokens, just use the first line length
+                // This is a simplification; proper handling would split tokens
+                (node.end_byte() - node.start_byte()) as u32
+            };
+
+            // Map capture name to token type index
+            let (token_type, token_modifiers) = capture_name_to_token(&name);
+
+            tokens.push((
+                start_pos.row as u32,
+                start_pos.column as u32,
+                length,
+                token_type,
+                token_modifiers,
+            ));
+        }
+
+        // Sort tokens by position (line, then column)
+        tokens.sort_by(|a, b| {
+            if a.0 != b.0 {
+                a.0.cmp(&b.0)
+            } else {
+                a.1.cmp(&b.1)
+            }
+        });
+
+        // Delta-encode the tokens, skipping overlapping positions
+        let mut result: Vec<u32> = Vec::with_capacity(tokens.len() * 5);
+        let mut prev_line = 0u32;
+        let mut prev_col = 0u32;
+        let mut last_end_col = 0u32; // Track end of last token to detect overlaps
+
+        for (line, col, length, token_type, token_modifiers) in tokens {
+            // Skip tokens that overlap with the previous one on the same line
+            if line == prev_line && col < last_end_col {
+                continue;
+            }
+
+            let delta_line = line - prev_line;
+            let delta_col = if delta_line == 0 { col - prev_col } else { col };
+
+            result.push(delta_line);
+            result.push(delta_col);
+            result.push(length);
+            result.push(token_type);
+            result.push(token_modifiers);
+
+            prev_line = line;
+            prev_col = col;
+            last_end_col = col + length;
+        }
+
+        js_sys::Uint32Array::from(&result[..])
+    }
+
+    /// Get the semantic token legend (token types and modifiers)
+    #[wasm_bindgen(js_name = getSemanticTokensLegend)]
+    pub fn get_semantic_tokens_legend(&self) -> JsValue {
+        let obj = js_sys::Object::new();
+
+        // Token types - must match the indices used in capture_name_to_token
+        let types = js_sys::Array::new();
+        types.push(&"comment".into()); // 0
+        types.push(&"string".into()); // 1
+        types.push(&"number".into()); // 2
+        types.push(&"type".into()); // 3
+        types.push(&"keyword".into()); // 4
+        types.push(&"function".into()); // 5
+        types.push(&"variable".into()); // 6
+        types.push(&"operator".into()); // 7
+
+        // Token modifiers - bit flags
+        let modifiers = js_sys::Array::new();
+        modifiers.push(&"definition".into()); // bit 0
+        modifiers.push(&"builtin".into()); // bit 1
+        modifiers.push(&"instruction".into()); // bit 2
+        modifiers.push(&"parameter".into()); // bit 3
+        modifiers.push(&"local".into()); // bit 4
+        modifiers.push(&"control".into()); // bit 5
+
+        js_sys::Reflect::set(&obj, &"tokenTypes".into(), &types).ok();
+        js_sys::Reflect::set(&obj, &"tokenModifiers".into(), &modifiers).ok();
+
+        obj.into()
+    }
+}
+
+/// Map a capture name from highlights.scm to (tokenType index, tokenModifiers bitmask)
+fn capture_name_to_token(name: &str) -> (u32, u32) {
+    match name {
+        // Comments
+        "comment" => (0, 0),
+
+        // Strings
+        "string" => (1, 0),
+
+        // Numbers
+        "number" => (2, 0),
+
+        // Types
+        "type" | "type.builtin" => (3, 0b10), // builtin modifier
+
+        // Keywords
+        "keyword" => (4, 0),
+        "keyword.control" => (4, 0b100000), // control modifier
+
+        // Functions/Instructions
+        "function" => (5, 0),
+        "function.definition" => (5, 0b01), // definition modifier
+        "function.instruction" => (5, 0b100), // instruction modifier
+
+        // Variables
+        "variable" => (6, 0),
+        "variable.definition" => (6, 0b01), // definition modifier
+        "variable.parameter" => (6, 0b1000), // parameter modifier
+        "variable.local" => (6, 0b10000),   // local modifier
+
+        // Default to keyword for unknown captures
+        _ => (4, 0),
     }
 }
 

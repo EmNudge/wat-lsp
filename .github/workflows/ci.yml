@@ -316,11 +316,19 @@ jobs:
         run: |
           mkdir -p playground/public
           cp pkg/wat_lsp_rust.js playground/
+          cp pkg/wat_lsp_rust.d.ts playground/
           cp pkg/wat_lsp_rust_bg.wasm playground/public/
 
       - name: Install playground dependencies
         working-directory: playground
         run: npm install
+
+      - name: Copy runtime dependencies to public
+        working-directory: playground
+        run: |
+          cp node_modules/web-tree-sitter/tree-sitter.wasm public/
+          cp node_modules/vscode-oniguruma/release/onig.wasm public/
+          cp ../vscode-extension/syntaxes/wat.tmLanguage.json public/
 
       - name: Build playground
         working-directory: playground

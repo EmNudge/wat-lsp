@@ -27,6 +27,8 @@ tree-sitter-wasm/vscode-extension/
 # Playground
 playground/*.wasm
 playground/public/*.wasm
+playground/wat_lsp_rust.js
+playground/wat_lsp_rust.d.ts
 playground/node_modules/
 playground/dist/
 playground/test-results/

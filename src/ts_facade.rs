@@ -39,7 +39,8 @@ mod wasm {
     use std::ops::Range;
     use wasm_bindgen::prelude::*;
     use web_tree_sitter_sg::{
-        Language as WtsLanguage, Parser as WtsParser, SyntaxNode, Tree as WtsTree, TreeSitter,
+        Language as WtsLanguage, Parser as WtsParser, Query as WtsQuery, SyntaxNode,
+        Tree as WtsTree, TreeSitter,
     };
 
     // Include the tree-sitter-wat.wasm file at compile time
@@ -54,6 +55,17 @@ mod wasm {
     #[derive(Clone)]
     pub struct Language(WtsLanguage);
 
+    impl Language {
+        /// Create a query from this language
+        pub fn query(&self, source: &str) -> Result<Query, String> {
+            let js_source = js_sys::JsString::from(source);
+            self.0
+                .query(&js_source)
+                .map(Query)
+                .map_err(|e| format!("Query error: {:?}", e))
+        }
+    }
+
     /// Get the WAT language (async because it loads from WASM)
     pub async fn wat_language() -> Result<Language, String> {
         // Convert bytes to Uint8Array
@@ -64,6 +76,74 @@ mod wasm {
             .await
             .map_err(|e| format!("Failed to load WAT grammar: {:?}", e))?;
         Ok(Language(lang))
+    }
+
+    /// Query wrapper for running tree-sitter queries
+    pub struct Query(WtsQuery);
+
+    impl Query {
+        /// Get the capture names defined in this query
+        pub fn capture_names(&self) -> Vec<String> {
+            let names = self.0.capture_names();
+            names.iter().filter_map(|v| v.as_string()).collect()
+        }
+
+        /// Run captures on a node, returning all captures
+        pub fn captures(&self, node: &Node) -> Vec<QueryCapture> {
+            use wasm_bindgen::JsCast;
+            let captures = self.0.captures(&node.0, None, None);
+
+            let mut result = Vec::new();
+            for v in captures.iter() {
+                let obj = match v.dyn_ref::<js_sys::Object>() {
+                    Some(o) => o,
+                    None => continue,
+                };
+
+                let name = match js_sys::Reflect::get(obj, &"name".into())
+                    .ok()
+                    .and_then(|n| n.as_string())
+                {
+                    Some(s) => s,
+                    None => continue,
+                };
+
+                let node_val = match js_sys::Reflect::get(obj, &"node".into()).ok() {
+                    Some(n) => n,
+                    None => continue,
+                };
+
+                // Use unchecked_into since the JS object is a valid SyntaxNode
+                // but dyn_ref fails due to wasm-bindgen type mismatch
+                let node: SyntaxNode = node_val.unchecked_into();
+
+                result.push(QueryCapture {
+                    name,
+                    node: Node(node),
+                });
+            }
+
+            result
+        }
+    }
+
+    /// A single capture from a query
+    #[derive(Clone)]
+    pub struct QueryCapture {
+        name: String,
+        node: Node,
+    }
+
+    impl QueryCapture {
+        /// Get the capture name (e.g., "comment", "keyword", "string")
+        pub fn name(&self) -> String {
+            self.name.clone()
+        }
+
+        /// Get the captured node
+        pub fn node(&self) -> Node {
+            self.node.clone()
+        }
     }
 
     /// Parser wrapper
@@ -92,11 +172,12 @@ mod wasm {
     }
 
     /// Create a parser configured for WAT (async)
-    pub async fn create_parser() -> Result<Parser, String> {
+    /// Returns both the parser and the language for query creation
+    pub async fn create_parser() -> Result<(Parser, Language), String> {
         let mut parser = Parser::new()?;
         let language = wat_language().await?;
         parser.set_language(&language)?;
-        Ok(parser)
+        Ok((parser, language))
     }
 
     /// Tree wrapper
