@@ -62,6 +62,13 @@ pub const BLOCK_KINDS_EXPR: &[&str] = &["expr1_block", "expr1_loop", "expr1_if",
 /// All block-related node kinds (instruction form used in some contexts)
 pub const BLOCK_KINDS_INSTR: &[&str] = &["instr_block", "instr_loop"];
 
+// ============================================================================
+// Struct operation constants - used for hover and diagnostics
+// ============================================================================
+
+/// Struct operations that reference a type and a field
+pub const STRUCT_OPS: &[&str] = &["struct.get", "struct.set", "struct.get_s", "struct.get_u"];
+
 /// Check if a kind represents any block structure (statement, expression, or instruction form)
 pub fn is_block_kind(kind: &str) -> bool {
     BLOCK_KINDS_STATEMENT.contains(&kind)
@@ -410,15 +417,12 @@ pub fn determine_context_from_line(line: &str) -> InstructionContext {
 }
 
 /// Find the function that contains the given position.
-/// Returns the last function whose start line is at or before the position.
+/// Checks that the position is within the function's line range (start to end).
 pub fn find_containing_function(symbols: &SymbolTable, position: Position) -> Option<&Function> {
-    // FIXED: Iterate in reverse to find the LAST (most recent) function
-    // that starts at or before this position, not the first one
     symbols
         .functions
         .iter()
-        .rev()
-        .find(|func| func.line <= position.line)
+        .find(|func| position.line >= func.line && position.line <= func.end_line)
 }
 
 /// Get the line at the specified position in a document.

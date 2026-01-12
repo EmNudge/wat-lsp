@@ -307,41 +307,11 @@ fn extract_func_locals(func: &wast::core::Func, source: &str) -> Vec<Variable> {
     locals
 }
 
-/// Convert wast ValType to our ValueType
+/// Convert wast ValType to our ValueType.
+/// Uses the centralized From implementation in symbols.rs.
+#[inline]
 fn extract_value_type(val_type: &wast::core::ValType) -> ValueType {
-    match val_type {
-        wast::core::ValType::I32 => ValueType::I32,
-        wast::core::ValType::I64 => ValueType::I64,
-        wast::core::ValType::F32 => ValueType::F32,
-        wast::core::ValType::F64 => ValueType::F64,
-        wast::core::ValType::V128 => ValueType::V128,
-        wast::core::ValType::Ref(ref_type) => match &ref_type.heap {
-            wast::core::HeapType::Abstract { ty, .. } => match ty {
-                wast::core::AbstractHeapType::Func => ValueType::Funcref,
-                wast::core::AbstractHeapType::Extern => ValueType::Externref,
-                wast::core::AbstractHeapType::Struct => ValueType::Structref,
-                wast::core::AbstractHeapType::Array => ValueType::Arrayref,
-                wast::core::AbstractHeapType::I31 => ValueType::I31ref,
-                wast::core::AbstractHeapType::Any => ValueType::Anyref,
-                wast::core::AbstractHeapType::Eq => ValueType::Eqref,
-                wast::core::AbstractHeapType::None => ValueType::Nullref,
-                wast::core::AbstractHeapType::NoFunc => ValueType::NullFuncref,
-                wast::core::AbstractHeapType::NoExtern => ValueType::NullExternref,
-                _ => ValueType::Unknown,
-            },
-            wast::core::HeapType::Concrete(idx) => match idx {
-                wast::token::Index::Num(n, _) => {
-                    if ref_type.nullable {
-                        ValueType::RefNull(*n)
-                    } else {
-                        ValueType::Ref(*n)
-                    }
-                }
-                wast::token::Index::Id(_) => ValueType::Unknown,
-            },
-            wast::core::HeapType::Exact(_) => ValueType::Unknown,
-        },
-    }
+    ValueType::from(val_type)
 }
 
 #[cfg(test)]

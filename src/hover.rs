@@ -1,8 +1,11 @@
 use crate::core::types::{HoverResult, Position};
+use crate::symbol_lookup::{
+    find_block_in_function, find_local_in_function, find_param_in_function,
+};
 use crate::symbols::*;
 use crate::utils::{
     determine_context_with_fallback, find_containing_function, format_function_signature,
-    get_line_at_position, get_word_at_position, is_inside_comment, InstructionContext,
+    get_line_at_position, get_word_at_position, is_inside_comment, InstructionContext, STRUCT_OPS,
 };
 
 // Use the appropriate tree-sitter types based on feature
@@ -104,15 +107,11 @@ fn provide_symbol_hover(
     // Check for local/param (both usage and declaration in Function context)
     if context == InstructionContext::Local || context == InstructionContext::Function {
         if let Some(func) = find_containing_function(symbols, position) {
-            for param in &func.parameters {
-                if param.name.as_deref() == Some(word) {
-                    return Some(format_param_hover(word, param));
-                }
+            if let Some(param) = find_param_in_function(word, func) {
+                return Some(format_param_hover(word, param));
             }
-            for local in &func.locals {
-                if local.name.as_deref() == Some(word) {
-                    return Some(format_local_hover(word, local));
-                }
+            if let Some(local) = find_local_in_function(word, func) {
+                return Some(format_local_hover(word, local));
             }
         }
     }
@@ -120,10 +119,8 @@ fn provide_symbol_hover(
     // Check for block labels (both usage and declaration)
     if context == InstructionContext::Branch || context == InstructionContext::Block {
         if let Some(func) = find_containing_function(symbols, position) {
-            for block in &func.blocks {
-                if block.label == word {
-                    return Some(format_block_hover(block));
-                }
+            if let Some(block) = find_block_in_function(word, func) {
+                return Some(format_block_hover(block));
             }
         }
     }
@@ -254,21 +251,15 @@ fn try_all_symbol_types(
 
     // Try local/param in containing function
     if let Some(func) = find_containing_function(symbols, position) {
-        for param in &func.parameters {
-            if param.name.as_deref() == Some(word) {
-                return Some(format_param_hover(word, param));
-            }
+        if let Some(param) = find_param_in_function(word, func) {
+            return Some(format_param_hover(word, param));
         }
-        for local in &func.locals {
-            if local.name.as_deref() == Some(word) {
-                return Some(format_local_hover(word, local));
-            }
+        if let Some(local) = find_local_in_function(word, func) {
+            return Some(format_local_hover(word, local));
         }
         // Try block labels
-        for block in &func.blocks {
-            if block.label == word {
-                return Some(format_block_hover(block));
-            }
+        if let Some(block) = find_block_in_function(word, func) {
+            return Some(format_block_hover(block));
         }
     }
 
@@ -310,9 +301,7 @@ fn provide_struct_field_hover(
     let line = get_line_at_position(document, position.line as usize)?;
 
     // Look for struct operations that have type and field
-    let struct_ops = ["struct.get", "struct.set", "struct.get_s", "struct.get_u"];
-
-    for op in &struct_ops {
+    for op in STRUCT_OPS {
         if let Some(op_pos) = line.find(op) {
             let after_op = &line[op_pos + op.len()..];
 
