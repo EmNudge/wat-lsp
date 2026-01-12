@@ -1,4 +1,5 @@
 // WAT Playground - Main Application with LSP Integration
+// Powered by @emnudge/wat-lsp
 import * as monaco from 'monaco-editor';
 import wabtInit from 'wabt';
 import { watLanguage } from './wat-language.js';
