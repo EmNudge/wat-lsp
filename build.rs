@@ -28,7 +28,7 @@ fn main() {
 fn compile_tree_sitter_grammar() {
     use std::process::Command;
 
-    let grammar_dir = "tree-sitter-wasm";
+    let grammar_dir = "grammars/tree-sitter-wat";
     let grammar_path = format!("{}/grammar.js", grammar_dir);
 
     println!("cargo:rerun-if-changed={}", grammar_path);

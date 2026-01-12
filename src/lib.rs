@@ -3,9 +3,6 @@
 // Core types (protocol-independent) - must be first as other modules depend on it
 pub mod core;
 
-// Symbol table (shared between native and WASM)
-pub mod symbols;
-
 // Wast-based parser (works in WASM, always available)
 pub mod wast_parser;
 
@@ -29,26 +26,32 @@ pub mod utils;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod symbol_lookup;
 
-// Hover support (uses tree-sitter via ts_facade)
+// LSP feature modules (completion, definition, hover, references, signature, symbols)
+pub mod features;
+
+// Re-export feature modules at the top level for backward compatibility
+pub use features::symbols;
+
 #[cfg(any(feature = "native", feature = "wasm"))]
-pub mod hover;
-
-// Native-only modules (depend on tower-lsp or other native deps)
-#[cfg(feature = "native")]
-pub mod completion;
+pub use features::hover;
 
 #[cfg(feature = "native")]
-pub mod definition;
+pub use features::completion;
 
+#[cfg(feature = "native")]
+pub use features::definition;
+
+#[cfg(feature = "native")]
+pub use features::references;
+
+#[cfg(feature = "native")]
+pub use features::signature;
+
+// Diagnostics (native only)
 #[cfg(feature = "native")]
 pub mod diagnostics;
 
-#[cfg(feature = "native")]
-pub mod references;
-
-#[cfg(feature = "native")]
-pub mod signature;
-
+// Platform-specific modules
 #[cfg(feature = "native")]
 pub mod native;
 

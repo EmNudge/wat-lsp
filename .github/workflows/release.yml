@@ -50,7 +50,7 @@ jobs:
       - name: Get version from package.json
         id: version
         shell: bash
-        run: echo "version=v$(node -p "require('./vscode-extension/package.json').version")" >> $GITHUB_OUTPUT
+        run: echo "version=v$(node -p "require('./packages/vscode-extension/package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
@@ -60,7 +60,7 @@ jobs:
         run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter generate
 
       - name: Build release binary
@@ -108,29 +108,29 @@ jobs:
 
       - name: Organize server binaries
         run: |
-          mkdir -p vscode-extension/server
-          cp server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust vscode-extension/server/wat-lsp-rust-linux-x64
-          cp server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust.exe vscode-extension/server/wat-lsp-rust-win32-x64.exe
-          cp server-binaries/server-x86_64-apple-darwin/wat-lsp-rust vscode-extension/server/wat-lsp-rust-darwin-x64
-          cp server-binaries/server-aarch64-apple-darwin/wat-lsp-rust vscode-extension/server/wat-lsp-rust-darwin-arm64
-          chmod +x vscode-extension/server/wat-lsp-rust-*
+          mkdir -p packages/vscode-extension/server
+          cp server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-linux-x64
+          cp server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust.exe packages/vscode-extension/server/wat-lsp-rust-win32-x64.exe
+          cp server-binaries/server-x86_64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-x64
+          cp server-binaries/server-aarch64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-arm64
+          chmod +x packages/vscode-extension/server/wat-lsp-rust-*
 
       - name: Install extension dependencies
-        working-directory: vscode-extension
+        working-directory: packages/vscode-extension
         run: npm install
 
       - name: Package extension
-        working-directory: vscode-extension
+        working-directory: packages/vscode-extension
         run: npx vsce package
 
       - name: Publish to Open VSX
-        working-directory: vscode-extension
+        working-directory: packages/vscode-extension
         continue-on-error: true
         run: |
           npm install -g ovsx
           ovsx publish *.vsix -p ${{ secrets.OPENVSX_TOKEN }}
 
       - name: Publish to VS Code Marketplace
-        working-directory: vscode-extension
+        working-directory: packages/vscode-extension
         continue-on-error: true
         run: npx vsce publish --pat ${{ secrets.VSCE_PAT }}

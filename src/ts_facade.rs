@@ -44,7 +44,8 @@ mod wasm {
     };
 
     // Include the tree-sitter-wat.wasm file at compile time
-    const WAT_GRAMMAR_WASM: &[u8] = include_bytes!("../tree-sitter-wasm/tree-sitter-wat.wasm");
+    const WAT_GRAMMAR_WASM: &[u8] =
+        include_bytes!("../grammars/tree-sitter-wat/tree-sitter-wat.wasm");
 
     /// Initialize tree-sitter runtime (must be called before using parser)
     pub async fn init() -> Result<(), JsValue> {

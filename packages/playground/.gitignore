@@ -1,0 +1,5 @@
+dist/
+node_modules/
+public/wat.tmLanguage.json
+public/tree-sitter.wasm
+public/onig.wasm
