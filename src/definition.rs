@@ -1,3 +1,7 @@
+use crate::symbol_lookup::{
+    find_block_label_in_function, find_local_or_param_in_function, find_symbol_definition_range,
+    IndexContext,
+};
 use crate::symbols::*;
 use crate::utils::{
     determine_context_with_fallback, find_containing_function, get_word_at_position,
@@ -5,6 +9,14 @@ use crate::utils::{
 };
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
+
+/// Helper to convert a core Range to an LSP Location
+fn range_to_location(range: crate::core::types::Range, uri: &Url) -> Location {
+    Location {
+        uri: uri.clone(),
+        range: range.into(),
+    }
+}
 
 #[cfg(test)]
 mod tests;
@@ -206,36 +218,16 @@ fn provide_symbol_definition(
         InstructionContext::Local => {
             // Jump to local/parameter definition
             if let Some(func) = find_containing_function(symbols, position.into()) {
-                // Check parameters first
-                for param in &func.parameters {
-                    if param.name.as_ref() == Some(&word.to_string()) {
-                        return param.range.as_ref().map(|range| Location {
-                            uri: lsp_uri.clone(),
-                            range: (*range).into(),
-                        });
-                    }
-                }
-                // Then check locals
-                for local in &func.locals {
-                    if local.name.as_ref() == Some(&word.to_string()) {
-                        return local.range.as_ref().map(|range| Location {
-                            uri: lsp_uri.clone(),
-                            range: (*range).into(),
-                        });
-                    }
+                if let Some(range) = find_local_or_param_in_function(word, func) {
+                    return Some(range_to_location(range, &lsp_uri));
                 }
             }
         }
         InstructionContext::Branch => {
             // Jump to block label definition
             if let Some(func) = find_containing_function(symbols, position.into()) {
-                for block in &func.blocks {
-                    if block.label == word {
-                        return block.range.as_ref().map(|range| Location {
-                            uri: lsp_uri.clone(),
-                            range: (*range).into(),
-                        });
-                    }
+                if let Some(range) = find_block_label_in_function(word, func) {
+                    return Some(range_to_location(range, &lsp_uri));
                 }
             }
         }
@@ -287,73 +279,15 @@ fn provide_symbol_definition(
         InstructionContext::Block => {
             // Block context - same as Branch for definition lookup
             if let Some(func) = find_containing_function(symbols, position.into()) {
-                for block in &func.blocks {
-                    if block.label == word {
-                        return block.range.as_ref().map(|range| Location {
-                            uri: lsp_uri.clone(),
-                            range: (*range).into(),
-                        });
-                    }
+                if let Some(range) = find_block_label_in_function(word, func) {
+                    return Some(range_to_location(range, &lsp_uri));
                 }
             }
         }
         InstructionContext::General => {
-            // Try all symbol types
-            // Try function
-            if let Some(func) = symbols.get_function_by_name(word) {
-                return func.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-            // Try global
-            if let Some(global) = symbols.get_global_by_name(word) {
-                return global.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-            // Try table
-            if let Some(table) = symbols.get_table_by_name(word) {
-                return table.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-            // Try memory
-            if let Some(memory) = symbols.get_memory_by_name(word) {
-                return memory.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-            // Try type
-            if let Some(type_def) = symbols.get_type_by_name(word) {
-                return type_def.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-            // Try tag
-            if let Some(tag) = symbols.get_tag_by_name(word) {
-                return tag.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-            // Try data segment
-            if let Some(data) = symbols.get_data_by_name(word) {
-                return data.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-            // Try elem segment
-            if let Some(elem) = symbols.get_elem_by_name(word) {
-                return elem.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
+            // Use shared symbol lookup for all symbol types
+            if let Some(range) = find_symbol_definition_range(word, symbols, position.into()) {
+                return Some(range_to_location(range, &lsp_uri));
             }
         }
         InstructionContext::Data => {
@@ -388,76 +322,19 @@ fn provide_index_definition(
     position: Position,
     uri: &str,
 ) -> Option<Location> {
-    // Parse URI once at the beginning
     let lsp_uri = Url::parse(uri).ok()?;
+    let instr_context = determine_context_with_fallback(tree, document, position.into());
 
-    let context = determine_context_with_fallback(tree, document, position.into());
+    // Convert InstructionContext to IndexContext
+    let index_context = IndexContext::from_instruction_context(instr_context)?;
 
-    match context {
-        InstructionContext::Call => {
-            // Jump to function by index
-            if let Some(func) = symbols.get_function_by_index(index) {
-                return func.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-        }
-        InstructionContext::Global => {
-            // Jump to global by index
-            if let Some(global) = symbols.get_global_by_index(index) {
-                return global.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-        }
-        InstructionContext::Type => {
-            // Jump to type by index
-            if let Some(type_def) = symbols.get_type_by_index(index) {
-                return type_def.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-        }
-        InstructionContext::Tag => {
-            // Jump to tag by index
-            if let Some(tag) = symbols.get_tag_by_index(index) {
-                return tag.range.as_ref().map(|range| Location {
-                    uri: lsp_uri.clone(),
-                    range: (*range).into(),
-                });
-            }
-        }
-        InstructionContext::Local => {
-            // Jump to local/parameter by index
-            if let Some(func) = find_containing_function(symbols, position.into()) {
-                // Parameters come first, then locals
-                let total_params = func.parameters.len();
+    // Use shared lookup
+    let range = crate::symbol_lookup::find_index_definition_range(
+        index,
+        symbols,
+        index_context,
+        position.into(),
+    )?;
 
-                if index < total_params {
-                    // It's a parameter
-                    if let Some(param) = func.parameters.get(index) {
-                        return param.range.as_ref().map(|range| Location {
-                            uri: lsp_uri.clone(),
-                            range: (*range).into(),
-                        });
-                    }
-                } else {
-                    // It's a local
-                    let local_index = index - total_params;
-                    if let Some(local) = func.locals.get(local_index) {
-                        return local.range.as_ref().map(|range| Location {
-                            uri: lsp_uri.clone(),
-                            range: (*range).into(),
-                        });
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-
-    None
+    Some(range_to_location(range, &lsp_uri))
 }

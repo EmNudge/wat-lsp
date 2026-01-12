@@ -1578,25 +1578,8 @@ fn node_text(node: &Node, source: &str) -> String {
 fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
     // Check strict match first (for direct children like "i32" in some contexts)
     let text = node_text(value_type_node, source);
-    match text.as_str() {
-        "i32" => return ValueType::I32,
-        "i64" => return ValueType::I64,
-        "f32" => return ValueType::F32,
-        "f64" => return ValueType::F64,
-        "v128" => return ValueType::V128,
-        "i8" => return ValueType::I8,
-        "i16" => return ValueType::I16,
-        "funcref" => return ValueType::Funcref,
-        "externref" => return ValueType::Externref,
-        "structref" => return ValueType::Structref,
-        "arrayref" => return ValueType::Arrayref,
-        "i31ref" => return ValueType::I31ref,
-        "anyref" => return ValueType::Anyref,
-        "eqref" => return ValueType::Eqref,
-        "nullref" => return ValueType::Nullref,
-        "nullfuncref" => return ValueType::NullFuncref,
-        "nullexternref" => return ValueType::NullExternref,
-        _ => {}
+    if let Some(vt) = ValueType::try_parse(&text) {
+        return vt;
     }
 
     let mut cursor = value_type_node.walk();
@@ -1655,27 +1638,11 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
     ValueType::Unknown
 }
 
+/// Alias for ValueType::try_parse for convenience in tree traversal code.
+/// Use this when traversing tree-sitter nodes and checking type strings.
+#[inline]
 fn simple_type_from_str(s: &str) -> Option<ValueType> {
-    match s {
-        "i32" => Some(ValueType::I32),
-        "i64" => Some(ValueType::I64),
-        "f32" => Some(ValueType::F32),
-        "f64" => Some(ValueType::F64),
-        "v128" => Some(ValueType::V128),
-        "i8" => Some(ValueType::I8),
-        "i16" => Some(ValueType::I16),
-        "funcref" => Some(ValueType::Funcref),
-        "externref" => Some(ValueType::Externref),
-        "structref" => Some(ValueType::Structref),
-        "arrayref" => Some(ValueType::Arrayref),
-        "i31ref" => Some(ValueType::I31ref),
-        "anyref" => Some(ValueType::Anyref),
-        "eqref" => Some(ValueType::Eqref),
-        "nullref" => Some(ValueType::Nullref),
-        "nullfuncref" => Some(ValueType::NullFuncref),
-        "nullexternref" => Some(ValueType::NullExternref),
-        _ => None,
-    }
+    ValueType::try_parse(s)
 }
 
 /// Extract reference type from a ref_type node (handles nested structure)

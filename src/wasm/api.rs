@@ -7,8 +7,10 @@ use wasm_bindgen::prelude::*;
 use crate::core::types::{HoverResult, Position, Range};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
+use crate::symbol_lookup::{find_symbol_definition_range, IndexContext};
 use crate::symbols::SymbolTable;
 use crate::ts_facade::{self, Language, Parser, Query, Tree};
+use crate::utils::{get_word_at_position, is_word_char};
 
 /// The highlights.scm query for syntax highlighting
 const HIGHLIGHTS_QUERY: &str = include_str!("../../tree-sitter-wasm/queries/highlights.scm");
@@ -170,7 +172,7 @@ impl WatLSP {
 
         // Find definition for symbols
         if word.starts_with('$') {
-            if let Some(range) = find_symbol_definition(&word, symbols, &self.document, position) {
+            if let Some(range) = find_symbol_definition_range(&word, symbols, position) {
                 return definition_to_js(&range);
             }
             // Fallback: if no range but symbol exists, use line number
@@ -479,41 +481,6 @@ impl Default for WatLSP {
 
 // Helper functions
 
-fn get_word_at_position(document: &str, position: Position) -> Option<String> {
-    let lines: Vec<&str> = document.lines().collect();
-    let line = lines.get(position.line as usize)?;
-
-    let col = position.character as usize;
-    if col > line.len() {
-        return None;
-    }
-
-    // Find word boundaries
-    let chars: Vec<char> = line.chars().collect();
-    let mut start = col;
-    let mut end = col;
-
-    // Expand left
-    while start > 0 && is_word_char(chars[start - 1]) {
-        start -= 1;
-    }
-
-    // Expand right
-    while end < chars.len() && is_word_char(chars[end]) {
-        end += 1;
-    }
-
-    if start == end {
-        return None;
-    }
-
-    Some(chars[start..end].iter().collect())
-}
-
-fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '$' || c == '.'
-}
-
 fn hover_to_js(hover: &HoverResult) -> JsValue {
     let obj = js_sys::Object::new();
 
@@ -560,59 +527,6 @@ fn reference_to_js(range: &Range) -> JsValue {
     obj.into()
 }
 
-fn find_symbol_definition(
-    word: &str,
-    symbols: &SymbolTable,
-    _document: &str,
-    position: Position,
-) -> Option<Range> {
-    // Check functions
-    if let Some(func) = symbols.get_function_by_name(word) {
-        return func.range;
-    }
-
-    // Check globals
-    if let Some(global) = symbols.get_global_by_name(word) {
-        return global.range;
-    }
-
-    // Check locals within containing function
-    if let Some(func) = find_containing_function(symbols, position) {
-        for param in &func.parameters {
-            if param.name.as_ref() == Some(&word.to_string()) {
-                return param.range;
-            }
-        }
-        for local in &func.locals {
-            if local.name.as_ref() == Some(&word.to_string()) {
-                return local.range;
-            }
-        }
-    }
-
-    // Check tables
-    if let Some(table) = symbols.get_table_by_name(word) {
-        return table.range;
-    }
-
-    // Check memories
-    if let Some(memory) = symbols.get_memory_by_name(word) {
-        return memory.range;
-    }
-
-    // Check types
-    if let Some(type_def) = symbols.get_type_by_name(word) {
-        return type_def.range;
-    }
-
-    // Check tags
-    if let Some(tag) = symbols.get_tag_by_name(word) {
-        return tag.range;
-    }
-
-    None
-}
-
 fn find_index_definition(
     index: usize,
     symbols: &SymbolTable,
@@ -623,24 +537,23 @@ fn find_index_definition(
     let lines: Vec<&str> = document.lines().collect();
     let line = lines.get(position.line as usize)?;
 
-    if line.contains("call") {
-        symbols.get_function_by_index(index)?.range
+    let context = if line.contains("call") {
+        IndexContext::Function
     } else if line.contains("global") {
-        symbols.get_global_by_index(index)?.range
+        IndexContext::Global
     } else if line.contains("local") {
-        if let Some(func) = find_containing_function(symbols, position) {
-            let total_params = func.parameters.len();
-            if index < total_params {
-                func.parameters.get(index)?.range
-            } else {
-                func.locals.get(index - total_params)?.range
-            }
-        } else {
-            None
-        }
+        IndexContext::Local
+    } else if line.contains("type") || line.contains("struct") || line.contains("array") {
+        IndexContext::Type
+    } else if line.contains("table") {
+        IndexContext::Table
+    } else if line.contains("memory") {
+        IndexContext::Memory
     } else {
-        None
-    }
+        return None;
+    };
+
+    crate::symbol_lookup::find_index_definition_range(index, symbols, context, position)
 }
 
 fn find_symbol_references(
@@ -679,9 +592,7 @@ fn find_symbol_references(
 
     // Remove declaration if not included
     if !include_declaration && !refs.is_empty() {
-        if let Some(def_range) =
-            find_symbol_definition(word, symbols, document, Position::new(0, 0))
-        {
+        if let Some(def_range) = find_symbol_definition_range(word, symbols, Position::new(0, 0)) {
             refs.retain(|r| {
                 r.start.line != def_range.start.line
                     || r.start.character != def_range.start.character
@@ -690,16 +601,6 @@ fn find_symbol_references(
     }
 
     refs
-}
-
-fn find_containing_function(
-    symbols: &SymbolTable,
-    position: Position,
-) -> Option<&crate::symbols::Function> {
-    symbols
-        .functions
-        .iter()
-        .find(|func| position.line >= func.line && position.line <= func.end_line)
 }
 
 /// Diagnostic information for syntax errors

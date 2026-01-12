@@ -57,27 +57,75 @@ impl std::fmt::Display for ValueType {
 }
 
 impl ValueType {
+    /// Try to parse a string into a ValueType.
+    /// Returns None for unrecognized type strings.
+    /// This is the canonical type parsing function used by all parsers.
+    pub fn try_parse(s: &str) -> Option<Self> {
+        match s {
+            "i32" => Some(ValueType::I32),
+            "i64" => Some(ValueType::I64),
+            "f32" => Some(ValueType::F32),
+            "f64" => Some(ValueType::F64),
+            "v128" => Some(ValueType::V128),
+            "i8" => Some(ValueType::I8),
+            "i16" => Some(ValueType::I16),
+            "funcref" => Some(ValueType::Funcref),
+            "externref" => Some(ValueType::Externref),
+            "structref" => Some(ValueType::Structref),
+            "arrayref" => Some(ValueType::Arrayref),
+            "i31ref" => Some(ValueType::I31ref),
+            "anyref" => Some(ValueType::Anyref),
+            "eqref" => Some(ValueType::Eqref),
+            "nullref" => Some(ValueType::Nullref),
+            "nullfuncref" => Some(ValueType::NullFuncref),
+            "nullexternref" => Some(ValueType::NullExternref),
+            _ => None,
+        }
+    }
+
+    /// Parse a string into a ValueType, returning Unknown for unrecognized strings.
     #[allow(dead_code)] // May be useful for future features
     pub fn parse(s: &str) -> Self {
-        match s {
-            "i32" => ValueType::I32,
-            "i64" => ValueType::I64,
-            "f32" => ValueType::F32,
-            "f64" => ValueType::F64,
-            "v128" => ValueType::V128,
-            "i8" => ValueType::I8,
-            "i16" => ValueType::I16,
-            "funcref" => ValueType::Funcref,
-            "externref" => ValueType::Externref,
-            "structref" => ValueType::Structref,
-            "arrayref" => ValueType::Arrayref,
-            "i31ref" => ValueType::I31ref,
-            "anyref" => ValueType::Anyref,
-            "eqref" => ValueType::Eqref,
-            "nullref" => ValueType::Nullref,
-            "nullfuncref" => ValueType::NullFuncref,
-            "nullexternref" => ValueType::NullExternref,
-            _ => ValueType::Unknown,
+        Self::try_parse(s).unwrap_or(ValueType::Unknown)
+    }
+}
+
+/// Convert from wast crate's ValType to our ValueType.
+/// Centralized conversion used by wast_parser.
+impl From<&wast::core::ValType<'_>> for ValueType {
+    fn from(val_type: &wast::core::ValType) -> Self {
+        match val_type {
+            wast::core::ValType::I32 => ValueType::I32,
+            wast::core::ValType::I64 => ValueType::I64,
+            wast::core::ValType::F32 => ValueType::F32,
+            wast::core::ValType::F64 => ValueType::F64,
+            wast::core::ValType::V128 => ValueType::V128,
+            wast::core::ValType::Ref(ref_type) => match &ref_type.heap {
+                wast::core::HeapType::Abstract { ty, .. } => match ty {
+                    wast::core::AbstractHeapType::Func => ValueType::Funcref,
+                    wast::core::AbstractHeapType::Extern => ValueType::Externref,
+                    wast::core::AbstractHeapType::Struct => ValueType::Structref,
+                    wast::core::AbstractHeapType::Array => ValueType::Arrayref,
+                    wast::core::AbstractHeapType::I31 => ValueType::I31ref,
+                    wast::core::AbstractHeapType::Any => ValueType::Anyref,
+                    wast::core::AbstractHeapType::Eq => ValueType::Eqref,
+                    wast::core::AbstractHeapType::None => ValueType::Nullref,
+                    wast::core::AbstractHeapType::NoFunc => ValueType::NullFuncref,
+                    wast::core::AbstractHeapType::NoExtern => ValueType::NullExternref,
+                    _ => ValueType::Unknown,
+                },
+                wast::core::HeapType::Concrete(idx) => match idx {
+                    wast::token::Index::Num(n, _) => {
+                        if ref_type.nullable {
+                            ValueType::RefNull(*n)
+                        } else {
+                            ValueType::Ref(*n)
+                        }
+                    }
+                    wast::token::Index::Id(_) => ValueType::Unknown,
+                },
+                wast::core::HeapType::Exact(_) => ValueType::Unknown,
+            },
         }
     }
 }

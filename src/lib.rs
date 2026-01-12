@@ -25,6 +25,10 @@ pub mod parser;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod utils;
 
+// Symbol lookup utilities (shared between native and WASM)
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod symbol_lookup;
+
 // Hover support (uses tree-sitter via ts_facade)
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod hover;

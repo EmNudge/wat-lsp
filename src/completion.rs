@@ -1,7 +1,6 @@
 use crate::symbols::*;
 use crate::utils::{
-    determine_context_from_line, find_containing_function, get_line_at_position, node_at_position,
-    InstructionContext,
+    determine_context_from_line, find_containing_function, get_line_at_position, InstructionContext,
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -14,7 +13,7 @@ mod tests;
 pub fn provide_completion(
     document: &str,
     symbols: &SymbolTable,
-    tree: &Tree,
+    _tree: &Tree, // Kept for API compatibility; completion uses line-based context detection
     position: Position,
 ) -> Vec<CompletionItem> {
     let mut completions = Vec::new();
@@ -216,19 +215,10 @@ pub fn provide_completion(
 
     // Dollar sign completions (variables and functions)
     if line_prefix.ends_with("$") {
-        // Try AST-based context detection, but fall back to string matching for incomplete code
-        let context = if let Some(node) = node_at_position(tree, document, position.into()) {
-            let ast_context = determine_dollar_context(node);
-            // If AST gives us General context, fall back to string matching
-            if ast_context == InstructionContext::General {
-                determine_context_from_line(line_prefix)
-            } else {
-                ast_context
-            }
-        } else {
-            // No valid AST node, use string matching
-            determine_context_from_line(line_prefix)
-        };
+        // For completion, prefer line-based detection since code is incomplete while typing.
+        // AST-based detection can walk up to function level and give wrong context.
+        // Line-based detection is more reliable for completion scenarios.
+        let context = determine_context_from_line(line_prefix);
 
         match context {
             InstructionContext::Call => {
@@ -477,53 +467,3 @@ fn make_completion(label: &str, detail: &str) -> CompletionItem {
 
 static NUMBER_CONST_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap());
-
-/// Determine the context for dollar sign completion using AST
-fn determine_dollar_context(node: tree_sitter::Node) -> InstructionContext {
-    // Look for instruction ancestors to determine context
-    let mut current = node;
-    loop {
-        let kind = current.kind();
-
-        // Check if we're in a plain instruction
-        if kind == "instr_plain" {
-            // Check the operator
-            if let Some(op_child) = current.child_by_field_name("op") {
-                let op_kind = op_child.kind();
-                if op_kind.starts_with("op_call") {
-                    return InstructionContext::Call;
-                } else if op_kind.contains("local") {
-                    return InstructionContext::Local;
-                } else if op_kind.contains("global") {
-                    return InstructionContext::Global;
-                } else if op_kind.starts_with("op_br") {
-                    return InstructionContext::Branch;
-                }
-            }
-
-            // Also check children for operators
-            let mut cursor = current.walk();
-            for child in current.children(&mut cursor) {
-                let child_kind = child.kind();
-                if child_kind.starts_with("op_call") {
-                    return InstructionContext::Call;
-                } else if child_kind.contains("local") {
-                    return InstructionContext::Local;
-                } else if child_kind.contains("global") {
-                    return InstructionContext::Global;
-                } else if child_kind.starts_with("op_br") {
-                    return InstructionContext::Branch;
-                }
-            }
-        }
-
-        // Move to parent
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
-        }
-    }
-
-    InstructionContext::General
-}

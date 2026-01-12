@@ -2,7 +2,7 @@ use crate::diagnostics::instruction_metadata::get_instruction_arity_map;
 use crate::symbols::SymbolTable;
 use crate::utils::{
     determine_instruction_context_at_node, find_containing_function, node_to_lsp_range,
-    InstructionContext,
+    InstructionContext, STRUCT_OPS,
 };
 use std::sync::OnceLock;
 use tower_lsp::lsp_types::*;
@@ -139,12 +139,7 @@ fn check_references(
 
     // For struct.get/struct.set, only the first index is a type reference
     // The second index is a field reference which we don't validate yet
-    if *context == InstructionContext::Type
-        && (first_token == "struct.get"
-            || first_token == "struct.get_s"
-            || first_token == "struct.get_u"
-            || first_token == "struct.set")
-    {
+    if *context == InstructionContext::Type && STRUCT_OPS.contains(&first_token) {
         // Only validate the first index child
         find_first_index_identifier(node, source, symbols, diagnostics, context);
         return;
