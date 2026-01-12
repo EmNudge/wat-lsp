@@ -1,6 +1,7 @@
 use crate::symbols::*;
 use crate::utils::{
-    find_containing_function, get_line_at_position, node_at_position, InstructionContext,
+    determine_context_from_line, find_containing_function, get_line_at_position, node_at_position,
+    InstructionContext,
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -220,13 +221,13 @@ pub fn provide_completion(
             let ast_context = determine_dollar_context(node);
             // If AST gives us General context, fall back to string matching
             if ast_context == InstructionContext::General {
-                determine_context_from_line_completion(line_prefix)
+                determine_context_from_line(line_prefix)
             } else {
                 ast_context
             }
         } else {
             // No valid AST node, use string matching
-            determine_context_from_line_completion(line_prefix)
+            determine_context_from_line(line_prefix)
         };
 
         match context {
@@ -525,19 +526,4 @@ fn determine_dollar_context(node: tree_sitter::Node) -> InstructionContext {
     }
 
     InstructionContext::General
-}
-
-/// Fallback: Determine context from line text (for incomplete/malformed code)
-fn determine_context_from_line_completion(line_prefix: &str) -> InstructionContext {
-    if line_prefix.contains("call ") {
-        InstructionContext::Call
-    } else if line_prefix.contains("global.") {
-        InstructionContext::Global
-    } else if line_prefix.contains("local.") {
-        InstructionContext::Local
-    } else if line_prefix.contains("br") {
-        InstructionContext::Branch
-    } else {
-        InstructionContext::General
-    }
 }

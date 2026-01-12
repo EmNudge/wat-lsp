@@ -1,7 +1,8 @@
 use crate::diagnostics::instruction_metadata::get_instruction_arity_map;
 use crate::symbols::SymbolTable;
 use crate::utils::{
-    determine_instruction_context_at_node, find_containing_function, InstructionContext,
+    determine_instruction_context_at_node, find_containing_function, node_to_lsp_range,
+    InstructionContext,
 };
 use std::sync::OnceLock;
 use tower_lsp::lsp_types::*;
@@ -292,7 +293,7 @@ fn create_undefined_reference_diagnostic(
     identifier_name: &str,
     context: &InstructionContext,
 ) -> Diagnostic {
-    let range = node_to_range(node);
+    let range = node_to_lsp_range(node);
 
     let message = match context {
         InstructionContext::Branch | InstructionContext::Block => {
@@ -322,23 +323,6 @@ fn create_undefined_reference_diagnostic(
         related_information: None,
         tags: None,
         data: None,
-    }
-}
-
-/// Convert a tree-sitter node to an LSP range
-fn node_to_range(node: &Node) -> Range {
-    let start_point = node.start_position();
-    let end_point = node.end_position();
-
-    Range {
-        start: Position {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-        },
-        end: Position {
-            line: end_point.row as u32,
-            character: end_point.column as u32,
-        },
     }
 }
 
@@ -683,7 +667,7 @@ fn create_parameter_count_diagnostic(
     actual_count: usize,
     expected_message: &str,
 ) -> Diagnostic {
-    let range = node_to_range(node);
+    let range = node_to_lsp_range(node);
 
     let param_word = if actual_count == 1 {
         "parameter"
@@ -716,7 +700,7 @@ fn create_operand_count_diagnostic(
     actual_count: usize,
     expected_message: &str,
 ) -> Diagnostic {
-    let range = node_to_range(node);
+    let range = node_to_lsp_range(node);
 
     let message = format!(
         "Instruction '{}' expects {}, but got {}",

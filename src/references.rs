@@ -1,7 +1,8 @@
 use crate::symbols::*;
 use crate::utils::{
-    determine_instruction_context_at_node, find_containing_function, get_line_at_position,
-    get_word_at_position, node_at_position, InstructionContext,
+    determine_context_from_line, determine_instruction_context_at_node, find_containing_function,
+    get_line_at_position, get_word_at_position, node_at_position, node_to_lsp_range,
+    position_to_byte, InstructionContext,
 };
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
@@ -51,6 +52,14 @@ pub enum ReferenceTarget {
         name: Option<String>,
         index: usize,
     },
+    Data {
+        name: Option<String>,
+        index: usize,
+    },
+    Elem {
+        name: Option<String>,
+        index: usize,
+    },
 }
 
 /// Context for reference search operations
@@ -74,79 +83,6 @@ fn is_in_same_function_by_line(
         }
     }
     false
-}
-
-/// Check if a line contains a keyword as an instruction (not as part of an identifier)
-/// Keywords are matched when they appear as:
-/// - An instruction (e.g., "call ", "local.get", "memory.grow")
-/// - A declaration (e.g., "(func ", "(global ", "(memory ")
-fn line_contains_keyword(line: &str, keyword: &str) -> bool {
-    // Check for instruction pattern: keyword followed by space, dot, or end of string
-    // Also check for declaration pattern: (keyword followed by space or identifier
-    for (i, _) in line.match_indices(keyword) {
-        // Check character before the match (if any)
-        let char_before = if i > 0 { line.chars().nth(i - 1) } else { None };
-
-        // Check character after the match (if any)
-        let char_after = line.chars().nth(i + keyword.len());
-
-        // The keyword should be preceded by non-identifier char or start of string
-        let valid_before = match char_before {
-            None => true,       // Start of line
-            Some('(') => true,  // Declaration like (func
-            Some(' ') => true,  // Instruction
-            Some('\t') => true, // Tab
-            Some(_) => false,   // Part of identifier like $edit_memory
-        };
-
-        // The keyword should be followed by non-identifier char
-        let valid_after = match char_after {
-            None => true,                          // End of line
-            Some(' ') => true,                     // Keyword followed by space
-            Some('.') => true,                     // Instruction like local.get
-            Some('_') if keyword == "br" => true,  // br_if, br_table
-            Some(')') => true,                     // End of s-expr
-            Some('$') => true,                     // Keyword followed by identifier
-            Some(c) if c.is_ascii_digit() => true, // Like br0, call0
-            Some(_) => false,                      // Part of identifier
-        };
-
-        if valid_before && valid_after {
-            return true;
-        }
-    }
-    false
-}
-
-/// Determine context from line text (fallback for incomplete code)
-/// Uses specialized keyword matching for accurate reference detection
-fn determine_context_from_line_refs(line: &str) -> InstructionContext {
-    // Check for instruction keywords (order matters - more specific first)
-    if line_contains_keyword(line, "call") {
-        InstructionContext::Call
-    } else if line_contains_keyword(line, "global") {
-        InstructionContext::Global
-    } else if line_contains_keyword(line, "local") {
-        InstructionContext::Local
-    } else if line_contains_keyword(line, "br") {
-        InstructionContext::Branch
-    } else if line_contains_keyword(line, "table") {
-        InstructionContext::Table
-    } else if line_contains_keyword(line, "memory") {
-        InstructionContext::Memory
-    } else if line_contains_keyword(line, "type")
-        || line_contains_keyword(line, "struct")
-        || line_contains_keyword(line, "array")
-        || line.contains("ref.")
-    {
-        InstructionContext::Type
-    } else if line_contains_keyword(line, "func") {
-        InstructionContext::Function
-    } else if line_contains_keyword(line, "throw") || line_contains_keyword(line, "tag") {
-        InstructionContext::Tag
-    } else {
-        InstructionContext::General
-    }
 }
 
 /// Main entry point for providing find-references
@@ -206,7 +142,7 @@ pub fn identify_symbol_at_position(
         if ast_context == InstructionContext::General {
             // Fallback to line-based detection for incomplete code
             if let Some(line) = get_line_at_position(document, position.line as usize) {
-                determine_context_from_line_refs(line)
+                determine_context_from_line(line)
             } else {
                 InstructionContext::General
             }
@@ -216,7 +152,7 @@ pub fn identify_symbol_at_position(
     } else {
         // Fallback to line-based detection
         if let Some(line) = get_line_at_position(document, position.line as usize) {
-            determine_context_from_line_refs(line)
+            determine_context_from_line(line)
         } else {
             InstructionContext::General
         }
@@ -233,7 +169,7 @@ pub fn identify_symbol_at_position(
             // If we couldn't identify the symbol with AST context, try line-based fallback
             if result.is_none() && context == InstructionContext::Function {
                 if let Some(line) = get_line_at_position(document, position.line as usize) {
-                    let line_context = determine_context_from_line_refs(line);
+                    let line_context = determine_context_from_line(line);
                     result = identify_indexed_symbol(
                         index,
                         symbols,
@@ -431,12 +367,20 @@ fn identify_named_symbol(
             }
         }
         InstructionContext::Data => {
-            // Data segment references - return None for now as we don't have a Data ReferenceTarget
-            // Could be added in the future
+            if let Some(data) = symbols.get_data_by_name(word) {
+                return Some(ReferenceTarget::Data {
+                    name: Some(word.to_string()),
+                    index: data.index,
+                });
+            }
         }
         InstructionContext::Elem => {
-            // Elem segment references - return None for now as we don't have an Elem ReferenceTarget
-            // Could be added in the future
+            if let Some(elem) = symbols.get_elem_by_name(word) {
+                return Some(ReferenceTarget::Elem {
+                    name: Some(word.to_string()),
+                    index: elem.index,
+                });
+            }
         }
     }
 
@@ -707,7 +651,7 @@ fn find_reference_identifiers(
             block_stack,
         ) {
             if let Ok(lsp_uri) = Url::parse(ctx.uri) {
-                let range = node_to_range(node);
+                let range = node_to_lsp_range(node);
                 ctx.results.push(Location {
                     uri: lsp_uri,
                     range,
@@ -731,7 +675,7 @@ fn find_reference_identifiers(
                     block_stack,
                 ) {
                     if let Ok(lsp_uri) = Url::parse(ctx.uri) {
-                        let range = node_to_range(node);
+                        let range = node_to_lsp_range(node);
                         ctx.results.push(Location {
                             uri: lsp_uri,
                             range,
@@ -834,6 +778,18 @@ fn matches_target_identifier(
         }
         ReferenceTarget::Tag { name, .. } => {
             if *context != InstructionContext::Tag {
+                return false;
+            }
+            name.as_ref() == Some(&identifier.to_string())
+        }
+        ReferenceTarget::Data { name, .. } => {
+            if *context != InstructionContext::Data {
+                return false;
+            }
+            name.as_ref() == Some(&identifier.to_string())
+        }
+        ReferenceTarget::Elem { name, .. } => {
+            if *context != InstructionContext::Elem {
                 return false;
             }
             name.as_ref() == Some(&identifier.to_string())
@@ -959,6 +915,24 @@ fn matches_target_index(
             }
             index == *target_index
         }
+        ReferenceTarget::Data {
+            index: target_index,
+            ..
+        } => {
+            if *context != InstructionContext::Data {
+                return false;
+            }
+            index == *target_index
+        }
+        ReferenceTarget::Elem {
+            index: target_index,
+            ..
+        } => {
+            if *context != InstructionContext::Elem {
+                return false;
+            }
+            index == *target_index
+        }
     }
 }
 
@@ -979,7 +953,7 @@ fn build_block_stack_at_position(
     position: Position,
 ) -> Vec<BlockInfo> {
     let mut block_stack = Vec::new();
-    let target_byte = position_to_byte(document, position);
+    let target_byte = position_to_byte(document, position.into());
 
     build_block_stack_recursive(tree.root_node(), document, target_byte, &mut block_stack);
 
@@ -1020,37 +994,6 @@ fn build_block_stack_recursive(
     for child in node.children(&mut cursor) {
         build_block_stack_recursive(child, document, target_byte, block_stack);
     }
-}
-
-/// Convert a position to a byte offset
-fn position_to_byte(document: &str, position: Position) -> usize {
-    let mut byte_offset = 0;
-    let mut current_line = 0;
-
-    for (i, ch) in document.char_indices() {
-        if current_line == position.line as usize {
-            // We're on the target line, now count characters
-            let line_start = byte_offset;
-
-            for (char_count, (j, _)) in document[line_start..].char_indices().enumerate() {
-                if char_count == position.character as usize {
-                    return line_start + j;
-                }
-            }
-
-            // If we reach here, the character is at the end of the line
-            return document
-                .len()
-                .min(line_start + document[line_start..].len());
-        }
-
-        if ch == '\n' {
-            current_line += 1;
-            byte_offset = i + 1;
-        }
-    }
-
-    byte_offset
 }
 
 /// Extract block label from a block node
@@ -1139,26 +1082,14 @@ fn get_definition_location(
         }
         ReferenceTarget::Type { index, .. } => symbols.get_type_by_index(*index)?.range.as_ref()?,
         ReferenceTarget::Tag { index, .. } => symbols.get_tag_by_index(*index)?.range.as_ref()?,
+        ReferenceTarget::Data { index, .. } => symbols.get_data_by_index(*index)?.range.as_ref()?,
+        ReferenceTarget::Elem { index, .. } => symbols.get_elem_by_index(*index)?.range.as_ref()?,
     };
 
     Some(Location {
         uri: lsp_uri,
         range: (*range).into(),
     })
-}
-
-/// Convert tree-sitter Node to LSP Range
-fn node_to_range(node: &Node) -> Range {
-    Range {
-        start: Position {
-            line: node.start_position().row as u32,
-            character: node.start_position().column as u32,
-        },
-        end: Position {
-            line: node.end_position().row as u32,
-            character: node.end_position().column as u32,
-        },
-    }
 }
 
 /// Parse a natural number (decimal or hex)

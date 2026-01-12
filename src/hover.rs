@@ -1,9 +1,8 @@
 use crate::core::types::{HoverResult, Position};
 use crate::symbols::*;
 use crate::utils::{
-    determine_context_from_line, determine_instruction_context, find_containing_function,
-    get_line_at_position, get_word_at_position, is_inside_comment, node_at_position,
-    InstructionContext,
+    determine_context_with_fallback, find_containing_function, get_line_at_position,
+    get_word_at_position, is_inside_comment, InstructionContext,
 };
 
 // Use the appropriate tree-sitter types based on feature
@@ -86,75 +85,33 @@ fn provide_symbol_hover(
     tree: &Tree,
     position: Position,
 ) -> Option<HoverResult> {
-    // Determine context using AST, with fallback to line matching
-    let context = if let Some(node) = node_at_position(tree, document, position) {
-        let ast_context = determine_instruction_context(node, document);
-        let line_context = get_line_at_position(document, position.line as usize)
-            .map(determine_context_from_line)
-            .unwrap_or(InstructionContext::General);
-
-        // Use line-based context for catch clauses (AST may return Block due to grammar issues)
-        if ast_context == InstructionContext::General
-            || (ast_context == InstructionContext::Block && line_context == InstructionContext::Tag)
-        {
-            line_context
-        } else {
-            ast_context
-        }
-    } else {
-        // AST node not found, use line-based detection
-        if let Some(line) = get_line_at_position(document, position.line as usize) {
-            determine_context_from_line(line)
-        } else {
-            InstructionContext::General
-        }
-    };
+    let context = determine_context_with_fallback(tree, document, position);
 
     // Check for function
     if context == InstructionContext::Call || context == InstructionContext::Function {
         if let Some(func) = symbols.get_function_by_name(word) {
-            let signature = format_function_signature(func);
-            return Some(HoverResult::new(format!("```wat\n{}\n```", signature)));
+            return Some(format_function_hover(func));
         }
     }
 
     // Check for global (both usage and declaration)
     if context == InstructionContext::Global {
         if let Some(global) = symbols.get_global_by_name(word) {
-            let mut info = format!(
-                "```wat\n(global {} {}{})\n```",
-                word,
-                if global.is_mutable { "mut " } else { "" },
-                global.var_type.to_str()
-            );
-            if let Some(ref val) = global.initial_value {
-                info.push_str(&format!("\n\nInitial value: `{}`", val));
-            }
-            return Some(HoverResult::new(info));
+            return Some(format_global_hover(word, global));
         }
     }
 
     // Check for local/param (both usage and declaration in Function context)
     if context == InstructionContext::Local || context == InstructionContext::Function {
         if let Some(func) = find_containing_function(symbols, position) {
-            // Check params
             for param in &func.parameters {
                 if param.name.as_deref() == Some(word) {
-                    return Some(HoverResult::new(format!(
-                        "```wat\n(param {} {})\n```",
-                        word,
-                        param.param_type.to_str()
-                    )));
+                    return Some(format_param_hover(word, param));
                 }
             }
-            // Check locals
             for local in &func.locals {
                 if local.name.as_deref() == Some(word) {
-                    return Some(HoverResult::new(format!(
-                        "```wat\n(local {} {})\n```",
-                        word,
-                        local.var_type.to_str()
-                    )));
+                    return Some(format_local_hover(word, local));
                 }
             }
         }
@@ -165,12 +122,7 @@ fn provide_symbol_hover(
         if let Some(func) = find_containing_function(symbols, position) {
             for block in &func.blocks {
                 if block.label == word {
-                    return Some(HoverResult::new(format!(
-                        "```wat\n({} {})\n```\nDefined at line {}",
-                        block.block_type,
-                        block.label,
-                        block.line + 1
-                    )));
+                    return Some(format_block_hover(block));
                 }
             }
         }
@@ -179,38 +131,21 @@ fn provide_symbol_hover(
     // Check for table (including call_indirect context)
     if context == InstructionContext::Table || context == InstructionContext::Call {
         if let Some(table) = symbols.get_table_by_name(word) {
-            let limits_str = match table.limits.1 {
-                Some(max) => format!("{} {}", table.limits.0, max),
-                None => table.limits.0.to_string(),
-            };
-            return Some(HoverResult::new(format!(
-                "```wat\n(table {} {} {})\n```",
-                word,
-                limits_str,
-                table.ref_type.to_str()
-            )));
+            return Some(format_table_hover(word, table));
         }
     }
 
     // Check for memory (both declaration and references)
     if context == InstructionContext::Memory || context == InstructionContext::General {
         if let Some(memory) = symbols.get_memory_by_name(word) {
-            let limits_str = match memory.limits.1 {
-                Some(max) => format!("{} {}", memory.limits.0, max),
-                None => memory.limits.0.to_string(),
-            };
-            return Some(HoverResult::new(format!(
-                "```wat\n(memory {} {})\n```",
-                word, limits_str
-            )));
+            return Some(format_memory_hover(word, memory));
         }
     }
 
     // Check for type
     if context == InstructionContext::Type {
         if let Some(type_def) = symbols.get_type_by_name(word) {
-            let sig = format_type_signature(word, type_def);
-            return Some(HoverResult::new(format!("```wat\n{}\n```", sig)));
+            return Some(format_type_hover(word, type_def));
         }
 
         // Check for struct field reference in Type context (struct.get/set $type $field)
@@ -222,56 +157,21 @@ fn provide_symbol_hover(
     // Check for tag (throw, catch, tag definition)
     if context == InstructionContext::Tag {
         if let Some(tag) = symbols.get_tag_by_name(word) {
-            let params_str = if tag.params.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    " (param {})",
-                    tag.params
-                        .iter()
-                        .map(|t| t.to_str())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            };
-            return Some(HoverResult::new(format!(
-                "```wat\n(tag {}{})\n```",
-                word, params_str
-            )));
+            return Some(format_tag_hover(word, tag));
         }
     }
 
     // Check for data segment
     if context == InstructionContext::Data {
         if let Some(data) = symbols.get_data_by_name(word) {
-            let preview = if data.content.len() > 32 {
-                format!("{}...", &data.content[..32])
-            } else {
-                data.content.clone()
-            };
-            return Some(HoverResult::new(format!(
-                "```wat\n(data {} \"{}\")\n```\nLength: {} bytes",
-                word, preview, data.byte_length
-            )));
+            return Some(format_data_hover(word, data));
         }
     }
 
     // Check for elem segment
     if context == InstructionContext::Elem {
         if let Some(elem) = symbols.get_elem_by_name(word) {
-            let funcs_preview = if elem.func_names.len() > 4 {
-                format!(
-                    "{} ... ({} total)",
-                    elem.func_names[..4].join(" "),
-                    elem.func_names.len()
-                )
-            } else {
-                elem.func_names.join(" ")
-            };
-            return Some(HoverResult::new(format!(
-                "```wat\n(elem {} func {})\n```",
-                word, funcs_preview
-            )));
+            return Some(format_elem_hover(word, elem));
         }
     }
 
@@ -334,125 +234,62 @@ fn try_all_symbol_types(
 ) -> Option<HoverResult> {
     // Try function
     if let Some(func) = symbols.get_function_by_name(word) {
-        let signature = format_function_signature(func);
-        return Some(HoverResult::new(format!("```wat\n{}\n```", signature)));
+        return Some(format_function_hover(func));
     }
 
     // Try global
     if let Some(global) = symbols.get_global_by_name(word) {
-        let mut info = format!(
-            "```wat\n(global {} {}{})\n```",
-            word,
-            if global.is_mutable { "mut " } else { "" },
-            global.var_type.to_str()
-        );
-        if let Some(ref val) = global.initial_value {
-            info.push_str(&format!("\n\nInitial value: `{}`", val));
-        }
-        return Some(HoverResult::new(info));
+        return Some(format_global_hover(word, global));
     }
 
     // Try table
     if let Some(table) = symbols.get_table_by_name(word) {
-        let limits_str = match table.limits.1 {
-            Some(max) => format!("{} {}", table.limits.0, max),
-            None => table.limits.0.to_string(),
-        };
-        return Some(HoverResult::new(format!(
-            "```wat\n(table {} {} {})\n```",
-            word,
-            limits_str,
-            table.ref_type.to_str()
-        )));
+        return Some(format_table_hover(word, table));
     }
 
     // Try type
     if let Some(type_def) = symbols.get_type_by_name(word) {
-        let sig = format_type_signature(word, type_def);
-        return Some(HoverResult::new(format!("```wat\n{}\n```", sig)));
+        return Some(format_type_hover(word, type_def));
     }
 
     // Try local/param in containing function
     if let Some(func) = find_containing_function(symbols, position) {
         for param in &func.parameters {
             if param.name.as_deref() == Some(word) {
-                return Some(HoverResult::new(format!(
-                    "```wat\n(param {} {})\n```",
-                    word,
-                    param.param_type.to_str()
-                )));
+                return Some(format_param_hover(word, param));
             }
         }
         for local in &func.locals {
             if local.name.as_deref() == Some(word) {
-                return Some(HoverResult::new(format!(
-                    "```wat\n(local {} {})\n```",
-                    word,
-                    local.var_type.to_str()
-                )));
+                return Some(format_local_hover(word, local));
             }
         }
         // Try block labels
         for block in &func.blocks {
             if block.label == word {
-                return Some(HoverResult::new(format!(
-                    "```wat\n({} {})\n```\nDefined at line {}",
-                    block.block_type,
-                    block.label,
-                    block.line + 1
-                )));
+                return Some(format_block_hover(block));
             }
         }
     }
 
+    // Try memory
+    if let Some(memory) = symbols.get_memory_by_name(word) {
+        return Some(format_memory_hover(word, memory));
+    }
+
     // Try tag
     if let Some(tag) = symbols.get_tag_by_name(word) {
-        let params_str = if tag.params.is_empty() {
-            String::new()
-        } else {
-            format!(
-                " (param {})",
-                tag.params
-                    .iter()
-                    .map(|t| t.to_str())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        };
-        return Some(HoverResult::new(format!(
-            "```wat\n(tag {}{})\n```",
-            word, params_str
-        )));
+        return Some(format_tag_hover(word, tag));
     }
 
     // Try data segment
     if let Some(data) = symbols.get_data_by_name(word) {
-        let preview = if data.content.len() > 32 {
-            format!("{}...", &data.content[..32])
-        } else {
-            data.content.clone()
-        };
-        return Some(HoverResult::new(format!(
-            "```wat\n(data {} \"{}\")\n```\nLength: {} bytes",
-            word, preview, data.byte_length
-        )));
+        return Some(format_data_hover(word, data));
     }
 
     // Try elem segment
     if let Some(elem) = symbols.get_elem_by_name(word) {
-        let funcs_preview = if elem.func_names.len() > 4 {
-            format!(
-                "{} ... ({} total)",
-                elem.func_names[..4].join(" "),
-                elem.func_names.len()
-            )
-        } else {
-            elem.func_names.join(" ")
-        };
-        return Some(HoverResult::new(format!(
-            "```wat\n(elem {} func {})\n```",
-            word, funcs_preview
-        )));
+        return Some(format_elem_hover(word, elem));
     }
 
     // Try struct field
@@ -555,23 +392,7 @@ fn provide_index_hover(
     tree: &Tree,
     position: Position,
 ) -> Option<HoverResult> {
-    // Determine context using AST, with fallback to line matching
-    let context = if let Some(node) = node_at_position(tree, document, position) {
-        let ast_context = determine_instruction_context(node, document);
-        if ast_context == InstructionContext::General {
-            if let Some(line) = get_line_at_position(document, position.line as usize) {
-                determine_context_from_line(line)
-            } else {
-                InstructionContext::General
-            }
-        } else {
-            ast_context
-        }
-    } else if let Some(line) = get_line_at_position(document, position.line as usize) {
-        determine_context_from_line(line)
-    } else {
-        InstructionContext::General
-    };
+    let context = determine_context_with_fallback(tree, document, position);
 
     if context == InstructionContext::Call {
         if let Some(func) = symbols.get_function_by_index(index) {
@@ -619,6 +440,10 @@ fn provide_index_hover(
     None
 }
 
+// ============================================================================
+// Hover Formatters - shared formatting functions to avoid duplication
+// ============================================================================
+
 fn format_function_signature(func: &Function) -> String {
     let mut sig = String::from("(func");
 
@@ -644,6 +469,120 @@ fn format_function_signature(func: &Function) -> String {
 
     sig.push(')');
     sig
+}
+
+fn format_function_hover(func: &Function) -> HoverResult {
+    HoverResult::new(format!("```wat\n{}\n```", format_function_signature(func)))
+}
+
+fn format_global_hover(word: &str, global: &Global) -> HoverResult {
+    let mut info = format!(
+        "```wat\n(global {} {}{})\n```",
+        word,
+        if global.is_mutable { "mut " } else { "" },
+        global.var_type.to_str()
+    );
+    if let Some(ref val) = global.initial_value {
+        info.push_str(&format!("\n\nInitial value: `{}`", val));
+    }
+    HoverResult::new(info)
+}
+
+fn format_param_hover(word: &str, param: &Parameter) -> HoverResult {
+    HoverResult::new(format!(
+        "```wat\n(param {} {})\n```",
+        word,
+        param.param_type.to_str()
+    ))
+}
+
+fn format_local_hover(word: &str, local: &Variable) -> HoverResult {
+    HoverResult::new(format!(
+        "```wat\n(local {} {})\n```",
+        word,
+        local.var_type.to_str()
+    ))
+}
+
+fn format_block_hover(block: &BlockLabel) -> HoverResult {
+    HoverResult::new(format!(
+        "```wat\n({} {})\n```\nDefined at line {}",
+        block.block_type,
+        block.label,
+        block.line + 1
+    ))
+}
+
+fn format_table_hover(word: &str, table: &Table) -> HoverResult {
+    let limits_str = match table.limits.1 {
+        Some(max) => format!("{} {}", table.limits.0, max),
+        None => table.limits.0.to_string(),
+    };
+    HoverResult::new(format!(
+        "```wat\n(table {} {} {})\n```",
+        word,
+        limits_str,
+        table.ref_type.to_str()
+    ))
+}
+
+fn format_memory_hover(word: &str, memory: &Memory) -> HoverResult {
+    let limits_str = match memory.limits.1 {
+        Some(max) => format!("{} {}", memory.limits.0, max),
+        None => memory.limits.0.to_string(),
+    };
+    HoverResult::new(format!("```wat\n(memory {} {})\n```", word, limits_str))
+}
+
+fn format_type_hover(word: &str, type_def: &TypeDef) -> HoverResult {
+    HoverResult::new(format!(
+        "```wat\n{}\n```",
+        format_type_signature(word, type_def)
+    ))
+}
+
+fn format_tag_hover(word: &str, tag: &Tag) -> HoverResult {
+    let params_str = if tag.params.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " (param {})",
+            tag.params
+                .iter()
+                .map(|t| t.to_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    HoverResult::new(format!("```wat\n(tag {}{})\n```", word, params_str))
+}
+
+fn format_data_hover(word: &str, data: &DataSegment) -> HoverResult {
+    let preview = if data.content.len() > 32 {
+        format!("{}...", &data.content[..32])
+    } else {
+        data.content.clone()
+    };
+    HoverResult::new(format!(
+        "```wat\n(data {} \"{}\")\n```\nLength: {} bytes",
+        word, preview, data.byte_length
+    ))
+}
+
+fn format_elem_hover(word: &str, elem: &ElemSegment) -> HoverResult {
+    let funcs_preview = if elem.func_names.len() > 4 {
+        format!(
+            "{} ... ({} total)",
+            elem.func_names[..4].join(" "),
+            elem.func_names.len()
+        )
+    } else {
+        elem.func_names.join(" ")
+    };
+    HoverResult::new(format!(
+        "```wat\n(elem {} func {})\n```",
+        word, funcs_preview
+    ))
 }
 
 fn get_instruction_doc(word: &str) -> Option<String> {
