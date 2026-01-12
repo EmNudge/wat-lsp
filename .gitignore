@@ -25,13 +25,17 @@ tree-sitter-wasm/target
 tree-sitter-wasm/vscode-extension/
 
 # Playground
-playground/*.wasm
 playground/public/*.wasm
-playground/wat_lsp_rust.js
-playground/wat_lsp_rust.d.ts
+playground/public/wat.tmLanguage.json
 playground/node_modules/
 playground/dist/
 playground/test-results/
+playground/package-lock.json
+
+# Packages
+packages/wat-lsp/node_modules/
+packages/wat-lsp/dist/
+packages/wat-lsp/package-lock.json
 
 # VS Code Extension
 vscode-extension/node_modules/

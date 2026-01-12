@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      packages: ${{ steps.filter.outputs.packages }}
       playground: ${{ steps.filter.outputs.playground }}
     steps:
       - name: Checkout code
@@ -33,8 +34,13 @@ jobs:
               - 'build.rs'
               - 'docs/**'
               - 'tree-sitter-wasm/**'
+            packages:
+              - 'packages/**'
+              - 'src/**'
+              - 'tree-sitter-wasm/**'
             playground:
               - 'playground/**'
+              - 'packages/**'
               - 'tree-sitter-wasm/**'
               - 'src/**'
 
@@ -246,6 +252,68 @@ jobs:
             pkg/wat_lsp_rust_bg.wasm
             pkg/package.json
 
+  build-npm-package:
+    name: Build NPM Package
+    needs: changes
+    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
+      - name: Generate tree-sitter parser
+        working-directory: tree-sitter-wasm
+        run: tree-sitter generate
+
+      - name: Build tree-sitter WASM
+        working-directory: tree-sitter-wasm
+        run: tree-sitter build --wasm
+
+      - name: Build WASM module
+        run: wasm-pack build --target web --no-pack -- --features wasm --no-default-features
+
+      - name: Install package dependencies
+        working-directory: packages/wat-lsp
+        run: npm install
+
+      - name: Build NPM package
+        working-directory: packages/wat-lsp
+        run: |
+          mkdir -p dist/wasm
+          cp ../../pkg/wat_lsp_rust.js dist/wasm/
+          cp ../../pkg/wat_lsp_rust.d.ts dist/wasm/
+          cp ../../pkg/wat_lsp_rust_bg.wasm dist/wasm/
+          npm run build:wrapper
+          npm run build:assets
+
+      - name: Upload NPM package artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
+
+      - name: Cache NPM package for future runs
+        uses: actions/cache/save@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'tree-sitter-wasm/**', 'packages/wat-lsp/src/**') }}
+
   security-audit:
     name: Security Audit
     needs: changes
@@ -278,57 +346,64 @@ jobs:
 
   playground:
     name: Playground
-    needs: changes
-    if: needs.changes.outputs.playground == 'true' || needs.changes.outputs.rust == 'true'
+    needs: [changes, build-npm-package]
+    # Run if playground changed, OR if rust changed (and build-npm-package ran)
+    # The 'always()' allows this to run even if build-npm-package was skipped
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      (needs.changes.outputs.playground == 'true' || needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
 
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '20'
 
-      - name: Install wasm-pack
-        uses: jetli/wasm-pack-action@v0.4.0
+      - name: Clean package directory
+        run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
 
-      - name: Install tree-sitter CLI
-        run: npm install -g tree-sitter-cli
+      # Try to restore from cache first (fast path for playground-only changes)
+      - name: Restore NPM package from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'tree-sitter-wasm/**', 'packages/wat-lsp/src/**') }}
 
-      - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
-        run: tree-sitter generate
+      # If cache miss and build-npm-package ran, download the artifact
+      - name: Download NPM package artifact
+        if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
 
-      - name: Build tree-sitter WASM
-        working-directory: tree-sitter-wasm
-        run: tree-sitter build --wasm
-
-      - name: Build WASM LSP module
-        run: wasm-pack build --target web --no-pack -- --features wasm --no-default-features
-
-      - name: Copy WASM files to playground
+      - name: Verify package structure
         run: |
-          mkdir -p playground/public
-          cp pkg/wat_lsp_rust.js playground/
-          cp pkg/wat_lsp_rust.d.ts playground/
-          cp pkg/wat_lsp_rust_bg.wasm playground/public/
+          echo "Cache hit: ${{ steps.cache-restore.outputs.cache-hit }}"
+          echo "Build job result: ${{ needs.build-npm-package.result }}"
+          echo "Package contents:"
+          ls -la packages/wat-lsp/
+          if [ ! -d "packages/wat-lsp/dist/wasm" ]; then
+            echo "ERROR: NPM package not available!"
+            echo "This can happen on first run - try re-running the workflow after build-npm-package succeeds."
+            exit 1
+          fi
+          ls -la packages/wat-lsp/dist/
+          ls -la packages/wat-lsp/dist/wasm/
 
       - name: Install playground dependencies
         working-directory: playground
         run: npm install
 
-      - name: Copy runtime dependencies to public
+      - name: Setup playground assets
         working-directory: playground
-        run: |
-          cp node_modules/web-tree-sitter/tree-sitter.wasm public/
-          cp node_modules/vscode-oniguruma/release/onig.wasm public/
-          cp ../vscode-extension/syntaxes/wat.tmLanguage.json public/
+        run: npm run setup
 
       - name: Build playground
         working-directory: playground

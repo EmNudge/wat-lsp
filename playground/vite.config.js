@@ -3,10 +3,19 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   optimizeDeps: {
     include: ['monaco-editor', 'wabt', 'web-tree-sitter'],
-    exclude: ['wat_lsp_rust']
+    exclude: ['@emnudge/wat-lsp']
+  },
+  resolve: {
+    // Ensure web-tree-sitter is resolved from playground's node_modules
+    // even when imported by @emnudge/wat-lsp (which has it as optional peer dep)
+    dedupe: ['web-tree-sitter']
   },
   build: {
-    target: 'esnext'
+    target: 'esnext',
+    rollupOptions: {
+      // Don't externalize web-tree-sitter - bundle it
+      external: [],
+    }
   },
   server: {
     headers: {
