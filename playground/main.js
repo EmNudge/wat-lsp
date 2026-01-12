@@ -1,17 +1,11 @@
 // WAT Playground - Main Application with LSP Integration
 import * as monaco from 'monaco-editor';
 import wabtInit from 'wabt';
-import { Parser } from 'web-tree-sitter';
 import { watLanguage } from './wat-language.js';
 import { watExamples } from './examples.js';
-import initWasm, { WatLSP } from './wat_lsp_rust.js';
+import { createWatLSP } from '@emnudge/wat-lsp';
 import * as vsctm from 'vscode-textmate';
 import * as oniguruma from 'vscode-oniguruma';
-
-// Pre-initialize web-tree-sitter with correct WASM path before our module loads
-await Parser.init({
-  locateFile: (file) => `/tree-sitter.wasm`
-});
 
 let editor;
 let wabt;
@@ -529,36 +523,30 @@ async function initLSP() {
   setLSPStatus(false, 'Loading WASM LSP...');
 
   try {
-    // Initialize the WASM module first
-    // The WASM file is served from /wat_lsp_rust_bg.wasm in public/
-    await initWasm('/wat_lsp_rust_bg.wasm');
+    // Use createWatLSP which handles all initialization
+    watLSP = await createWatLSP({
+      treeSitterWasmPath: '/tree-sitter.wasm',
+      watLspWasmPath: '/wat_lsp_rust_bg.wasm',
+    });
 
-    watLSP = new WatLSP();
-    const success = await watLSP.initialize();
+    setLSPStatus(true, 'LSP Ready (Rust WASM)');
+    consoleOutput.info('LSP initialized with @emnudge/wat-lsp');
+    consoleOutput.info('Features: Hover, Go to Definition (F12), Find References (Shift+F12), Semantic Highlighting');
 
-    if (success) {
-      setLSPStatus(true, 'LSP Ready (Rust WASM)');
-      consoleOutput.info('LSP initialized with Rust WASM module');
-      consoleOutput.info('Features: Hover, Go to Definition (F12), Find References (Shift+F12), Semantic Highlighting');
+    // Register semantic tokens provider for syntax highlighting
+    registerSemanticTokensProvider();
 
-      // Register semantic tokens provider for syntax highlighting
-      registerSemanticTokensProvider();
-
-      // Initial parse
-      if (editor) {
-        watLSP.parse(editor.getValue());
-        updateDiagnostics();
-        updateLSPDebugPanel();
-      }
-    } else {
-      setLSPStatus(false, 'LSP Error');
-      consoleOutput.warn('LSP failed to initialize. Hover/definition/references will not work.');
+    // Initial parse
+    if (editor) {
+      watLSP.parse(editor.getValue());
+      updateDiagnostics();
+      updateLSPDebugPanel();
     }
 
     // Expose for debugging
     window.watLSP = watLSP;
 
-    return success;
+    return true;
   } catch (error) {
     console.error('Failed to initialize WASM LSP:', error);
     setLSPStatus(false, 'LSP Error');
