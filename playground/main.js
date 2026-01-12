@@ -923,12 +923,56 @@ function initTabs() {
   });
 }
 
+// Initialize resizable panel
+function initResizablePanel() {
+  const resizeHandle = document.querySelector('.resize-handle');
+  const outputPanel = document.querySelector('.output-panel');
+
+  if (!resizeHandle || !outputPanel) return;
+
+  // Create overlay to capture mouse events during resize (prevents Monaco from stealing events)
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position: fixed; inset: 0; z-index: 9999; cursor: col-resize; display: none;';
+  document.body.appendChild(overlay);
+
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = outputPanel.offsetWidth;
+    resizeHandle.classList.add('active');
+    overlay.style.display = 'block';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+
+    // Calculate new width (dragging left increases width, right decreases)
+    const delta = startX - e.clientX;
+    const newWidth = Math.min(Math.max(startWidth + delta, 200), window.innerWidth * 0.8);
+    outputPanel.style.width = `${newWidth}px`;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      resizeHandle.classList.remove('active');
+      overlay.style.display = 'none';
+    }
+  });
+}
+
 // Initialize everything
 async function init() {
   consoleOutput.init();
   consoleOutput.info('Initializing WAT LSP Playground...');
 
   initTabs();
+  initResizablePanel();
 
   // Initialize Monaco, wabt, and LSP in parallel
   await Promise.all([
