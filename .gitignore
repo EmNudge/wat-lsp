@@ -44,3 +44,6 @@ vscode-extension/grammars/queries/
 vscode-extension/server/
 vscode-extension/*.vsix
 vscode-extension/package-lock.json
+
+# wasm-pack output folder
+pkg/

@@ -33,15 +33,15 @@ jobs:
               - 'Cargo.lock'
               - 'build.rs'
               - 'docs/**'
-              - 'tree-sitter-wasm/**'
+              - 'grammars/tree-sitter-wat/**'
             packages:
               - 'packages/**'
               - 'src/**'
-              - 'tree-sitter-wasm/**'
+              - 'grammars/tree-sitter-wat/**'
             playground:
-              - 'playground/**'
+              - 'packages/playground/**'
               - 'packages/**'
-              - 'tree-sitter-wasm/**'
+              - 'grammars/tree-sitter-wat/**'
               - 'src/**'
 
   test:
@@ -75,7 +75,7 @@ jobs:
         run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter generate
 
       - name: Cache cargo registry
@@ -125,11 +125,11 @@ jobs:
         run: npm install -g tree-sitter-cli
 
       - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter generate
 
       - name: Build tree-sitter WASM
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter build --wasm
 
       - name: Run clippy (native)
@@ -193,7 +193,7 @@ jobs:
         run: echo "$env:APPDATA\npm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter generate
 
       - name: Build release binary
@@ -232,11 +232,11 @@ jobs:
         run: npm install -g tree-sitter-cli
 
       - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter generate
 
       - name: Build tree-sitter WASM
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter build --wasm
 
       - name: Build WASM package
@@ -278,11 +278,11 @@ jobs:
         run: npm install -g tree-sitter-cli
 
       - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter generate
 
       - name: Build tree-sitter WASM
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter build --wasm
 
       - name: Build WASM module
@@ -312,7 +312,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: packages/wat-lsp/dist
-          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'tree-sitter-wasm/**', 'packages/wat-lsp/src/**') }}
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
 
   security-audit:
     name: Security Audit
@@ -335,7 +335,7 @@ jobs:
         run: npm install -g tree-sitter-cli
 
       - name: Generate tree-sitter parser
-        working-directory: tree-sitter-wasm
+        working-directory: grammars/tree-sitter-wat
         run: tree-sitter generate
 
       - name: Install cargo-audit
@@ -373,7 +373,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: packages/wat-lsp/dist
-          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'tree-sitter-wasm/**', 'packages/wat-lsp/src/**') }}
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
 
       # If cache miss and build-npm-package ran, download the artifact
       - name: Download NPM package artifact
@@ -398,23 +398,23 @@ jobs:
           ls -la packages/wat-lsp/dist/wasm/
 
       - name: Install playground dependencies
-        working-directory: playground
+        working-directory: packages/playground
         run: npm install
 
       - name: Setup playground assets
-        working-directory: playground
+        working-directory: packages/playground
         run: npm run setup
 
       - name: Build playground
-        working-directory: playground
+        working-directory: packages/playground
         run: npm run build
 
       - name: Install Playwright browsers
-        working-directory: playground
+        working-directory: packages/playground
         run: npx playwright install --with-deps chromium
 
       - name: Run Playwright tests
-        working-directory: playground
+        working-directory: packages/playground
         run: npm test
 
       - name: Upload Playwright report
@@ -422,14 +422,14 @@ jobs:
         if: failure()
         with:
           name: playwright-report
-          path: playground/playwright-report/
+          path: packages/playground/playwright-report/
           retention-days: 7
 
       - name: Upload playground build
         uses: actions/upload-artifact@v6
         with:
           name: playground-dist
-          path: playground/dist/
+          path: packages/playground/dist/
 
   deploy-pages:
     name: Deploy to Cloudflare Pages

@@ -13,7 +13,8 @@ use crate::ts_facade::{self, Language, Parser, Query, Tree};
 use crate::utils::{get_word_at_position, is_word_char};
 
 /// The highlights.scm query for syntax highlighting
-const HIGHLIGHTS_QUERY: &str = include_str!("../../tree-sitter-wasm/queries/highlights.scm");
+const HIGHLIGHTS_QUERY: &str =
+    include_str!("../../grammars/tree-sitter-wat/queries/highlights.scm");
 
 /// Initialize panic hook for better error messages in the browser console
 #[wasm_bindgen(start)]

@@ -37,9 +37,9 @@ npm install -g tree-sitter-cli  # or: cargo install tree-sitter-cli
 
 Generate the tree-sitter parser (required before any build):
 ```bash
-cd tree-sitter-wasm
+cd grammars/tree-sitter-wat
 tree-sitter generate
-cd ..
+cd ../..
 ```
 
 ### Native LSP Server
@@ -54,9 +54,9 @@ Binary outputs to `target/release/wat-lsp-rust`.
 
 For browser usage, first build the tree-sitter WASM grammar:
 ```bash
-cd tree-sitter-wasm
+cd grammars/tree-sitter-wat
 tree-sitter build --wasm
-cd ..
+cd ../..
 ```
 
 Then build the Rust WASM module:
@@ -78,12 +78,12 @@ Instruction documentation is parsed from `docs/instructions.md` at compile timeâ
 Or build manually:
 
 ```bash
-./build-extension.sh
-cd vscode-extension && npm run package
+./scripts/build-extension.sh
+cd packages/vscode-extension && npm run package
 code --install-extension wat-lsp-*.vsix
 ```
 
-See [vscode-extension/README.md](vscode-extension/README.md) for details.
+See [packages/vscode-extension/README.md](packages/vscode-extension/README.md) for details.
 
 ### Other Editors
 
@@ -96,7 +96,7 @@ Try the LSP in your browser: **[wat-lsp.emnudge.dev](https://wat-lsp.emnudge.dev
 To build locally, first complete the [Prerequisites](#prerequisites) and [WASM Module](#wasm-module) build steps, then:
 
 ```bash
-cd playground
+cd packages/playground
 npm install
 npm run setup          # Copy WASM files and dependencies
 npm run build          # Build the site
@@ -106,7 +106,7 @@ npm run preview        # Preview the built site
 For development with hot reload:
 
 ```bash
-cd playground
+cd packages/playground
 npm run dev
 ```
 
