@@ -22,29 +22,44 @@ Supports WasmGC, Relaxed SIMD, Exception Handling, and Reference Types.
 The LSP server supports two build targets:
 
 - **Native**: Uses tree-sitter for fast, incremental parsing. Runs as a standalone LSP server.
-- **WASM**: Uses the `wast` crate for pure-Rust parsing. Runs in the browser for the playground.
+- **WASM**: Uses web-tree-sitter for browser-compatible parsing. Runs in the browser for the playground.
 
 Both targets share the same core code for symbol table construction and LSP features.
 
 ## Building
 
-### Native LSP Server
+### Prerequisites
 
-Requires `tree-sitter-cli`:
+Install `tree-sitter-cli`:
 ```bash
 npm install -g tree-sitter-cli  # or: cargo install tree-sitter-cli
 ```
 
-Build:
+Generate the tree-sitter parser (required before any build):
 ```bash
-cargo build --features native --release
+cd tree-sitter-wasm
+tree-sitter generate
+cd ..
+```
+
+### Native LSP Server
+
+```bash
+cargo build --release
 ```
 
 Binary outputs to `target/release/wat-lsp-rust`.
 
 ### WASM Module
 
-For browser usage:
+For browser usage, first build the tree-sitter WASM grammar:
+```bash
+cd tree-sitter-wasm
+tree-sitter build --wasm
+cd ..
+```
+
+Then build the Rust WASM module:
 ```bash
 wasm-pack build --target web --features wasm --no-default-features
 ```
@@ -76,22 +91,23 @@ Configure your editor to launch `wat-lsp-rust` for `.wat` files.
 
 ## Playground
 
-Try the LSP in your browser: **[wat-lsp-playground.emnudge.dev](https://wat-lsp-playground.emnudge.dev)**
+Try the LSP in your browser: **[wat-lsp.emnudge.dev](https://wat-lsp.emnudge.dev)**
 
-To build locally:
+To build locally, first complete the [Prerequisites](#prerequisites) and [WASM Module](#wasm-module) build steps, then:
 
 ```bash
-./build-docs.sh        # Build the playground site
 cd playground
+npm install
+npm run setup          # Copy WASM files and dependencies
+npm run build          # Build the site
 npm run preview        # Preview the built site
 ```
 
 For development with hot reload:
 
 ```bash
-./build-docs.sh        # Initial build (needed for WASM files)
 cd playground
-npm run dev            # Start dev server
+npm run dev
 ```
 
 Open the URL shown by Vite. Use F12 for Go to Definition, Shift+F12 for Find References.
