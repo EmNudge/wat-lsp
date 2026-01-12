@@ -8,6 +8,87 @@ use tree_sitter::{Node, Tree};
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::{Node, Tree};
 
+#[cfg(feature = "native")]
+use tower_lsp::lsp_types::Range as LspRange;
+
+// ============================================================================
+// Macros to eliminate native/wasm code duplication
+// ============================================================================
+
+/// Macro to copy a node (handles Copy vs Clone difference between native and wasm)
+macro_rules! node_copy {
+    ($node:expr) => {{
+        #[cfg(feature = "native")]
+        {
+            *$node
+        }
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        {
+            $node.clone()
+        }
+    }};
+}
+
+/// Macro to clone a node for storage
+macro_rules! node_clone {
+    ($node:expr) => {{
+        #[cfg(feature = "native")]
+        {
+            $node
+        }
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        {
+            $node.clone()
+        }
+    }};
+}
+
+// ============================================================================
+// Block type constants - centralized to prevent sync issues
+// ============================================================================
+
+/// All block-related node kinds (statement form)
+pub const BLOCK_KINDS_STATEMENT: &[&str] = &[
+    "block_block",
+    "block_loop",
+    "block_if",
+    "block_try",
+    "block_try_table",
+];
+
+/// All block-related node kinds (expression form)
+pub const BLOCK_KINDS_EXPR: &[&str] = &["expr1_block", "expr1_loop", "expr1_if", "expr1_try"];
+
+/// All block-related node kinds (instruction form used in some contexts)
+pub const BLOCK_KINDS_INSTR: &[&str] = &["instr_block", "instr_loop"];
+
+/// Check if a kind represents any block structure (statement, expression, or instruction form)
+pub fn is_block_kind(kind: &str) -> bool {
+    BLOCK_KINDS_STATEMENT.contains(&kind)
+        || BLOCK_KINDS_EXPR.contains(&kind)
+        || BLOCK_KINDS_INSTR.contains(&kind)
+}
+
+/// Check if a kind represents a labeled block structure (block, loop, if - not try)
+pub fn is_labeled_block_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "block_block" | "block_loop" | "block_if" | "expr1_block" | "expr1_loop" | "expr1_if"
+    )
+}
+
+/// Get the block type name from a node kind (block, loop, if, try, try_table)
+pub fn block_type_from_kind(kind: &str) -> &'static str {
+    match kind {
+        "block_block" | "expr1_block" | "instr_block" => "block",
+        "block_loop" | "expr1_loop" | "instr_loop" => "loop",
+        "block_if" | "expr1_if" => "if",
+        "block_try" | "expr1_try" => "try",
+        "block_try_table" => "try_table",
+        _ => "unknown",
+    }
+}
+
 /// Unified context for instruction type identification.
 /// Used across hover, definition, references, completion, and diagnostics.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -81,18 +162,12 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
         }
 
         // Check for block/loop contexts (both instr_* and block_* variants)
-        if kind == "instr_block"
-            || kind == "instr_loop"
-            || kind == "block_block"
-            || kind == "block_loop"
-            || kind == "block_if"
-            || kind == "block_try"
-            || kind == "block_try_table"
-            || kind == "expr1_block"
-            || kind == "expr1_loop"
-            || kind == "expr1_if"
-            || kind == "expr1_try"
-        {
+        #[cfg(feature = "native")]
+        if is_block_kind(kind) {
+            return InstructionContext::Block;
+        }
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        if is_block_kind(kind.as_str()) {
             return InstructionContext::Block;
         }
 
@@ -192,10 +267,9 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
 /// Determine the context for a node inside a catch_clause.
 /// For (catch $tag $label): first index is Tag, second is Branch
 /// For (catch_all $label): single index is Branch
-#[cfg(feature = "native")]
 fn determine_catch_clause_context(node: &Node, document: &str) -> Option<InstructionContext> {
     // Walk up to find the catch_clause and track our position
-    let mut current = *node;
+    let mut current = node_copy!(node);
     let mut index_node: Option<Node> = None;
 
     loop {
@@ -203,65 +277,7 @@ fn determine_catch_clause_context(node: &Node, document: &str) -> Option<Instruc
 
         // Track if we pass through an index node
         if kind == "index" {
-            index_node = Some(current);
-        }
-
-        if kind == "catch_clause" {
-            // Found the catch_clause, now determine position
-            let text = &document[current.byte_range()];
-
-            // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
-            let has_tag = text.contains("catch_ref")
-                || (text.contains("catch") && !text.contains("catch_all"));
-
-            if let Some(idx_node) = index_node {
-                // Find the position of this index among all index children
-                let mut cursor = current.walk();
-                let indices: Vec<_> = current
-                    .children(&mut cursor)
-                    .filter(|c| c.kind() == "index")
-                    .collect();
-
-                for (i, idx) in indices.iter().enumerate() {
-                    if idx.byte_range() == idx_node.byte_range() {
-                        // Found our index - first index in catch/catch_ref is tag, rest are labels
-                        if has_tag && i == 0 {
-                            return Some(InstructionContext::Tag);
-                        } else {
-                            return Some(InstructionContext::Branch);
-                        }
-                    }
-                }
-            }
-
-            // Inside catch_clause but not in an index - shouldn't happen for identifiers
-            return None;
-        }
-
-        // Walk up the tree
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
-        }
-    }
-
-    None
-}
-
-/// Determine the context for a node inside a catch_clause (WASM version)
-#[cfg(all(feature = "wasm", not(feature = "native")))]
-fn determine_catch_clause_context(node: &Node, document: &str) -> Option<InstructionContext> {
-    // Walk up to find the catch_clause and track our position
-    let mut current = node.clone();
-    let mut index_node: Option<Node> = None;
-
-    loop {
-        let kind = current.kind();
-
-        // Track if we pass through an index node
-        if kind == "index" {
-            index_node = Some(current.clone());
+            index_node = Some(node_clone!(current));
         }
 
         if kind == "catch_clause" {
@@ -470,30 +486,24 @@ pub fn position_to_byte(source: &str, position: Position) -> usize {
     byte_offset
 }
 
-/// Find the AST node at the given position (native version)
+/// Find the AST node at the given position (native version - returns borrowed node)
 #[cfg(feature = "native")]
 pub fn node_at_position<'a>(tree: &'a Tree, source: &str, position: Position) -> Option<Node<'a>> {
     let byte_offset = position_to_byte(source, position);
-    let root = tree.root_node();
-
-    find_deepest_node(root, byte_offset)
+    find_deepest_node(tree.root_node(), byte_offset)
 }
 
-/// Find the AST node at the given position (WASM version)
+/// Find the AST node at the given position (WASM version - returns owned node)
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 pub fn node_at_position(tree: &Tree, source: &str, position: Position) -> Option<Node> {
     let byte_offset = position_to_byte(source, position);
-    let root = tree.root_node();
-
-    find_deepest_node(root, byte_offset)
+    find_deepest_node(tree.root_node(), byte_offset)
 }
 
 /// Check if the given position is inside a comment (block or line)
 pub fn is_inside_comment(tree: &Tree, source: &str, position: Position) -> bool {
     let byte_offset = position_to_byte(source, position);
-    let root = tree.root_node();
-
-    is_inside_comment_node(root, byte_offset)
+    is_inside_comment_node(tree.root_node(), byte_offset)
 }
 
 /// Recursively check if byte_offset is inside a comment node
@@ -523,74 +533,37 @@ fn is_inside_comment_node(node: Node, byte_offset: usize) -> bool {
     false
 }
 
-/// Recursively find the deepest (most specific) node containing the byte offset (native version)
-#[cfg(feature = "native")]
+/// Recursively find the deepest (most specific) node containing the byte offset.
+/// Unified implementation using node_clone! macro for platform abstraction.
 fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
     let range = node.byte_range();
-    // Check if byte_offset is within the node (inclusive of start, exclusive of end)
-    // OR if it's at the end of the node (to handle cursor at end of word)
-    if !(range.start <= byte_offset && byte_offset <= range.end) {
-        return None;
-    }
-
-    let mut cursor = node.walk();
-    let mut best_child = None;
-    for child in node.children(&mut cursor) {
-        let child_range = child.byte_range();
-        let contains_or_adjacent =
-            child_range.start <= byte_offset && byte_offset <= child_range.end;
-        if contains_or_adjacent {
-            if let Some(found) = find_deepest_node(child, byte_offset) {
-                // Prefer the child that properly contains the offset over one where offset is at the end
-                if byte_offset < child_range.end || best_child.is_none() {
-                    best_child = Some(found);
-                    if byte_offset < child_range.end {
-                        // If offset is properly inside, return immediately
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(child) = best_child {
-        return Some(child);
-    }
-
-    Some(node)
-}
-
-/// Recursively find the deepest (most specific) node containing the byte offset (WASM version)
-#[cfg(all(feature = "wasm", not(feature = "native")))]
-fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
-    let range = node.byte_range();
+    // Check if byte_offset is within the node (inclusive of start and end to handle cursor at word boundary)
     if !(range.start <= byte_offset && byte_offset <= range.end) {
         return None;
     }
 
     let mut cursor = node.walk();
     let mut best_child: Option<Node> = None;
+
     for child in node.children(&mut cursor) {
         let child_range = child.byte_range();
         let contains_or_adjacent =
             child_range.start <= byte_offset && byte_offset <= child_range.end;
+
         if contains_or_adjacent {
-            if let Some(found) = find_deepest_node(child, byte_offset) {
+            if let Some(found) = find_deepest_node(node_clone!(child), byte_offset) {
+                // If offset is properly inside (not at boundary), return immediately
                 if byte_offset < child_range.end {
-                    // If offset is properly inside, return immediately
                     return Some(found);
                 } else if best_child.is_none() {
+                    // Offset at end boundary - keep as fallback
                     best_child = Some(found);
                 }
             }
         }
     }
 
-    if let Some(child) = best_child {
-        return Some(child);
-    }
-
-    Some(node)
+    best_child.or(Some(node))
 }
 
 /// Apply a text edit to a string in-place
@@ -633,6 +606,105 @@ fn calculate_position_after_edit(_text: &str, start: Position, inserted_text: &s
             character: last_line.len() as u32,
         }
     }
+}
+
+/// Convert a tree-sitter node to an LSP range (native only)
+#[cfg(feature = "native")]
+pub fn node_to_lsp_range(node: &Node) -> LspRange {
+    let start_point = node.start_position();
+    let end_point = node.end_position();
+
+    LspRange {
+        start: tower_lsp::lsp_types::Position {
+            line: start_point.row as u32,
+            character: start_point.column as u32,
+        },
+        end: tower_lsp::lsp_types::Position {
+            line: end_point.row as u32,
+            character: end_point.column as u32,
+        },
+    }
+}
+
+/// Determine instruction context using AST with fallback to line-based detection.
+/// This is the unified context detection function used across hover, definition,
+/// references, and completion modules.
+pub fn determine_context_with_fallback(
+    tree: &Tree,
+    document: &str,
+    position: Position,
+) -> InstructionContext {
+    if let Some(node) = node_at_position(tree, document, position) {
+        let ast_context = determine_instruction_context(node, document);
+        let line_context = get_line_at_position(document, position.line as usize)
+            .map(determine_context_from_line)
+            .unwrap_or(InstructionContext::General);
+
+        // Use line-based context for catch clauses (AST may return Block due to grammar issues)
+        // or when AST returns General
+        if ast_context == InstructionContext::General
+            || (ast_context == InstructionContext::Block && line_context == InstructionContext::Tag)
+        {
+            line_context
+        } else {
+            ast_context
+        }
+    } else {
+        // AST node not found, use line-based detection
+        get_line_at_position(document, position.line as usize)
+            .map(determine_context_from_line)
+            .unwrap_or(InstructionContext::General)
+    }
+}
+
+/// Determine instruction context at a specific node with fallback to line-based detection.
+/// Used by references module where we already have the node.
+pub fn determine_context_at_node_with_fallback(
+    node: &Node,
+    document: &str,
+    position: Position,
+) -> InstructionContext {
+    let ast_context = determine_instruction_context_at_node(node, document);
+    if ast_context == InstructionContext::General {
+        // Fallback to line-based detection for incomplete code
+        get_line_at_position(document, position.line as usize)
+            .map(determine_context_from_line)
+            .unwrap_or(InstructionContext::General)
+    } else {
+        ast_context
+    }
+}
+
+// ============================================================================
+// Shared formatting functions
+// ============================================================================
+
+/// Format a function signature for display (used by hover and signature help)
+pub fn format_function_signature(func: &Function) -> String {
+    let mut sig = String::from("(func");
+
+    if let Some(ref name) = func.name {
+        sig.push_str(&format!(" {}", name));
+    }
+
+    for param in &func.parameters {
+        sig.push_str(" (param");
+        if let Some(ref name) = param.name {
+            sig.push_str(&format!(" {}", name));
+        }
+        sig.push_str(&format!(" {})", param.param_type));
+    }
+
+    if !func.results.is_empty() {
+        sig.push_str(" (result");
+        for result in &func.results {
+            sig.push_str(&format!(" {}", result));
+        }
+        sig.push(')');
+    }
+
+    sig.push(')');
+    sig
 }
 
 #[cfg(test)]

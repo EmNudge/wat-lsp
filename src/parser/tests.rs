@@ -229,8 +229,8 @@ fn test_value_type_conversion() {
     assert_eq!(ValueType::parse("externref"), ValueType::Externref);
     assert_eq!(ValueType::parse("invalid"), ValueType::Unknown);
 
-    assert_eq!(ValueType::I32.to_str(), "i32");
-    assert_eq!(ValueType::F64.to_str(), "f64");
+    assert_eq!(ValueType::I32.to_string(), "i32");
+    assert_eq!(ValueType::F64.to_string(), "f64");
 }
 
 #[test]

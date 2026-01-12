@@ -1,7 +1,7 @@
 use crate::symbols::*;
 use crate::utils::{
-    determine_context_from_line, determine_instruction_context, find_containing_function,
-    get_line_at_position, get_word_at_position, node_at_position, InstructionContext,
+    determine_context_with_fallback, find_containing_function, get_word_at_position,
+    InstructionContext,
 };
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
@@ -182,27 +182,7 @@ fn provide_symbol_definition(
     // Parse URI once at the beginning
     let lsp_uri = Url::parse(uri).ok()?;
 
-    // Determine context using AST, with fallback to line matching
-    let context = if let Some(node) = node_at_position(tree, document, position.into()) {
-        let ast_context = determine_instruction_context(node, document);
-        if ast_context == InstructionContext::General {
-            // Fallback to line-based detection for incomplete code
-            if let Some(line) = get_line_at_position(document, position.line as usize) {
-                determine_context_from_line(line)
-            } else {
-                InstructionContext::General
-            }
-        } else {
-            ast_context
-        }
-    } else {
-        // Fallback to line-based detection
-        if let Some(line) = get_line_at_position(document, position.line as usize) {
-            determine_context_from_line(line)
-        } else {
-            InstructionContext::General
-        }
-    };
+    let context = determine_context_with_fallback(tree, document, position.into());
 
     match context {
         InstructionContext::Call => {
@@ -411,27 +391,7 @@ fn provide_index_definition(
     // Parse URI once at the beginning
     let lsp_uri = Url::parse(uri).ok()?;
 
-    // Determine context using AST, with fallback to line matching
-    let context = if let Some(node) = node_at_position(tree, document, position.into()) {
-        let ast_context = determine_instruction_context(node, document);
-        if ast_context == InstructionContext::General {
-            // Fallback to line-based detection for incomplete code
-            if let Some(line) = get_line_at_position(document, position.line as usize) {
-                determine_context_from_line(line)
-            } else {
-                InstructionContext::General
-            }
-        } else {
-            ast_context
-        }
-    } else {
-        // Fallback to line-based detection
-        if let Some(line) = get_line_at_position(document, position.line as usize) {
-            determine_context_from_line(line)
-        } else {
-            InstructionContext::General
-        }
-    };
+    let context = determine_context_with_fallback(tree, document, position.into());
 
     match context {
         InstructionContext::Call => {

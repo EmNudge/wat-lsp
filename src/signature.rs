@@ -1,5 +1,5 @@
 use crate::symbols::*;
-use crate::utils::{get_line_at_position, node_at_position};
+use crate::utils::{format_function_signature, get_line_at_position, node_at_position};
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
 
@@ -41,9 +41,9 @@ pub fn provide_signature_help(
     let mut parameters = Vec::new();
     for param in &func.parameters {
         let param_label = if let Some(ref name) = param.name {
-            format!("({} {})", name, param.param_type.to_str())
+            format!("({} {})", name, param.param_type)
         } else {
-            format!("(param {})", param.param_type.to_str())
+            format!("(param {})", param.param_type)
         };
         parameters.push(ParameterInformation {
             label: ParameterLabel::Simple(param_label),
@@ -186,31 +186,4 @@ fn find_function_call(line_prefix: &str) -> Option<CallInfo> {
     }
 
     None
-}
-
-fn format_function_signature(func: &Function) -> String {
-    let mut sig = String::from("(func");
-
-    if let Some(ref name) = func.name {
-        sig.push_str(&format!(" {}", name));
-    }
-
-    for param in &func.parameters {
-        sig.push_str(" (param");
-        if let Some(ref name) = param.name {
-            sig.push_str(&format!(" {}", name));
-        }
-        sig.push_str(&format!(" {})", param.param_type.to_str()));
-    }
-
-    if !func.results.is_empty() {
-        sig.push_str(" (result");
-        for result in &func.results {
-            sig.push_str(&format!(" {}", result.to_str()));
-        }
-        sig.push(')');
-    }
-
-    sig.push(')');
-    sig
 }

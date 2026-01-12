@@ -1,5 +1,6 @@
 use crate::core::types::{Position, Range};
 use crate::symbols::*;
+use crate::utils::{block_type_from_kind, BLOCK_KINDS_EXPR, BLOCK_KINDS_STATEMENT};
 
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
@@ -746,32 +747,17 @@ fn extract_blocks(func_node: &Node, source: &str) -> Vec<BlockLabel> {
 /// Recursively visit nodes to find labeled blocks/loops/ifs
 fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>) {
     let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind_str = kind.as_str();
+    #[cfg(feature = "native")]
+    let kind_str = kind;
 
     // Check both statement form (block_block) and expression form (expr1_block)
-    if kind == "block_block"
-        || kind == "block_loop"
-        || kind == "block_if"
-        || kind == "block_try"
-        || kind == "block_try_table"
-        || kind == "expr1_block"
-        || kind == "expr1_loop"
-        || kind == "expr1_if"
-        || kind == "expr1_try"
-    {
+    if BLOCK_KINDS_STATEMENT.contains(&kind_str) || BLOCK_KINDS_EXPR.contains(&kind_str) {
         // Check if it has a label
         if let Some(id_node) = find_identifier_node(node) {
             let label = node_text(&id_node, source);
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let kind = kind.as_str();
-            let block_type = match kind {
-                "block_block" | "expr1_block" => "block",
-                "block_loop" | "expr1_loop" => "loop",
-                "block_if" | "expr1_if" => "if",
-                "block_try" | "expr1_try" => "try",
-                "block_try_table" => "try_table",
-                _ => "unknown",
-            }
-            .to_string();
+            let block_type = block_type_from_kind(kind_str).to_string();
 
             blocks.push(BlockLabel {
                 label,

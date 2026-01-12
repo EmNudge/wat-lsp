@@ -1,6 +1,7 @@
 use crate::symbols::*;
 use crate::utils::{
-    find_containing_function, get_line_at_position, node_at_position, InstructionContext,
+    determine_context_from_line, find_containing_function, get_line_at_position, node_at_position,
+    InstructionContext,
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -51,7 +52,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l{}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(param) {}", param.param_type.to_str())),
+                        detail: Some(format!("(param) {}", param.param_type)),
                         insert_text: Some(insert_text.clone()),
                         documentation: Some(Documentation::String(format!(
                             "Expands to: {}",
@@ -67,7 +68,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l{}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(local) {}", local.var_type.to_str())),
+                        detail: Some(format!("(local) {}", local.var_type)),
                         insert_text: Some(insert_text.clone()),
                         documentation: Some(Documentation::String(format!(
                             "Expands to: {}",
@@ -90,7 +91,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l={}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(param) {}", param.param_type.to_str())),
+                        detail: Some(format!("(param) {}", param.param_type)),
                         insert_text_format: Some(InsertTextFormat::SNIPPET),
                         insert_text: Some(insert_text.clone()),
                         ..Default::default()
@@ -103,7 +104,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l={}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(local) {}", local.var_type.to_str())),
+                        detail: Some(format!("(local) {}", local.var_type)),
                         insert_text_format: Some(InsertTextFormat::SNIPPET),
                         insert_text: Some(insert_text.clone()),
                         ..Default::default()
@@ -122,7 +123,7 @@ pub fn provide_completion(
                 completions.push(CompletionItem {
                     label: format!("g{}", name),
                     kind: Some(CompletionItemKind::SNIPPET),
-                    detail: Some(format!("(global) {}", global.var_type.to_str())),
+                    detail: Some(format!("(global) {}", global.var_type)),
                     insert_text: Some(insert_text.clone()),
                     documentation: Some(Documentation::String(format!(
                         "Expands to: {}",
@@ -144,7 +145,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("g={}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(global mut) {}", global.var_type.to_str())),
+                        detail: Some(format!("(global mut) {}", global.var_type)),
                         insert_text_format: Some(InsertTextFormat::SNIPPET),
                         insert_text: Some(insert_text.clone()),
                         ..Default::default()
@@ -220,13 +221,13 @@ pub fn provide_completion(
             let ast_context = determine_dollar_context(node);
             // If AST gives us General context, fall back to string matching
             if ast_context == InstructionContext::General {
-                determine_context_from_line_completion(line_prefix)
+                determine_context_from_line(line_prefix)
             } else {
                 ast_context
             }
         } else {
             // No valid AST node, use string matching
-            determine_context_from_line_completion(line_prefix)
+            determine_context_from_line(line_prefix)
         };
 
         match context {
@@ -237,13 +238,13 @@ pub fn provide_completion(
                         let params_str = func
                             .parameters
                             .iter()
-                            .map(|p| p.param_type.to_str().to_string())
+                            .map(|p| p.param_type.to_string())
                             .collect::<Vec<_>>()
                             .join(" ");
                         let results_str = func
                             .results
                             .iter()
-                            .map(|r| r.to_str())
+                            .map(|r| r.to_string())
                             .collect::<Vec<_>>()
                             .join(" ");
 
@@ -278,7 +279,7 @@ pub fn provide_completion(
                             detail: Some(format!(
                                 "(global{}) {}",
                                 if global.is_mutable { " mut" } else { "" },
-                                global.var_type.to_str()
+                                global.var_type
                             )),
                             ..Default::default()
                         });
@@ -293,7 +294,7 @@ pub fn provide_completion(
                             completions.push(CompletionItem {
                                 label: name[1..].to_string(), // Remove $ prefix
                                 kind: Some(CompletionItemKind::VARIABLE),
-                                detail: Some(format!("(param) {}", param.param_type.to_str())),
+                                detail: Some(format!("(param) {}", param.param_type)),
                                 ..Default::default()
                             });
                         }
@@ -303,7 +304,7 @@ pub fn provide_completion(
                             completions.push(CompletionItem {
                                 label: name[1..].to_string(), // Remove $ prefix
                                 kind: Some(CompletionItemKind::VARIABLE),
-                                detail: Some(format!("(local) {}", local.var_type.to_str())),
+                                detail: Some(format!("(local) {}", local.var_type)),
                                 ..Default::default()
                             });
                         }
@@ -525,19 +526,4 @@ fn determine_dollar_context(node: tree_sitter::Node) -> InstructionContext {
     }
 
     InstructionContext::General
-}
-
-/// Fallback: Determine context from line text (for incomplete/malformed code)
-fn determine_context_from_line_completion(line_prefix: &str) -> InstructionContext {
-    if line_prefix.contains("call ") {
-        InstructionContext::Call
-    } else if line_prefix.contains("global.") {
-        InstructionContext::Global
-    } else if line_prefix.contains("local.") {
-        InstructionContext::Local
-    } else if line_prefix.contains("br") {
-        InstructionContext::Branch
-    } else {
-        InstructionContext::General
-    }
 }
