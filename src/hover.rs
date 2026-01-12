@@ -1,8 +1,8 @@
 use crate::core::types::{HoverResult, Position};
 use crate::symbols::*;
 use crate::utils::{
-    determine_context_with_fallback, find_containing_function, get_line_at_position,
-    get_word_at_position, is_inside_comment, InstructionContext,
+    determine_context_with_fallback, find_containing_function, format_function_signature,
+    get_line_at_position, get_word_at_position, is_inside_comment, InstructionContext,
 };
 
 // Use the appropriate tree-sitter types based on feature
@@ -189,12 +189,12 @@ fn format_type_signature(word: &str, type_def: &TypeDef) -> String {
         TypeKind::Func { params, results } => {
             let p_str = params
                 .iter()
-                .map(|t| t.to_str())
+                .map(|t| t.to_string())
                 .collect::<Vec<_>>()
                 .join(" ");
             let r_str = results
                 .iter()
-                .map(|t| t.to_str())
+                .map(|t| t.to_string())
                 .collect::<Vec<_>>()
                 .join(" ");
 
@@ -219,7 +219,7 @@ fn format_type_signature(word: &str, type_def: &TypeDef) -> String {
                 "(type {} (array {} {}))",
                 word,
                 if *mutable { "(mut ...)" } else { "..." },
-                element_type.to_str()
+                element_type
             )
         }
     }
@@ -332,7 +332,7 @@ fn provide_struct_field_hover(
                                     "```wat\n(field {} {} {})\n```\nField {} of {}",
                                     field_name,
                                     if *mutable { "(mut " } else { "" },
-                                    ftype.to_str(),
+                                    ftype,
                                     idx,
                                     type_name
                                 )));
@@ -368,7 +368,7 @@ fn provide_struct_field_hover(
                                         "```wat\n(field {} {}{})\n```\nField {} of {}",
                                         field_name,
                                         if *mutable { "(mut " } else { "" },
-                                        ftype.to_str(),
+                                        ftype,
                                         idx,
                                         type_name
                                     )));
@@ -409,7 +409,7 @@ fn provide_index_hover(
                 "```wat\n(global {}{} {})\n```",
                 global.name.as_deref().unwrap_or(""),
                 if global.is_mutable { " mut" } else { "" },
-                global.var_type.to_str()
+                global.var_type
             )));
         }
     }
@@ -422,7 +422,7 @@ fn provide_index_hover(
                 return Some(HoverResult::new(format!(
                     "```wat\n(param {} {})\n```",
                     param.name.as_deref().unwrap_or(&index.to_string()),
-                    param.param_type.to_str()
+                    param.param_type
                 )));
             } else {
                 let local_index = index - total_params;
@@ -430,7 +430,7 @@ fn provide_index_hover(
                     return Some(HoverResult::new(format!(
                         "```wat\n(local {} {})\n```",
                         local.name.as_deref().unwrap_or(&local_index.to_string()),
-                        local.var_type.to_str()
+                        local.var_type
                     )));
                 }
             }
@@ -444,33 +444,6 @@ fn provide_index_hover(
 // Hover Formatters - shared formatting functions to avoid duplication
 // ============================================================================
 
-fn format_function_signature(func: &Function) -> String {
-    let mut sig = String::from("(func");
-
-    if let Some(ref name) = func.name {
-        sig.push_str(&format!(" {}", name));
-    }
-
-    for param in &func.parameters {
-        sig.push_str(" (param");
-        if let Some(ref name) = param.name {
-            sig.push_str(&format!(" {}", name));
-        }
-        sig.push_str(&format!(" {})", param.param_type.to_str()));
-    }
-
-    if !func.results.is_empty() {
-        sig.push_str(" (result");
-        for result in &func.results {
-            sig.push_str(&format!(" {}", result.to_str()));
-        }
-        sig.push(')');
-    }
-
-    sig.push(')');
-    sig
-}
-
 fn format_function_hover(func: &Function) -> HoverResult {
     HoverResult::new(format!("```wat\n{}\n```", format_function_signature(func)))
 }
@@ -480,7 +453,7 @@ fn format_global_hover(word: &str, global: &Global) -> HoverResult {
         "```wat\n(global {} {}{})\n```",
         word,
         if global.is_mutable { "mut " } else { "" },
-        global.var_type.to_str()
+        global.var_type
     );
     if let Some(ref val) = global.initial_value {
         info.push_str(&format!("\n\nInitial value: `{}`", val));
@@ -491,17 +464,12 @@ fn format_global_hover(word: &str, global: &Global) -> HoverResult {
 fn format_param_hover(word: &str, param: &Parameter) -> HoverResult {
     HoverResult::new(format!(
         "```wat\n(param {} {})\n```",
-        word,
-        param.param_type.to_str()
+        word, param.param_type
     ))
 }
 
 fn format_local_hover(word: &str, local: &Variable) -> HoverResult {
-    HoverResult::new(format!(
-        "```wat\n(local {} {})\n```",
-        word,
-        local.var_type.to_str()
-    ))
+    HoverResult::new(format!("```wat\n(local {} {})\n```", word, local.var_type))
 }
 
 fn format_block_hover(block: &BlockLabel) -> HoverResult {
@@ -520,9 +488,7 @@ fn format_table_hover(word: &str, table: &Table) -> HoverResult {
     };
     HoverResult::new(format!(
         "```wat\n(table {} {} {})\n```",
-        word,
-        limits_str,
-        table.ref_type.to_str()
+        word, limits_str, table.ref_type
     ))
 }
 
@@ -549,7 +515,7 @@ fn format_tag_hover(word: &str, tag: &Tag) -> HoverResult {
             " (param {})",
             tag.params
                 .iter()
-                .map(|t| t.to_str())
+                .map(|t| t.to_string())
                 .collect::<Vec<_>>()
                 .join(" ")
         )

@@ -52,7 +52,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l{}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(param) {}", param.param_type.to_str())),
+                        detail: Some(format!("(param) {}", param.param_type)),
                         insert_text: Some(insert_text.clone()),
                         documentation: Some(Documentation::String(format!(
                             "Expands to: {}",
@@ -68,7 +68,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l{}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(local) {}", local.var_type.to_str())),
+                        detail: Some(format!("(local) {}", local.var_type)),
                         insert_text: Some(insert_text.clone()),
                         documentation: Some(Documentation::String(format!(
                             "Expands to: {}",
@@ -91,7 +91,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l={}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(param) {}", param.param_type.to_str())),
+                        detail: Some(format!("(param) {}", param.param_type)),
                         insert_text_format: Some(InsertTextFormat::SNIPPET),
                         insert_text: Some(insert_text.clone()),
                         ..Default::default()
@@ -104,7 +104,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("l={}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(local) {}", local.var_type.to_str())),
+                        detail: Some(format!("(local) {}", local.var_type)),
                         insert_text_format: Some(InsertTextFormat::SNIPPET),
                         insert_text: Some(insert_text.clone()),
                         ..Default::default()
@@ -123,7 +123,7 @@ pub fn provide_completion(
                 completions.push(CompletionItem {
                     label: format!("g{}", name),
                     kind: Some(CompletionItemKind::SNIPPET),
-                    detail: Some(format!("(global) {}", global.var_type.to_str())),
+                    detail: Some(format!("(global) {}", global.var_type)),
                     insert_text: Some(insert_text.clone()),
                     documentation: Some(Documentation::String(format!(
                         "Expands to: {}",
@@ -145,7 +145,7 @@ pub fn provide_completion(
                     completions.push(CompletionItem {
                         label: format!("g={}", name),
                         kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(global mut) {}", global.var_type.to_str())),
+                        detail: Some(format!("(global mut) {}", global.var_type)),
                         insert_text_format: Some(InsertTextFormat::SNIPPET),
                         insert_text: Some(insert_text.clone()),
                         ..Default::default()
@@ -238,13 +238,13 @@ pub fn provide_completion(
                         let params_str = func
                             .parameters
                             .iter()
-                            .map(|p| p.param_type.to_str().to_string())
+                            .map(|p| p.param_type.to_string())
                             .collect::<Vec<_>>()
                             .join(" ");
                         let results_str = func
                             .results
                             .iter()
-                            .map(|r| r.to_str())
+                            .map(|r| r.to_string())
                             .collect::<Vec<_>>()
                             .join(" ");
 
@@ -279,7 +279,7 @@ pub fn provide_completion(
                             detail: Some(format!(
                                 "(global{}) {}",
                                 if global.is_mutable { " mut" } else { "" },
-                                global.var_type.to_str()
+                                global.var_type
                             )),
                             ..Default::default()
                         });
@@ -294,7 +294,7 @@ pub fn provide_completion(
                             completions.push(CompletionItem {
                                 label: name[1..].to_string(), // Remove $ prefix
                                 kind: Some(CompletionItemKind::VARIABLE),
-                                detail: Some(format!("(param) {}", param.param_type.to_str())),
+                                detail: Some(format!("(param) {}", param.param_type)),
                                 ..Default::default()
                             });
                         }
@@ -304,7 +304,7 @@ pub fn provide_completion(
                             completions.push(CompletionItem {
                                 label: name[1..].to_string(), // Remove $ prefix
                                 kind: Some(CompletionItemKind::VARIABLE),
-                                detail: Some(format!("(local) {}", local.var_type.to_str())),
+                                detail: Some(format!("(local) {}", local.var_type)),
                                 ..Default::default()
                             });
                         }

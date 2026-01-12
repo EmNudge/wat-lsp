@@ -1,8 +1,8 @@
 use crate::symbols::*;
 use crate::utils::{
     determine_context_from_line, determine_instruction_context_at_node, find_containing_function,
-    get_line_at_position, get_word_at_position, node_at_position, node_to_lsp_range,
-    position_to_byte, InstructionContext,
+    get_line_at_position, get_word_at_position, is_labeled_block_kind, node_at_position,
+    node_to_lsp_range, position_to_byte, InstructionContext,
 };
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
@@ -528,10 +528,7 @@ fn walk_tree_for_references(
     let kind = node.kind();
 
     // Track block entry/exit for depth calculation
-    let is_block = matches!(
-        kind,
-        "block_block" | "block_loop" | "block_if" | "expr1_block" | "expr1_loop" | "expr1_if"
-    );
+    let is_block = is_labeled_block_kind(kind);
 
     if is_block {
         // Extract block label if present
@@ -975,10 +972,7 @@ fn build_block_stack_recursive(
     let kind = node.kind();
 
     // Check if this is a block node
-    let is_block = matches!(
-        kind,
-        "block_block" | "block_loop" | "block_if" | "expr1_block" | "expr1_loop" | "expr1_if"
-    );
+    let is_block = is_labeled_block_kind(kind);
 
     if is_block {
         // Extract block label if present

@@ -80,31 +80,6 @@ impl ValueType {
             _ => ValueType::Unknown,
         }
     }
-
-    pub fn to_str(&self) -> String {
-        match self {
-            ValueType::I32 => "i32".to_string(),
-            ValueType::I64 => "i64".to_string(),
-            ValueType::F32 => "f32".to_string(),
-            ValueType::F64 => "f64".to_string(),
-            ValueType::V128 => "v128".to_string(),
-            ValueType::I8 => "i8".to_string(),
-            ValueType::I16 => "i16".to_string(),
-            ValueType::Funcref => "funcref".to_string(),
-            ValueType::Externref => "externref".to_string(),
-            ValueType::Structref => "structref".to_string(),
-            ValueType::Arrayref => "arrayref".to_string(),
-            ValueType::I31ref => "i31ref".to_string(),
-            ValueType::Anyref => "anyref".to_string(),
-            ValueType::Eqref => "eqref".to_string(),
-            ValueType::Nullref => "nullref".to_string(),
-            ValueType::NullFuncref => "nullfuncref".to_string(),
-            ValueType::NullExternref => "nullexternref".to_string(),
-            ValueType::Ref(idx) => format!("(ref {})", idx),
-            ValueType::RefNull(idx) => format!("(ref null {})", idx),
-            ValueType::Unknown => "unknown".to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -290,148 +265,96 @@ pub struct SymbolTable {
     pub elem_map: HashMap<String, usize>,
 }
 
+/// Macro to generate add/get methods for symbol types.
+/// Eliminates boilerplate for the 8 symbol type method triplets.
+macro_rules! impl_symbol_accessors {
+    ($add_name:ident, $get_by_name:ident, $get_by_index:ident,
+     $type:ty, $vec:ident, $map:ident) => {
+        pub fn $add_name(&mut self, item: $type) {
+            let index = self.$vec.len();
+            if let Some(ref name) = item.name {
+                self.$map.insert(name.clone(), index);
+            }
+            self.$vec.push(item);
+        }
+
+        pub fn $get_by_name(&self, name: &str) -> Option<&$type> {
+            self.$map.get(name).and_then(|&idx| self.$vec.get(idx))
+        }
+
+        pub fn $get_by_index(&self, index: usize) -> Option<&$type> {
+            self.$vec.get(index)
+        }
+    };
+}
+
 impl SymbolTable {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn add_function(&mut self, func: Function) {
-        let index = self.functions.len();
-        if let Some(ref name) = func.name {
-            self.function_map.insert(name.clone(), index);
-        }
-        self.functions.push(func);
-    }
-
-    pub fn add_global(&mut self, global: Global) {
-        let index = self.globals.len();
-        if let Some(ref name) = global.name {
-            self.global_map.insert(name.clone(), index);
-        }
-        self.globals.push(global);
-    }
-
-    pub fn add_table(&mut self, table: Table) {
-        let index = self.tables.len();
-        if let Some(ref name) = table.name {
-            self.table_map.insert(name.clone(), index);
-        }
-        self.tables.push(table);
-    }
-
-    pub fn add_memory(&mut self, memory: Memory) {
-        let index = self.memories.len();
-        if let Some(ref name) = memory.name {
-            self.memory_map.insert(name.clone(), index);
-        }
-        self.memories.push(memory);
-    }
-
-    pub fn add_type(&mut self, type_def: TypeDef) {
-        let index = self.types.len();
-        if let Some(ref name) = type_def.name {
-            self.type_map.insert(name.clone(), index);
-        }
-        self.types.push(type_def);
-    }
-
-    pub fn get_function_by_name(&self, name: &str) -> Option<&Function> {
-        self.function_map
-            .get(name)
-            .and_then(|&idx| self.functions.get(idx))
-    }
-
-    pub fn get_function_by_index(&self, index: usize) -> Option<&Function> {
-        self.functions.get(index)
-    }
-
-    pub fn get_global_by_name(&self, name: &str) -> Option<&Global> {
-        self.global_map
-            .get(name)
-            .and_then(|&idx| self.globals.get(idx))
-    }
-
-    pub fn get_global_by_index(&self, index: usize) -> Option<&Global> {
-        self.globals.get(index)
-    }
-
-    pub fn get_table_by_name(&self, name: &str) -> Option<&Table> {
-        self.table_map
-            .get(name)
-            .and_then(|&idx| self.tables.get(idx))
-    }
-
-    pub fn get_table_by_index(&self, index: usize) -> Option<&Table> {
-        self.tables.get(index)
-    }
-
-    pub fn get_memory_by_name(&self, name: &str) -> Option<&Memory> {
-        self.memory_map
-            .get(name)
-            .and_then(|&idx| self.memories.get(idx))
-    }
-
-    pub fn get_memory_by_index(&self, index: usize) -> Option<&Memory> {
-        self.memories.get(index)
-    }
-
-    pub fn get_type_by_name(&self, name: &str) -> Option<&TypeDef> {
-        self.type_map.get(name).and_then(|&idx| self.types.get(idx))
-    }
-
-    pub fn get_type_by_index(&self, index: usize) -> Option<&TypeDef> {
-        self.types.get(index)
-    }
-
-    pub fn add_tag(&mut self, tag: Tag) {
-        let index = self.tags.len();
-        if let Some(ref name) = tag.name {
-            self.tag_map.insert(name.clone(), index);
-        }
-        self.tags.push(tag);
-    }
-
-    pub fn get_tag_by_name(&self, name: &str) -> Option<&Tag> {
-        self.tag_map.get(name).and_then(|&idx| self.tags.get(idx))
-    }
-
-    pub fn get_tag_by_index(&self, index: usize) -> Option<&Tag> {
-        self.tags.get(index)
-    }
-
-    pub fn add_data(&mut self, data: DataSegment) {
-        let index = self.data_segments.len();
-        if let Some(ref name) = data.name {
-            self.data_map.insert(name.clone(), index);
-        }
-        self.data_segments.push(data);
-    }
-
-    pub fn get_data_by_name(&self, name: &str) -> Option<&DataSegment> {
-        self.data_map
-            .get(name)
-            .and_then(|&idx| self.data_segments.get(idx))
-    }
-
-    pub fn get_data_by_index(&self, index: usize) -> Option<&DataSegment> {
-        self.data_segments.get(index)
-    }
-
-    pub fn add_elem(&mut self, elem: ElemSegment) {
-        let index = self.elem_segments.len();
-        if let Some(ref name) = elem.name {
-            self.elem_map.insert(name.clone(), index);
-        }
-        self.elem_segments.push(elem);
-    }
-
-    pub fn get_elem_by_name(&self, name: &str) -> Option<&ElemSegment> {
-        self.elem_map
-            .get(name)
-            .and_then(|&idx| self.elem_segments.get(idx))
-    }
-
-    pub fn get_elem_by_index(&self, index: usize) -> Option<&ElemSegment> {
-        self.elem_segments.get(index)
-    }
+    impl_symbol_accessors!(
+        add_function,
+        get_function_by_name,
+        get_function_by_index,
+        Function,
+        functions,
+        function_map
+    );
+    impl_symbol_accessors!(
+        add_global,
+        get_global_by_name,
+        get_global_by_index,
+        Global,
+        globals,
+        global_map
+    );
+    impl_symbol_accessors!(
+        add_table,
+        get_table_by_name,
+        get_table_by_index,
+        Table,
+        tables,
+        table_map
+    );
+    impl_symbol_accessors!(
+        add_memory,
+        get_memory_by_name,
+        get_memory_by_index,
+        Memory,
+        memories,
+        memory_map
+    );
+    impl_symbol_accessors!(
+        add_type,
+        get_type_by_name,
+        get_type_by_index,
+        TypeDef,
+        types,
+        type_map
+    );
+    impl_symbol_accessors!(
+        add_tag,
+        get_tag_by_name,
+        get_tag_by_index,
+        Tag,
+        tags,
+        tag_map
+    );
+    impl_symbol_accessors!(
+        add_data,
+        get_data_by_name,
+        get_data_by_index,
+        DataSegment,
+        data_segments,
+        data_map
+    );
+    impl_symbol_accessors!(
+        add_elem,
+        get_elem_by_name,
+        get_elem_by_index,
+        ElemSegment,
+        elem_segments,
+        elem_map
+    );
 }

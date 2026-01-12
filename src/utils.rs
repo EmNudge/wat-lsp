@@ -43,6 +43,52 @@ macro_rules! node_clone {
     }};
 }
 
+// ============================================================================
+// Block type constants - centralized to prevent sync issues
+// ============================================================================
+
+/// All block-related node kinds (statement form)
+pub const BLOCK_KINDS_STATEMENT: &[&str] = &[
+    "block_block",
+    "block_loop",
+    "block_if",
+    "block_try",
+    "block_try_table",
+];
+
+/// All block-related node kinds (expression form)
+pub const BLOCK_KINDS_EXPR: &[&str] = &["expr1_block", "expr1_loop", "expr1_if", "expr1_try"];
+
+/// All block-related node kinds (instruction form used in some contexts)
+pub const BLOCK_KINDS_INSTR: &[&str] = &["instr_block", "instr_loop"];
+
+/// Check if a kind represents any block structure (statement, expression, or instruction form)
+pub fn is_block_kind(kind: &str) -> bool {
+    BLOCK_KINDS_STATEMENT.contains(&kind)
+        || BLOCK_KINDS_EXPR.contains(&kind)
+        || BLOCK_KINDS_INSTR.contains(&kind)
+}
+
+/// Check if a kind represents a labeled block structure (block, loop, if - not try)
+pub fn is_labeled_block_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "block_block" | "block_loop" | "block_if" | "expr1_block" | "expr1_loop" | "expr1_if"
+    )
+}
+
+/// Get the block type name from a node kind (block, loop, if, try, try_table)
+pub fn block_type_from_kind(kind: &str) -> &'static str {
+    match kind {
+        "block_block" | "expr1_block" | "instr_block" => "block",
+        "block_loop" | "expr1_loop" | "instr_loop" => "loop",
+        "block_if" | "expr1_if" => "if",
+        "block_try" | "expr1_try" => "try",
+        "block_try_table" => "try_table",
+        _ => "unknown",
+    }
+}
+
 /// Unified context for instruction type identification.
 /// Used across hover, definition, references, completion, and diagnostics.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -116,18 +162,12 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
         }
 
         // Check for block/loop contexts (both instr_* and block_* variants)
-        if kind == "instr_block"
-            || kind == "instr_loop"
-            || kind == "block_block"
-            || kind == "block_loop"
-            || kind == "block_if"
-            || kind == "block_try"
-            || kind == "block_try_table"
-            || kind == "expr1_block"
-            || kind == "expr1_loop"
-            || kind == "expr1_if"
-            || kind == "expr1_try"
-        {
+        #[cfg(feature = "native")]
+        if is_block_kind(kind) {
+            return InstructionContext::Block;
+        }
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        if is_block_kind(kind.as_str()) {
             return InstructionContext::Block;
         }
 
@@ -633,6 +673,38 @@ pub fn determine_context_at_node_with_fallback(
     } else {
         ast_context
     }
+}
+
+// ============================================================================
+// Shared formatting functions
+// ============================================================================
+
+/// Format a function signature for display (used by hover and signature help)
+pub fn format_function_signature(func: &Function) -> String {
+    let mut sig = String::from("(func");
+
+    if let Some(ref name) = func.name {
+        sig.push_str(&format!(" {}", name));
+    }
+
+    for param in &func.parameters {
+        sig.push_str(" (param");
+        if let Some(ref name) = param.name {
+            sig.push_str(&format!(" {}", name));
+        }
+        sig.push_str(&format!(" {})", param.param_type));
+    }
+
+    if !func.results.is_empty() {
+        sig.push_str(" (result");
+        for result in &func.results {
+            sig.push_str(&format!(" {}", result));
+        }
+        sig.push(')');
+    }
+
+    sig.push(')');
+    sig
 }
 
 #[cfg(test)]
