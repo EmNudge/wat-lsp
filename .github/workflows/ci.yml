@@ -460,7 +460,8 @@ jobs:
         with:
           script: |
             const url = '${{ steps.deploy.outputs.deployment-url }}';
-            const body = `## 🚀 Playground Preview\n\nDeployed to Cloudflare Pages:\n${url}`;
+            const sha = context.payload.pull_request.head.sha.substring(0, 7);
+            const body = `## 🚀 Playground Preview\n\nDeployed to Cloudflare Pages:\n${url} (\`${sha}\`)`;
 
             // Find existing bot comment
             const { data: comments } = await github.rest.issues.listComments({
