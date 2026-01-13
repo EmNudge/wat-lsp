@@ -309,7 +309,7 @@ jobs:
           path: packages/wat-lsp/dist
 
       - name: Cache NPM package for future runs
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: packages/wat-lsp/dist
           key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
@@ -370,7 +370,7 @@ jobs:
       # Try to restore from cache first (fast path for playground-only changes)
       - name: Restore NPM package from cache
         id: cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: packages/wat-lsp/dist
           key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
