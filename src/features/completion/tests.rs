@@ -350,3 +350,131 @@ fn test_completion_item_kinds() {
         .iter()
         .all(|c| c.kind == Some(CompletionItemKind::KEYWORD)));
 }
+
+#[test]
+fn test_ref_instruction_completion() {
+    let document = "ref.";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 4);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(!completions.is_empty());
+
+    assert!(completions.iter().any(|c| c.label == "null"));
+    assert!(completions.iter().any(|c| c.label == "is_null"));
+    assert!(completions.iter().any(|c| c.label == "func"));
+    assert!(completions.iter().any(|c| c.label == "eq"));
+    assert!(completions.iter().any(|c| c.label == "test"));
+    assert!(completions.iter().any(|c| c.label == "cast"));
+}
+
+#[test]
+fn test_struct_instruction_completion() {
+    let document = "struct.";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 7);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(!completions.is_empty());
+
+    assert!(completions.iter().any(|c| c.label == "new"));
+    assert!(completions.iter().any(|c| c.label == "new_default"));
+    assert!(completions.iter().any(|c| c.label == "get"));
+    assert!(completions.iter().any(|c| c.label == "set"));
+}
+
+#[test]
+fn test_array_instruction_completion() {
+    let document = "array.";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 6);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(!completions.is_empty());
+
+    assert!(completions.iter().any(|c| c.label == "new"));
+    assert!(completions.iter().any(|c| c.label == "new_fixed"));
+    assert!(completions.iter().any(|c| c.label == "new_data"));
+    assert!(completions.iter().any(|c| c.label == "new_elem"));
+    assert!(completions.iter().any(|c| c.label == "get"));
+    assert!(completions.iter().any(|c| c.label == "set"));
+    assert!(completions.iter().any(|c| c.label == "len"));
+    assert!(completions.iter().any(|c| c.label == "init_data"));
+    assert!(completions.iter().any(|c| c.label == "init_elem"));
+}
+
+#[test]
+fn test_i31_instruction_completion() {
+    let document = "i31.";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 4);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(!completions.is_empty());
+
+    assert!(completions.iter().any(|c| c.label == "get_s"));
+    assert!(completions.iter().any(|c| c.label == "get_u"));
+}
+
+#[test]
+fn test_br_on_completion() {
+    let document = "br_on_";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 6);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(!completions.is_empty());
+
+    assert!(completions.iter().any(|c| c.label == "null"));
+    assert!(completions.iter().any(|c| c.label == "non_null"));
+    assert!(completions.iter().any(|c| c.label == "cast"));
+    assert!(completions.iter().any(|c| c.label == "cast_fail"));
+}
+
+#[test]
+fn test_any_convert_completion() {
+    let document = "any.";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 4);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(!completions.is_empty());
+
+    assert!(completions.iter().any(|c| c.label == "convert_extern"));
+}
+
+#[test]
+fn test_extern_convert_completion() {
+    let document = "extern.";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 7);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(!completions.is_empty());
+
+    assert!(completions.iter().any(|c| c.label == "convert_any"));
+}
+
+#[test]
+fn test_new_keyword_completions() {
+    let keywords = get_keyword_completions();
+
+    // Typed function references
+    assert!(keywords.iter().any(|c| c.label == "call_ref"));
+    assert!(keywords.iter().any(|c| c.label == "return_call_ref"));
+
+    // Tail calls
+    assert!(keywords.iter().any(|c| c.label == "return_call"));
+    assert!(keywords.iter().any(|c| c.label == "return_call_indirect"));
+
+    // WasmGC
+    assert!(keywords.iter().any(|c| c.label == "struct"));
+    assert!(keywords.iter().any(|c| c.label == "array"));
+    assert!(keywords.iter().any(|c| c.label == "rec"));
+    assert!(keywords.iter().any(|c| c.label == "sub"));
+
+    // Exception handling
+    assert!(keywords.iter().any(|c| c.label == "tag"));
+    assert!(keywords.iter().any(|c| c.label == "throw"));
+    assert!(keywords.iter().any(|c| c.label == "try_table"));
+}

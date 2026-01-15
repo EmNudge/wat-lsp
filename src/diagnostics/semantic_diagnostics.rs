@@ -17,6 +17,7 @@ pub fn provide_semantic_diagnostics(
     let mut diagnostics = Vec::new();
     walk_tree_for_undefined_references(tree.root_node(), source, symbols, &mut diagnostics);
     walk_tree_for_parameter_counts(tree.root_node(), source, symbols, &mut diagnostics);
+    check_atomic_operations_shared_memory(tree.root_node(), source, symbols, &mut diagnostics);
     diagnostics
 }
 
@@ -336,6 +337,77 @@ fn get_arity_map() -> &'static std::collections::HashMap<
     INSTRUCTION_ARITY.get_or_init(get_instruction_arity_map)
 }
 
+/// Check for atomic operations on non-shared memory
+/// Atomic operations require the memory to be declared as shared
+fn check_atomic_operations_shared_memory(
+    node: Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Skip if there are no memories (nothing to check against)
+    if symbols.memories.is_empty() {
+        return;
+    }
+
+    // Check if any memory is shared
+    let has_shared_memory = symbols.memories.iter().any(|m| m.shared);
+
+    // If there's shared memory, no need to warn
+    if has_shared_memory {
+        return;
+    }
+
+    // Walk the tree looking for atomic operations
+    walk_tree_for_atomic_ops(node, source, diagnostics);
+}
+
+/// Recursively find atomic operations and emit warnings
+fn walk_tree_for_atomic_ops(node: Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    // Only check instr_plain nodes (not expr1_plain which contains instr_plain as child)
+    // This avoids counting the same instruction twice
+    if node.kind() == "instr_plain" {
+        let text = &source[node.byte_range()];
+        let first_token = text.split_whitespace().next().unwrap_or("");
+
+        // Check if this is an atomic operation (but not atomic.fence which doesn't need shared memory)
+        if is_atomic_memory_operation(first_token) {
+            let range = node_to_lsp_range(&node);
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(NumberOrString::String("atomic-non-shared".to_string())),
+                code_description: None,
+                source: Some("wat-lsp".to_string()),
+                message: format!(
+                    "Atomic operation '{}' requires shared memory. Declare memory with 'shared' keyword: (memory 1 1 shared)",
+                    first_token
+                ),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
+    // Recursively check children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_tree_for_atomic_ops(child, source, diagnostics);
+    }
+}
+
+/// Check if an instruction is an atomic memory operation that requires shared memory
+fn is_atomic_memory_operation(instr: &str) -> bool {
+    // atomic.fence doesn't require shared memory
+    if instr == "atomic.fence" {
+        return false;
+    }
+
+    // All other atomic operations require shared memory
+    instr.contains(".atomic.") || instr.starts_with("memory.atomic.")
+}
+
 /// Recursively walk the tree looking for instructions with incorrect parameter counts
 fn walk_tree_for_parameter_counts(
     node: Node,
@@ -596,6 +668,43 @@ fn validate_dynamic_operands(
                             let msg = format!(
                                 "{} operands (params of function {})",
                                 expected, func_display
+                            );
+                            let diagnostic = create_operand_count_diagnostic(
+                                node,
+                                instr_name,
+                                operand_count,
+                                &msg,
+                            );
+                            diagnostics.push(diagnostic);
+                        }
+                    }
+                }
+            }
+        }
+        "call_ref" | "return_call_ref" => {
+            // (call_ref $type (args)* (funcref))
+            // The number of operands should match the type's parameter count + 1 (funcref)
+            if let Some(type_name) = extract_instruction_type_param(node, source) {
+                let type_def = if type_name.starts_with('$') {
+                    symbols.get_type_by_name(&type_name)
+                } else if let Ok(idx) = type_name.parse::<usize>() {
+                    symbols.get_type_by_index(idx)
+                } else {
+                    None
+                };
+
+                if let Some(type_def) = type_def {
+                    use crate::symbols::TypeKind;
+                    if let TypeKind::Func { params, .. } = &type_def.kind {
+                        // Expected: params + 1 for the funcref
+                        let expected = params.len() + 1;
+                        if operand_count > expected {
+                            let type_display = type_def.name.as_deref().unwrap_or(&type_name);
+                            let msg = format!(
+                                "at most {} operands ({} params + funcref for type {})",
+                                expected,
+                                params.len(),
+                                type_display
                             );
                             let diagnostic = create_operand_count_diagnostic(
                                 node,
@@ -1469,5 +1578,212 @@ mod tests {
             "Valid catch_all clause should not produce errors, got: {:?}",
             catch_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_call_ref_with_correct_operand_count() {
+        // Function type with 2 params, call_ref should expect 3 operands (2 params + funcref)
+        let document = r#"(module
+  (type $binop (func (param i32 i32) (result i32)))
+
+  (func $test (param $fn (ref $binop)) (result i32)
+    (call_ref $binop (i32.const 1) (i32.const 2) (local.get $fn))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        // Verify type was parsed with correct params
+        let type_def = symbols.get_type_by_name("$binop").unwrap();
+        if let crate::symbols::TypeKind::Func { params, .. } = &type_def.kind {
+            assert_eq!(params.len(), 2, "Type should have 2 params");
+        }
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("operand"))
+            .collect();
+        assert_eq!(
+            operand_errors.len(),
+            0,
+            "call_ref with correct operand count should have no errors, got: {:?}",
+            operand_errors
+                .iter()
+                .map(|d| &d.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_call_ref_with_too_many_operands() {
+        // Function type with 1 param, call_ref with 4 operands should error
+        let document = r#"(module
+  (type $unary (func (param i32) (result i32)))
+
+  (func $test (param $fn (ref $unary)) (result i32)
+    (call_ref $unary (i32.const 1) (i32.const 2) (i32.const 3) (local.get $fn))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("call_ref") && d.message.contains("operand"))
+            .collect();
+        assert_eq!(
+            operand_errors.len(),
+            1,
+            "call_ref with too many operands should produce one error"
+        );
+        assert!(operand_errors[0].message.contains("at most 2 operands"));
+    }
+
+    // Atomic operations validation tests
+
+    #[test]
+    fn test_atomic_op_with_shared_memory_no_warning() {
+        // Atomic operation with shared memory should not produce warnings
+        let document = r#"(module
+  (memory $mem 1 1 shared)
+
+  (func $test
+    (i32.atomic.load (i32.const 0))
+    drop
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        // Verify memory is shared
+        assert!(
+            symbols.memories[0].shared,
+            "Memory should be marked as shared"
+        );
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let atomic_warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Atomic operation"))
+            .collect();
+        assert_eq!(
+            atomic_warnings.len(),
+            0,
+            "Atomic op with shared memory should not produce warnings"
+        );
+    }
+
+    #[test]
+    fn test_atomic_op_without_shared_memory_warning() {
+        // Atomic operation without shared memory should produce a warning
+        let document = r#"(module
+  (memory $mem 1)
+
+  (func $test
+    (i32.atomic.load (i32.const 0))
+    drop
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        // Verify memory is NOT shared
+        assert!(!symbols.memories[0].shared, "Memory should not be shared");
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let atomic_warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Atomic operation") && d.message.contains("shared"))
+            .collect();
+        assert_eq!(
+            atomic_warnings.len(),
+            1,
+            "Atomic op without shared memory should produce a warning"
+        );
+        assert!(atomic_warnings[0].message.contains("i32.atomic.load"));
+    }
+
+    #[test]
+    fn test_atomic_fence_no_warning() {
+        // atomic.fence doesn't require shared memory
+        let document = r#"(module
+  (memory $mem 1)
+
+  (func $test
+    atomic.fence
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let atomic_warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Atomic operation"))
+            .collect();
+        assert_eq!(
+            atomic_warnings.len(),
+            0,
+            "atomic.fence should not require shared memory"
+        );
+    }
+
+    #[test]
+    fn test_multiple_atomic_ops_warnings() {
+        // Multiple atomic operations should each produce a warning
+        let document = r#"(module
+  (memory 1)
+
+  (func $test
+    (i32.atomic.load (i32.const 0))
+    drop
+    (i64.atomic.store (i32.const 0) (i64.const 42))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let atomic_warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Atomic operation"))
+            .collect();
+        assert_eq!(
+            atomic_warnings.len(),
+            2,
+            "Each atomic op should produce a warning"
+        );
+    }
+
+    #[test]
+    fn test_is_atomic_memory_operation() {
+        // Test the helper function
+        assert!(is_atomic_memory_operation("i32.atomic.load"));
+        assert!(is_atomic_memory_operation("i64.atomic.store"));
+        assert!(is_atomic_memory_operation("i32.atomic.rmw.add"));
+        assert!(is_atomic_memory_operation("memory.atomic.wait32"));
+        assert!(is_atomic_memory_operation("memory.atomic.notify"));
+
+        // atomic.fence should NOT require shared memory
+        assert!(!is_atomic_memory_operation("atomic.fence"));
+
+        // Regular operations should not match
+        assert!(!is_atomic_memory_operation("i32.load"));
+        assert!(!is_atomic_memory_operation("i64.store"));
+        assert!(!is_atomic_memory_operation("memory.grow"));
     }
 }

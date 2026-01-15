@@ -213,6 +213,109 @@ pub fn provide_completion(
         return completions;
     }
 
+    // Reference instruction completions
+    if line_prefix.ends_with("ref.") {
+        completions.push(make_completion("null", "Create null reference"));
+        completions.push(make_completion("is_null", "Check if reference is null"));
+        completions.push(make_completion("func", "Create function reference"));
+        completions.push(make_completion("eq", "Compare two references for equality"));
+        completions.push(make_completion(
+            "as_non_null",
+            "Assert reference is not null",
+        ));
+        completions.push(make_completion(
+            "test",
+            "Test if reference is of given type",
+        ));
+        completions.push(make_completion("cast", "Cast reference to given type"));
+        completions.push(make_completion("i31", "Create i31 reference from i32"));
+        return completions;
+    }
+
+    // Struct instruction completions (WasmGC)
+    if line_prefix.ends_with("struct.") {
+        completions.push(make_completion("new", "Create new struct"));
+        completions.push(make_completion(
+            "new_default",
+            "Create struct with default values",
+        ));
+        completions.push(make_completion("get", "Get struct field"));
+        completions.push(make_completion("get_s", "Get struct field (signed)"));
+        completions.push(make_completion("get_u", "Get struct field (unsigned)"));
+        completions.push(make_completion("set", "Set struct field"));
+        return completions;
+    }
+
+    // Array instruction completions (WasmGC)
+    if line_prefix.ends_with("array.") {
+        completions.push(make_completion("new", "Create new array"));
+        completions.push(make_completion("new_fixed", "Create fixed-size array"));
+        completions.push(make_completion(
+            "new_default",
+            "Create array with default values",
+        ));
+        completions.push(make_completion(
+            "new_data",
+            "Create array from data segment",
+        ));
+        completions.push(make_completion(
+            "new_elem",
+            "Create array from element segment",
+        ));
+        completions.push(make_completion("get", "Get array element"));
+        completions.push(make_completion("get_s", "Get array element (signed)"));
+        completions.push(make_completion("get_u", "Get array element (unsigned)"));
+        completions.push(make_completion("set", "Set array element"));
+        completions.push(make_completion("len", "Get array length"));
+        completions.push(make_completion("fill", "Fill array with value"));
+        completions.push(make_completion("copy", "Copy array elements"));
+        completions.push(make_completion(
+            "init_data",
+            "Initialize array from data segment",
+        ));
+        completions.push(make_completion(
+            "init_elem",
+            "Initialize array from element segment",
+        ));
+        return completions;
+    }
+
+    // i31 instruction completions
+    if line_prefix.ends_with("i31.") {
+        completions.push(make_completion("get_s", "Get i31 value (signed)"));
+        completions.push(make_completion("get_u", "Get i31 value (unsigned)"));
+        return completions;
+    }
+
+    // Branch-on-null/non-null completions
+    if line_prefix.ends_with("br_on_") {
+        completions.push(make_completion("null", "Branch if reference is null"));
+        completions.push(make_completion(
+            "non_null",
+            "Branch if reference is not null",
+        ));
+        completions.push(make_completion("cast", "Branch if cast succeeds"));
+        completions.push(make_completion("cast_fail", "Branch if cast fails"));
+        return completions;
+    }
+
+    // Any/extern conversion completions
+    if line_prefix.ends_with("any.") {
+        completions.push(make_completion(
+            "convert_extern",
+            "Convert externref to anyref",
+        ));
+        return completions;
+    }
+
+    if line_prefix.ends_with("extern.") {
+        completions.push(make_completion(
+            "convert_any",
+            "Convert anyref to externref",
+        ));
+        return completions;
+    }
+
     // Dollar sign completions (variables and functions)
     if line_prefix.ends_with("$") {
         // For completion, prefer line-based detection since code is incomplete while typing.
@@ -442,17 +545,50 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
 
 fn get_keyword_completions() -> Vec<CompletionItem> {
     vec![
+        // Core declarations
         make_completion("func", "Function declaration"),
         make_completion("param", "Function parameter"),
         make_completion("result", "Function result"),
         make_completion("local", "Local variable"),
         make_completion("global", "Global variable"),
+        make_completion("type", "Type declaration"),
+        make_completion("memory", "Memory declaration"),
+        make_completion("table", "Table declaration"),
+        make_completion("elem", "Element segment"),
+        make_completion("data", "Data segment"),
+        make_completion("import", "Import declaration"),
+        make_completion("export", "Export declaration"),
+        // Control flow
         make_completion("block", "Block statement"),
         make_completion("loop", "Loop statement"),
         make_completion("if", "Conditional statement"),
-        make_completion("call", "Call function"),
+        make_completion("else", "Else clause"),
+        make_completion("br", "Branch to label"),
+        make_completion("br_if", "Conditional branch"),
+        make_completion("br_table", "Branch table"),
         make_completion("return", "Return from function"),
+        // Function calls
+        make_completion("call", "Call function"),
+        make_completion("call_indirect", "Indirect call via table"),
+        make_completion("call_ref", "Call via typed function reference"),
+        make_completion("return_call", "Tail call function"),
+        make_completion("return_call_indirect", "Tail call via table"),
+        make_completion("return_call_ref", "Tail call via typed reference"),
+        // Stack operations
         make_completion("drop", "Drop value from stack"),
+        make_completion("select", "Select between two values"),
+        make_completion("nop", "No operation"),
+        make_completion("unreachable", "Trap unconditionally"),
+        // WasmGC types
+        make_completion("struct", "Struct type definition"),
+        make_completion("array", "Array type definition"),
+        make_completion("rec", "Recursive type group"),
+        make_completion("sub", "Subtype definition"),
+        // Exception handling
+        make_completion("tag", "Exception tag"),
+        make_completion("throw", "Throw exception"),
+        make_completion("throw_ref", "Throw exception reference"),
+        make_completion("try_table", "Try-catch table block"),
     ]
 }
 

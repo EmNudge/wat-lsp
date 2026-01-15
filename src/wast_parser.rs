@@ -88,11 +88,14 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                         });
                         table_index += 1;
                     }
-                    wast::core::ItemKind::Memory(_) => {
+                    wast::core::ItemKind::Memory(mem_type) => {
+                        let (min, max, is_memory64, shared) = extract_memory_type(mem_type);
                         symbols.add_memory(Memory {
                             name,
                             index: memory_index,
-                            limits: (0, None),
+                            limits: (min, max),
+                            is_memory64,
+                            shared,
                             line,
                             range,
                         });
@@ -160,27 +163,48 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                 table_index += 1;
             }
             wast::core::ModuleField::Memory(memory) => {
+                let (min, max, is_memory64, shared) = extract_memory_kind(&memory.kind);
                 symbols.add_memory(Memory {
                     name: memory.id.map(|id| format!("${}", id.name())),
                     index: memory_index,
-                    limits: (0, None),
+                    limits: (min, max),
+                    is_memory64,
+                    shared,
                     line: span_to_line(memory.span, source),
                     range: memory.id.map(|id| id_to_range(id, source)),
                 });
                 memory_index += 1;
             }
             wast::core::ModuleField::Type(type_def) => {
+                let (kind, supertype, is_final) = extract_type_def_info(&type_def.def);
                 symbols.add_type(TypeDef {
                     name: type_def.id.map(|id| format!("${}", id.name())),
                     index: type_index,
-                    kind: TypeKind::Func {
-                        params: Vec::new(),
-                        results: Vec::new(),
-                    },
+                    kind,
+                    supertype,
+                    is_final,
+                    rec_group_id: None,
                     line: span_to_line(type_def.span, source),
                     range: type_def.id.map(|id| id_to_range(id, source)),
                 });
                 type_index += 1;
+            }
+            wast::core::ModuleField::Rec(rec_group) => {
+                let rec_id = Some(type_index);
+                for rec_type in rec_group.types.iter() {
+                    let (kind, supertype, is_final) = extract_type_def_info(&rec_type.def);
+                    symbols.add_type(TypeDef {
+                        name: rec_type.id.map(|id| format!("${}", id.name())),
+                        index: type_index,
+                        kind,
+                        supertype,
+                        is_final,
+                        rec_group_id: rec_id,
+                        line: span_to_line(rec_type.span, source),
+                        range: rec_type.id.map(|id| id_to_range(id, source)),
+                    });
+                    type_index += 1;
+                }
             }
             wast::core::ModuleField::Tag(tag) => {
                 symbols.add_tag(Tag {
@@ -312,6 +336,96 @@ fn extract_func_locals(func: &wast::core::Func, source: &str) -> Vec<Variable> {
 #[inline]
 fn extract_value_type(val_type: &wast::core::ValType) -> ValueType {
     ValueType::from(val_type)
+}
+
+/// Extract type definition info from wast TypeDef
+/// Returns (TypeKind, supertype, is_final)
+fn extract_type_def_info(def: &wast::core::TypeDef) -> (TypeKind, Option<u32>, bool) {
+    // Extract supertype index if present
+    let supertype = def.parent.as_ref().and_then(|idx| match idx {
+        wast::token::Index::Num(n, _) => Some(*n),
+        wast::token::Index::Id(_) => None, // Can't resolve named index here
+    });
+
+    // is_final defaults to true if not specified
+    let is_final = def.final_type.unwrap_or(true);
+
+    // Extract type kind from inner kind
+    let kind = match &def.kind {
+        wast::core::InnerTypeKind::Func(func_type) => {
+            let params: Vec<ValueType> = func_type
+                .params
+                .iter()
+                .map(|(_, _, ty)| extract_value_type(ty))
+                .collect();
+            let results: Vec<ValueType> =
+                func_type.results.iter().map(extract_value_type).collect();
+            TypeKind::Func { params, results }
+        }
+        wast::core::InnerTypeKind::Struct(struct_type) => {
+            let fields: Vec<(Option<String>, ValueType, bool)> = struct_type
+                .fields
+                .iter()
+                .map(|field| {
+                    let name = field.id.map(|id| format!("${}", id.name()));
+                    let ty = extract_storage_type(&field.ty);
+                    let mutable = field.mutable;
+                    (name, ty, mutable)
+                })
+                .collect();
+            TypeKind::Struct { fields }
+        }
+        wast::core::InnerTypeKind::Array(array_type) => {
+            let element_type = extract_storage_type(&array_type.ty);
+            let mutable = array_type.mutable;
+            TypeKind::Array {
+                element_type,
+                mutable,
+            }
+        }
+        wast::core::InnerTypeKind::Cont(_) => {
+            // Continuation types are for stack switching, treat as func for now
+            TypeKind::Func {
+                params: Vec::new(),
+                results: Vec::new(),
+            }
+        }
+    };
+
+    (kind, supertype, is_final)
+}
+
+/// Extract ValueType from wast StorageType
+fn extract_storage_type(storage: &wast::core::StorageType) -> ValueType {
+    match storage {
+        wast::core::StorageType::Val(val_type) => extract_value_type(val_type),
+        wast::core::StorageType::I8 => ValueType::I8,
+        wast::core::StorageType::I16 => ValueType::I16,
+    }
+}
+
+/// Extract memory type info from wast MemoryType
+/// Returns (min, max, is_memory64, shared)
+fn extract_memory_type(mem_type: &wast::core::MemoryType) -> (u64, Option<u64>, bool, bool) {
+    let min = mem_type.limits.min;
+    let max = mem_type.limits.max;
+    let is_memory64 = mem_type.limits.is64;
+    let shared = mem_type.shared;
+    (min, max, is_memory64, shared)
+}
+
+/// Extract memory type info from wast MemoryKind
+/// Returns (min, max, is_memory64, shared)
+fn extract_memory_kind(kind: &wast::core::MemoryKind) -> (u64, Option<u64>, bool, bool) {
+    match kind {
+        wast::core::MemoryKind::Normal(mem_type) => extract_memory_type(mem_type),
+        wast::core::MemoryKind::Inline { data, is64, .. } => {
+            // For inline memory, calculate size from data length
+            let min = data.len() as u64;
+            (min, None, *is64, false)
+        }
+        wast::core::MemoryKind::Import { ty, .. } => extract_memory_type(ty),
+    }
 }
 
 #[cfg(test)]
