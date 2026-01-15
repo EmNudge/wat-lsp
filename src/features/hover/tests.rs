@@ -85,6 +85,9 @@ fn create_test_symbols() -> SymbolTable {
             params: vec![ValueType::I32, ValueType::I32],
             results: vec![ValueType::I32],
         },
+        supertype: None,
+        is_final: true,
+        rec_group_id: None,
         line: 0,
         range: None,
     };
@@ -329,6 +332,56 @@ fn test_instruction_docs_available() {
     assert!(INSTRUCTION_DOCS.contains_key("local.get"));
     assert!(INSTRUCTION_DOCS.contains_key("block"));
     assert!(INSTRUCTION_DOCS.contains_key("call"));
+}
+
+#[test]
+fn test_new_instruction_docs_available() {
+    // Test that the new WASM 3.0 instruction docs are available
+    // Typed function references
+    assert!(
+        INSTRUCTION_DOCS.contains_key("call_ref"),
+        "call_ref should be documented"
+    );
+    assert!(
+        INSTRUCTION_DOCS.contains_key("return_call_ref"),
+        "return_call_ref should be documented"
+    );
+
+    // Null-checking branches
+    assert!(
+        INSTRUCTION_DOCS.contains_key("br_on_null"),
+        "br_on_null should be documented"
+    );
+    assert!(
+        INSTRUCTION_DOCS.contains_key("br_on_non_null"),
+        "br_on_non_null should be documented"
+    );
+
+    // Reference equality
+    assert!(
+        INSTRUCTION_DOCS.contains_key("ref.eq"),
+        "ref.eq should be documented"
+    );
+
+    // Reference conversions
+    assert!(
+        INSTRUCTION_DOCS.contains_key("any.convert_extern"),
+        "any.convert_extern should be documented"
+    );
+    assert!(
+        INSTRUCTION_DOCS.contains_key("extern.convert_any"),
+        "extern.convert_any should be documented"
+    );
+
+    // Array initialization
+    assert!(
+        INSTRUCTION_DOCS.contains_key("array.init_data"),
+        "array.init_data should be documented"
+    );
+    assert!(
+        INSTRUCTION_DOCS.contains_key("array.init_elem"),
+        "array.init_elem should be documented"
+    );
 }
 
 #[test]

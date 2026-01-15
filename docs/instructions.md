@@ -4687,3 +4687,122 @@ Example:
 (atomic.fence)
 ```
 ---
+
+## call_ref
+Call a function through a typed function reference. The reference type determines the expected function signature.
+
+Signature: `(param args... funcref) (result results...)`
+
+Example:
+```wat
+(type $sig (func (param i32) (result i32)))
+(call_ref $sig (i32.const 42) (local.get $func_ref))
+```
+---
+
+## return_call_ref
+Tail call a function through a typed function reference. Immediately returns the callee's result without growing the call stack.
+
+Signature: `(param args... funcref) (result results...)`
+
+Example:
+```wat
+(type $sig (func (param i32) (result i32)))
+(return_call_ref $sig (i32.const 42) (local.get $func_ref))
+```
+---
+
+## br_on_null
+Branch to a label if the reference is null. If not null, the non-null reference remains on the stack.
+
+Signature: `(param ref) (result ref?)`
+
+Example:
+```wat
+(block $is_null
+  (br_on_null $is_null (local.get $maybe_null_ref))
+  ;; Reference is not null here, use it
+  (call $use_ref)
+)
+;; Jumped here if ref was null
+```
+---
+
+## br_on_non_null
+Branch to a label if the reference is not null. The non-null reference is passed to the target block.
+
+Signature: `(param ref) (result)`
+
+Example:
+```wat
+(block $not_null (param (ref $type))
+  (br_on_non_null $not_null (local.get $maybe_null_ref))
+  ;; Reference was null, handle null case
+  (return)
+)
+;; Target block receives non-null ref
+```
+---
+
+## ref.eq
+Compare two references for equality. Both references must be of type eqref or a subtype.
+
+Signature: `(param eqref eqref) (result i32)`
+
+Example:
+```wat
+(ref.eq (local.get $ref1) (local.get $ref2))  ;; Returns 1 if equal, 0 otherwise
+```
+---
+
+## any.convert_extern
+Convert an externref to anyref. This allows external references to be used with GC reference operations.
+
+Signature: `(param externref) (result anyref)`
+
+Example:
+```wat
+(any.convert_extern (local.get $ext_ref))
+```
+---
+
+## extern.convert_any
+Convert an anyref to externref. This allows any GC reference to be passed out as an external reference.
+
+Signature: `(param anyref) (result externref)`
+
+Example:
+```wat
+(extern.convert_any (local.get $any_ref))
+```
+---
+
+## array.init_data
+Initialize a portion of an array from a passive data segment. Takes the array, destination offset in the array, source offset in the data segment, and length.
+
+Signature: `(param arrayref i32 i32 i32)`
+
+Example:
+```wat
+(array.init_data $byte_array $data_segment
+  (local.get $arr)     ;; array reference
+  (i32.const 0)        ;; destination offset in array
+  (i32.const 0)        ;; source offset in data segment
+  (i32.const 100))     ;; number of elements to copy
+```
+---
+
+## array.init_elem
+Initialize a portion of an array from a passive element segment. Takes the array, destination offset in the array, source offset in the element segment, and length.
+
+Signature: `(param arrayref i32 i32 i32)`
+
+Example:
+```wat
+(array.init_elem $funcref_array $elem_segment
+  (local.get $arr)     ;; array reference
+  (i32.const 0)        ;; destination offset in array
+  (i32.const 0)        ;; source offset in elem segment
+  (i32.const 10))      ;; number of elements to copy
+```
+---

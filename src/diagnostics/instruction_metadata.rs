@@ -411,6 +411,37 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("throw_ref", InstructionArity::unary_op()); // exnref
     map.insert("rethrow", InstructionArity::exact(1, "label index", 0));
 
+    // Typed function references
+    map.insert("call_ref", InstructionArity::dynamic(1, 1, "type index")); // args + funcref
+    map.insert(
+        "return_call_ref",
+        InstructionArity::dynamic(1, 1, "type index"),
+    ); // args + funcref
+
+    // Null-checking branches
+    map.insert("br_on_null", InstructionArity::exact(1, "label index", 1)); // ref
+    map.insert(
+        "br_on_non_null",
+        InstructionArity::exact(1, "label index", 1),
+    ); // ref
+
+    // Reference equality
+    map.insert("ref.eq", InstructionArity::binary_op()); // eqref, eqref
+
+    // Reference conversions
+    map.insert("any.convert_extern", InstructionArity::unary_op()); // externref
+    map.insert("extern.convert_any", InstructionArity::unary_op()); // anyref
+
+    // Array initialization from segments
+    map.insert(
+        "array.init_data",
+        InstructionArity::exact(2, "type and data index", 4),
+    ); // array, dst, src, len
+    map.insert(
+        "array.init_elem",
+        InstructionArity::exact(2, "type and elem index", 4),
+    ); // array, dst, src, len
+
     // Bulk memory operations
     map.insert("memory.copy", InstructionArity::exact(0, "", 3)); // dest, src, len
     map.insert("memory.fill", InstructionArity::exact(0, "", 3)); // dest, val, len

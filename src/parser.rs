@@ -355,21 +355,30 @@ fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Opti
         (None, None)
     };
 
-    let mut min_limit = 0;
-    let mut max_limit = None;
+    let mut min_limit: u64 = 0;
+    let mut max_limit: Option<u64> = None;
+    let mut is_memory64 = false;
+    let mut shared = false;
 
     let mut cursor = desc_node.walk();
     for child in desc_node.children(&mut cursor) {
         if child.kind() == "memory_type" {
             let mut type_cursor = child.walk();
             for type_child in child.children(&mut type_cursor) {
+                // Check for i64 keyword indicating memory64
+                if type_child.kind() == "value_type" {
+                    let type_text = node_text(&type_child, source);
+                    if type_text == "i64" {
+                        is_memory64 = true;
+                    }
+                }
                 if type_child.kind() == "limits" {
                     let mut limits_cursor = type_child.walk();
                     let mut nat_index = 0;
                     for limit_child in type_child.children(&mut limits_cursor) {
                         if limit_child.kind() == "nat" {
                             let text = node_text(&limit_child, source);
-                            if let Ok(num) = text.parse::<u32>() {
+                            if let Ok(num) = text.parse::<u64>() {
                                 if nat_index == 0 {
                                     min_limit = num;
                                 } else {
@@ -377,6 +386,11 @@ fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Opti
                                 }
                                 nat_index += 1;
                             }
+                        }
+                        // Check for shared/unshared keyword
+                        if limit_child.kind() == "share" {
+                            let share_text = node_text(&limit_child, source);
+                            shared = share_text == "shared";
                         }
                     }
                 }
@@ -388,6 +402,8 @@ fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Opti
         name,
         index,
         limits: (min_limit, max_limit),
+        is_memory64,
+        shared,
         line: desc_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -1048,6 +1064,9 @@ fn extract_type_from_single_node(
         name,
         index,
         kind,
+        supertype: None,
+        is_final: true, // Default to final
+        rec_group_id: None,
         line: type_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -1093,9 +1112,69 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         params: Vec::new(),
         results: Vec::new(),
     };
+    let mut supertype: Option<u32> = None;
+    let mut is_final = true; // Default to final
 
     let mut cursor = type_node.walk();
     for child in type_node.children(&mut cursor) {
+        // Handle sub_type: (sub final? supertype_index? def_type)
+        if child.kind() == "sub_type" {
+            let mut sub_cursor = child.walk();
+            for sub_child in child.children(&mut sub_cursor) {
+                let sub_kind = sub_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let sub_kind = sub_kind.as_str();
+
+                match sub_kind {
+                    "final" => {
+                        is_final = true;
+                    }
+                    "index" => {
+                        // Parse supertype index
+                        let idx_text = node_text(&sub_child, source);
+                        // Remove $ prefix if present and parse as number
+                        let idx_str = idx_text.trim_start_matches('$');
+                        if let Ok(idx) = idx_str.parse::<u32>() {
+                            supertype = Some(idx);
+                        }
+                    }
+                    "def_type" => {
+                        // Process the inner type definition
+                        let mut def_cursor = sub_child.walk();
+                        for def_child in sub_child.children(&mut def_cursor) {
+                            if def_child.kind() == "struct_type" {
+                                kind = extract_struct_kind(&def_child, source);
+                            } else if def_child.kind() == "array_type" {
+                                kind = extract_array_kind(&def_child, source);
+                            } else if def_child.kind() == "func_type" {
+                                let params = extract_parameters(&def_child, source);
+                                for param in params {
+                                    parameters.push(param.param_type);
+                                }
+                                results.extend(extract_results(&def_child, source));
+                            }
+                        }
+                    }
+                    // If no "final" keyword, type is not final (can be subtyped)
+                    _ => {
+                        // Check if this is a type definition directly
+                        if sub_child.kind() == "struct_type" {
+                            kind = extract_struct_kind(&sub_child, source);
+                            is_final = false; // sub without final means not final
+                        } else if sub_child.kind() == "array_type" {
+                            kind = extract_array_kind(&sub_child, source);
+                            is_final = false;
+                        }
+                    }
+                }
+            }
+            // If we saw "sub" but no "final", the type is not final
+            let text = node_text(&child, source);
+            if !text.contains("final") {
+                is_final = false;
+            }
+            continue;
+        }
         // Check if this child is directly a struct_type or array_type
         // (happens when type_field is just the type itself)
         if child.kind() == "struct_type" {
@@ -1241,9 +1320,52 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         name,
         index,
         kind,
+        supertype,
+        is_final,
+        rec_group_id: None,
         line: type_node.range().start_point.row as u32,
         range: name_range,
     })
+}
+
+/// Helper to extract struct kind from a struct_type node
+fn extract_struct_kind(struct_node: &Node, source: &str) -> TypeKind {
+    let mut fields = Vec::new();
+    let mut struct_cursor = struct_node.walk();
+
+    for struct_child in struct_node.children(&mut struct_cursor) {
+        if struct_child.kind() == "field_type" {
+            let (field_name, field_type, mutable) = extract_field_type(&struct_child, source);
+            fields.push((field_name, field_type, mutable));
+        }
+    }
+    TypeKind::Struct { fields }
+}
+
+/// Helper to extract array kind from an array_type node
+fn extract_array_kind(array_node: &Node, source: &str) -> TypeKind {
+    let mut element_type = ValueType::Unknown;
+    let mut mutable = false;
+
+    let mut array_cursor = array_node.walk();
+    for array_child in array_node.children(&mut array_cursor) {
+        if array_child.kind() == "field_type" {
+            let mut fc = array_child.walk();
+            for c in array_child.children(&mut fc) {
+                if c.kind() == "value_type" {
+                    element_type = extract_value_type(&c, source);
+                }
+            }
+            let text = node_text(&array_child, source);
+            if text.contains("(mut") || text.contains(" mut ") {
+                mutable = true;
+            }
+        }
+    }
+    TypeKind::Array {
+        element_type,
+        mutable,
+    }
 }
 
 /// Extract table definitions (with offset for imports)
@@ -1422,33 +1544,72 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
         (None, None)
     };
 
-    let mut min_limit = 0;
-    let mut max_limit = None;
+    let mut min_limit: u64 = 0;
+    let mut max_limit: Option<u64> = None;
+    let mut is_memory64 = false;
+    let mut shared = false;
+
+    // Helper to extract limits from a limits node
+    let extract_limits =
+        |limits_node: &Node, min: &mut u64, max: &mut Option<u64>, shared_flag: &mut bool| {
+            let mut limits_cursor = limits_node.walk();
+            let mut nat_index = 0;
+            for limit_child in limits_node.children(&mut limits_cursor) {
+                if limit_child.kind() == "nat" {
+                    let text = node_text(&limit_child, source);
+                    if let Ok(num) = text.parse::<u64>() {
+                        if nat_index == 0 {
+                            *min = num;
+                        } else {
+                            *max = Some(num);
+                        }
+                        nat_index += 1;
+                    }
+                }
+                // Check for shared/unshared keyword
+                if limit_child.kind() == "share" {
+                    let share_text = node_text(&limit_child, source);
+                    *shared_flag = share_text == "shared";
+                }
+            }
+        };
 
     let mut cursor = memory_node.walk();
     for child in memory_node.children(&mut cursor) {
+        // Check for i64 keyword at memory node level indicating memory64
+        if child.kind() == "value_type" {
+            let type_text = node_text(&child, source);
+            if type_text == "i64" {
+                is_memory64 = true;
+            }
+        }
         if child.kind() == "memory_fields_type" {
             let mut fields_cursor = child.walk();
             for fields_child in child.children(&mut fields_cursor) {
+                // Check for i64 keyword in memory_fields_type
+                if fields_child.kind() == "value_type" {
+                    let type_text = node_text(&fields_child, source);
+                    if type_text == "i64" {
+                        is_memory64 = true;
+                    }
+                }
                 if fields_child.kind() == "memory_type" {
                     let mut type_cursor = fields_child.walk();
                     for type_child in fields_child.children(&mut type_cursor) {
-                        if type_child.kind() == "limits" {
-                            let mut limits_cursor = type_child.walk();
-                            let mut nat_index = 0;
-                            for limit_child in type_child.children(&mut limits_cursor) {
-                                if limit_child.kind() == "nat" {
-                                    let text = node_text(&limit_child, source);
-                                    if let Ok(num) = text.parse::<u32>() {
-                                        if nat_index == 0 {
-                                            min_limit = num;
-                                        } else {
-                                            max_limit = Some(num);
-                                        }
-                                        nat_index += 1;
-                                    }
-                                }
+                        // Check for i64 keyword in memory_type
+                        if type_child.kind() == "value_type" {
+                            let type_text = node_text(&type_child, source);
+                            if type_text == "i64" {
+                                is_memory64 = true;
                             }
+                        }
+                        if type_child.kind() == "limits" {
+                            extract_limits(
+                                &type_child,
+                                &mut min_limit,
+                                &mut max_limit,
+                                &mut shared,
+                            );
                         }
                     }
                 }
@@ -1457,22 +1618,15 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
             // Handle direct memory_type (without wrapper)
             let mut type_cursor = child.walk();
             for type_child in child.children(&mut type_cursor) {
-                if type_child.kind() == "limits" {
-                    let mut limits_cursor = type_child.walk();
-                    let mut nat_index = 0;
-                    for limit_child in type_child.children(&mut limits_cursor) {
-                        if limit_child.kind() == "nat" {
-                            let text = node_text(&limit_child, source);
-                            if let Ok(num) = text.parse::<u32>() {
-                                if nat_index == 0 {
-                                    min_limit = num;
-                                } else {
-                                    max_limit = Some(num);
-                                }
-                                nat_index += 1;
-                            }
-                        }
+                // Check for i64 keyword in memory_type
+                if type_child.kind() == "value_type" {
+                    let type_text = node_text(&type_child, source);
+                    if type_text == "i64" {
+                        is_memory64 = true;
                     }
+                }
+                if type_child.kind() == "limits" {
+                    extract_limits(&type_child, &mut min_limit, &mut max_limit, &mut shared);
                 }
             }
         }
@@ -1482,6 +1636,8 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
         name,
         index,
         limits: (min_limit, max_limit),
+        is_memory64,
+        shared,
         line: memory_node.range().start_point.row as u32,
         range: name_range,
     })

@@ -216,7 +216,11 @@ pub struct Memory {
     #[allow(dead_code)] // Useful for numeric memory references
     pub index: usize,
     #[allow(dead_code)] // Useful for memory operations and diagnostics
-    pub limits: (u32, Option<u32>), // (min, max)
+    pub limits: (u64, Option<u64>), // (min, max) - u64 for memory64 support
+    #[allow(dead_code)] // Useful for memory64 validation
+    pub is_memory64: bool, // true if memory uses i64 address space
+    #[allow(dead_code)] // Useful for atomic operation validation
+    pub shared: bool, // true if memory is shared (for threads)
     #[allow(dead_code)] // Useful for go-to-definition
     pub line: u32,
     #[allow(dead_code)] // Useful for go-to-definition
@@ -244,6 +248,12 @@ pub struct TypeDef {
     #[allow(dead_code)] // Useful for numeric type references
     pub index: usize,
     pub kind: TypeKind,
+    #[allow(dead_code)] // Useful for subtype validation
+    pub supertype: Option<u32>, // Parent type index for subtyping
+    #[allow(dead_code)] // Useful for subtype validation
+    pub is_final: bool, // Whether this type can be subtyped
+    #[allow(dead_code)] // Useful for rec group handling
+    pub rec_group_id: Option<usize>, // Which rec group this type belongs to
     #[allow(dead_code)] // Useful for go-to-definition
     pub line: u32,
     #[allow(dead_code)] // Useful for go-to-definition
