@@ -23,6 +23,11 @@ name = "wat-hover"
 path = "src/bin/wat-hover.rs"
 required-features = ["native"]
 
+[[bin]]
+name = "wat-docs"
+path = "src/bin/wat-docs.rs"
+required-features = ["native"]
+
 [features]
 default = ["native"]
 native = [
