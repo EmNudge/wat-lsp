@@ -3,6 +3,9 @@
 // Core types (protocol-independent) - must be first as other modules depend on it
 pub mod core;
 
+// Documentation access (instruction docs generated at build time)
+pub mod docs;
+
 // Wast-based parser (works in WASM, always available)
 pub mod wast_parser;
 

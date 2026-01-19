@@ -327,11 +327,11 @@ fn test_is_word_char() {
 #[test]
 fn test_instruction_docs_available() {
     // Test that some basic instruction docs are available
-    assert!(INSTRUCTION_DOCS.contains_key("i32.add"));
-    assert!(INSTRUCTION_DOCS.contains_key("f32.mul")); // Changed from f64.mul
-    assert!(INSTRUCTION_DOCS.contains_key("local.get"));
-    assert!(INSTRUCTION_DOCS.contains_key("block"));
-    assert!(INSTRUCTION_DOCS.contains_key("call"));
+    assert!(crate::docs::get_instruction_doc("i32.add").is_some());
+    assert!(crate::docs::get_instruction_doc("f32.mul").is_some()); // Changed from f64.mul
+    assert!(crate::docs::get_instruction_doc("local.get").is_some());
+    assert!(crate::docs::get_instruction_doc("block").is_some());
+    assert!(crate::docs::get_instruction_doc("call").is_some());
 }
 
 #[test]
@@ -339,47 +339,47 @@ fn test_new_instruction_docs_available() {
     // Test that the new WASM 3.0 instruction docs are available
     // Typed function references
     assert!(
-        INSTRUCTION_DOCS.contains_key("call_ref"),
+        crate::docs::get_instruction_doc("call_ref").is_some(),
         "call_ref should be documented"
     );
     assert!(
-        INSTRUCTION_DOCS.contains_key("return_call_ref"),
+        crate::docs::get_instruction_doc("return_call_ref").is_some(),
         "return_call_ref should be documented"
     );
 
     // Null-checking branches
     assert!(
-        INSTRUCTION_DOCS.contains_key("br_on_null"),
+        crate::docs::get_instruction_doc("br_on_null").is_some(),
         "br_on_null should be documented"
     );
     assert!(
-        INSTRUCTION_DOCS.contains_key("br_on_non_null"),
+        crate::docs::get_instruction_doc("br_on_non_null").is_some(),
         "br_on_non_null should be documented"
     );
 
     // Reference equality
     assert!(
-        INSTRUCTION_DOCS.contains_key("ref.eq"),
+        crate::docs::get_instruction_doc("ref.eq").is_some(),
         "ref.eq should be documented"
     );
 
     // Reference conversions
     assert!(
-        INSTRUCTION_DOCS.contains_key("any.convert_extern"),
+        crate::docs::get_instruction_doc("any.convert_extern").is_some(),
         "any.convert_extern should be documented"
     );
     assert!(
-        INSTRUCTION_DOCS.contains_key("extern.convert_any"),
+        crate::docs::get_instruction_doc("extern.convert_any").is_some(),
         "extern.convert_any should be documented"
     );
 
     // Array initialization
     assert!(
-        INSTRUCTION_DOCS.contains_key("array.init_data"),
+        crate::docs::get_instruction_doc("array.init_data").is_some(),
         "array.init_data should be documented"
     );
     assert!(
-        INSTRUCTION_DOCS.contains_key("array.init_elem"),
+        crate::docs::get_instruction_doc("array.init_elem").is_some(),
         "array.init_elem should be documented"
     );
 }

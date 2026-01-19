@@ -541,8 +541,5 @@ fn format_elem_hover(word: &str, elem: &ElemSegment) -> HoverResult {
 }
 
 fn get_instruction_doc(word: &str) -> Option<String> {
-    INSTRUCTION_DOCS.get(word).map(|s| s.to_string())
+    crate::docs::get_instruction_doc(word).map(|s| s.to_string())
 }
-
-// Include the auto-generated instruction documentation
-include!(concat!(env!("OUT_DIR"), "/instruction_docs.rs"));
