@@ -185,6 +185,60 @@
   (func $mul_f64x2 (param $a v128) (param $b v128) (result v128)
     (f64x2.mul (local.get $a) (local.get $b)))
 
+  ;; ============================================================
+  ;; Zero-extending loads
+  ;; Load partial data and zero the remaining lanes
+  ;; ============================================================
+
+  ;; Load 32 bits into lowest lane, zero upper 96 bits
+  (func $load32_zero (param $offset i32) (result v128)
+    (v128.load32_zero (local.get $offset)))
+
+  ;; Load 64 bits into lowest lane, zero upper 64 bits
+  (func $load64_zero (param $offset i32) (result v128)
+    (v128.load64_zero (local.get $offset)))
+
+  ;; ============================================================
+  ;; Lane memory operations
+  ;; Load/store individual lanes without affecting others
+  ;; ============================================================
+
+  ;; Load 8-bit value into specific lane of existing vector
+  (func $load8_into_lane (param $offset i32) (param $v v128) (result v128)
+    (v128.load8_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Load 16-bit value into specific lane
+  (func $load16_into_lane (param $offset i32) (param $v v128) (result v128)
+    (v128.load16_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Load 32-bit value into specific lane
+  (func $load32_into_lane (param $offset i32) (param $v v128) (result v128)
+    (v128.load32_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Load 64-bit value into specific lane
+  (func $load64_into_lane (param $offset i32) (param $v v128) (result v128)
+    (v128.load64_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Store 8-bit value from specific lane
+  (func $store8_from_lane (param $offset i32) (param $v v128)
+    (v128.store8_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Store 16-bit value from specific lane
+  (func $store16_from_lane (param $offset i32) (param $v v128)
+    (v128.store16_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Store 32-bit value from specific lane
+  (func $store32_from_lane (param $offset i32) (param $v v128)
+    (v128.store32_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Store 64-bit value from specific lane
+  (func $store64_from_lane (param $offset i32) (param $v v128)
+    (v128.store64_lane 0 (local.get $offset) (local.get $v)))
+
+  ;; Lane operations with offset
+  (func $load64_lane_with_offset (param $base i32) (param $v v128) (result v128)
+    (v128.load64_lane offset=8 1 (local.get $base) (local.get $v)))
+
   ;; Exports
   (export "add_i32x4" (func $add_i32x4))
   (export "mul_f32x4" (func $mul_f32x4))

@@ -261,5 +261,84 @@ export const watExamples = {
     (local.set $result (i32.add (local.get $a) (local.get $b)))
     (call $log (local.get $result))
     (local.get $result)))
+`,
+
+  simd: `(module
+  ;; SIMD (Single Instruction Multiple Data) Example
+  ;; Demonstrates v128 operations for parallel computation
+
+  (memory (export "memory") 1)
+
+  ;; Basic v128 operations
+  (func (export "add_vectors") (param $a v128) (param $b v128) (result v128)
+    (i32x4.add (local.get $a) (local.get $b)))
+
+  ;; Create a constant vector
+  (func (export "make_vector") (result v128)
+    (v128.const i32x4 1 2 3 4))
+
+  ;; Splat a single value to all lanes
+  (func (export "splat") (param $val i32) (result v128)
+    (i32x4.splat (local.get $val)))
+
+  ;; Extract a lane from a vector
+  (func (export "get_lane_0") (param $v v128) (result i32)
+    (i32x4.extract_lane 0 (local.get $v)))
+
+  ;; Replace a lane in a vector
+  (func (export "set_lane_0") (param $v v128) (param $val i32) (result v128)
+    (i32x4.replace_lane 0 (local.get $v) (local.get $val)))
+
+  ;; ============================================================
+  ;; Lane load/store operations (load/store individual lanes)
+  ;; These were recently added to the grammar!
+  ;; ============================================================
+
+  ;; Load a 64-bit value into a specific lane
+  (func (export "load_into_lane") (param $v v128) (param $addr i32) (result v128)
+    (v128.load64_lane 0 (local.get $addr) (local.get $v)))
+
+  ;; Store a 64-bit value from a specific lane
+  (func (export "store_from_lane") (param $v v128) (param $addr i32)
+    (v128.store64_lane 0 (local.get $addr) (local.get $v)))
+
+  ;; Load 32-bit lanes
+  (func (export "load32_into_lane") (param $v v128) (param $addr i32) (result v128)
+    (v128.load32_lane 0 (local.get $addr) (local.get $v)))
+
+  ;; Store 32-bit lanes
+  (func (export "store32_from_lane") (param $v v128) (param $addr i32)
+    (v128.store32_lane 0 (local.get $addr) (local.get $v)))
+
+  ;; ============================================================
+  ;; Zero-extending loads (load partial and zero the rest)
+  ;; These were also recently added!
+  ;; ============================================================
+
+  ;; Load 64 bits and zero-extend to v128 (upper 64 bits = 0)
+  (func (export "load64_zero") (param $addr i32) (result v128)
+    (v128.load64_zero (local.get $addr)))
+
+  ;; Load 32 bits and zero-extend to v128 (upper 96 bits = 0)
+  (func (export "load32_zero") (param $addr i32) (result v128)
+    (v128.load32_zero (local.get $addr)))
+
+  ;; ============================================================
+  ;; Practical example: Sum array elements using SIMD
+  ;; ============================================================
+
+  ;; Sum 4 i32 values in parallel from memory
+  (func (export "sum_simd") (param $addr i32) (result i32)
+    (local $vec v128)
+    ;; Load 4 i32 values
+    (local.set $vec (v128.load (local.get $addr)))
+    ;; Sum all lanes
+    (i32.add
+      (i32.add
+        (i32x4.extract_lane 0 (local.get $vec))
+        (i32x4.extract_lane 1 (local.get $vec)))
+      (i32.add
+        (i32x4.extract_lane 2 (local.get $vec))
+        (i32x4.extract_lane 3 (local.get $vec))))))
 `
 };

@@ -3469,6 +3469,119 @@ Example:
 ```
 ---
 
+## v128.load32_zero
+Load 32-bit value into the lowest lane and zero all other lanes.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load32_zero (i32.const 0))  ;; Loads i32 into lane 0, zeros lanes 1-3
+```
+---
+
+## v128.load64_zero
+Load 64-bit value into the lowest lane and zero all other lanes.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(v128.load64_zero (i32.const 0))  ;; Loads i64 into lane 0, zeros lane 1
+```
+---
+
+## v128.load8_lane
+Load 8-bit value into a specific lane of an existing vector.
+
+Signature: `(param i32 v128) (result v128)`
+
+Example:
+```wat
+(v128.load8_lane 0 (i32.const 0) (local.get $vec))  ;; Load byte into lane 0
+(v128.load8_lane offset=4 5 (i32.const 0) (local.get $vec))  ;; With offset, lane 5
+```
+---
+
+## v128.load16_lane
+Load 16-bit value into a specific lane of an existing vector.
+
+Signature: `(param i32 v128) (result v128)`
+
+Example:
+```wat
+(v128.load16_lane 0 (i32.const 0) (local.get $vec))  ;; Load i16 into lane 0
+```
+---
+
+## v128.load32_lane
+Load 32-bit value into a specific lane of an existing vector.
+
+Signature: `(param i32 v128) (result v128)`
+
+Example:
+```wat
+(v128.load32_lane 0 (i32.const 0) (local.get $vec))  ;; Load i32 into lane 0
+```
+---
+
+## v128.load64_lane
+Load 64-bit value into a specific lane of an existing vector.
+
+Signature: `(param i32 v128) (result v128)`
+
+Example:
+```wat
+(v128.load64_lane 0 (i32.const 0) (local.get $vec))  ;; Load i64 into lane 0
+(v128.load64_lane offset=8 1 (i32.const 0) (local.get $vec))  ;; With offset, lane 1
+```
+---
+
+## v128.store8_lane
+Store 8-bit value from a specific lane to memory.
+
+Signature: `(param i32 v128)`
+
+Example:
+```wat
+(v128.store8_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as byte
+```
+---
+
+## v128.store16_lane
+Store 16-bit value from a specific lane to memory.
+
+Signature: `(param i32 v128)`
+
+Example:
+```wat
+(v128.store16_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as i16
+```
+---
+
+## v128.store32_lane
+Store 32-bit value from a specific lane to memory.
+
+Signature: `(param i32 v128)`
+
+Example:
+```wat
+(v128.store32_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as i32
+```
+---
+
+## v128.store64_lane
+Store 64-bit value from a specific lane to memory.
+
+Signature: `(param i32 v128)`
+
+Example:
+```wat
+(v128.store64_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as i64
+(v128.store64_lane offset=8 1 (i32.const 0) (local.get $vec))  ;; With offset, lane 1
+```
+---
+
 ## v128.any_true
 Check if any bit in the vector is non-zero.
 

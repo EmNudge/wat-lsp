@@ -284,6 +284,7 @@ module.exports = grammar({
         seq($.op_simd_offset_opt_align_opt, optional($.offset_value), optional($.align_value)),
         $.op_simd_const,
         $.op_simd_lane,
+        seq($.op_simd_lane_memarg, optional($.offset_value), optional($.align_value), $.int),
       ),
 
     _instruction_relaxed_simd: $ =>
@@ -643,7 +644,7 @@ module.exports = grammar({
             "v",
             choice(
               imm(/(8x16|16x8|32x4|64x2)\.load_splat/),
-              imm(/128\.(load((8|16|32|64)_splat|(8x8|16x4|32x2)_[su])?|store)/),
+              imm(/128\.(load((8|16|32|64)_splat|(8x8|16x4|32x2)_[su]|(32|64)_zero)?|store)/),
             ),
           ),
         ),
@@ -688,6 +689,10 @@ module.exports = grammar({
         seq(alias(seq(choice("f32x4", "f64x2", "i32x4", "i64x2"), imm("."), imm("extract_lane")), $.instr_name), $.int),
         seq(alias(seq(choice("f32x4", "f64x2", "i8x16", "i16x8", "i32x4", "i64x2"), imm("."), imm("replace_lane")), $.instr_name), $.int),
       ),
+
+    // proposal: simd - memory lane operations (load/store with lane index)
+    op_simd_lane_memarg: $ =>
+      token(seq("v128.", choice("load", "store"), imm(/(8|16|32|64)_lane/))),
 
     // proposal: bulk-memory-operations
     op_table_copy: $ => seq("table.copy", optional(seq($.index, $.index))),
