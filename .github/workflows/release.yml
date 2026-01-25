@@ -5,15 +5,95 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.5). Leave empty to auto-bump minor version from latest release.'
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  # Determine version and check if release exists for current commit
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.actor == github.repository_owner
+    outputs:
+      version: ${{ steps.determine-version.outputs.version }}
+      release_exists: ${{ steps.check-release.outputs.exists }}
+      existing_tag: ${{ steps.check-release.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Get latest release version
+        id: latest-release
+        run: |
+          LATEST=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "v0.0.0")
+          echo "latest=$LATEST" >> $GITHUB_OUTPUT
+          # Extract version number without 'v' prefix
+          VERSION_NUM=${LATEST#v}
+          echo "latest_num=$VERSION_NUM" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: determine-version
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            # Tag push - use the tag name
+            VERSION="${{ github.ref_name }}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            # Manual input provided
+            VERSION="v${{ inputs.version }}"
+          else
+            # Auto-bump minor version
+            LATEST="${{ steps.latest-release.outputs.latest_num }}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST"
+            NEW_MINOR=$((MINOR + 1))
+            VERSION="v${MAJOR}.${NEW_MINOR}.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Determined version: $VERSION"
+
+      - name: Check if release exists for current commit
+        id: check-release
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          echo "Current commit: $CURRENT_SHA"
+
+          # Check all releases to find one pointing to this commit
+          EXISTING_TAG=""
+          for tag in $(gh release list --json tagName -q '.[].tagName'); do
+            TAG_SHA=$(git rev-parse "$tag" 2>/dev/null || echo "")
+            if [ "$TAG_SHA" == "$CURRENT_SHA" ]; then
+              EXISTING_TAG="$tag"
+              break
+            fi
+          done
+
+          if [ -n "$EXISTING_TAG" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "tag=$EXISTING_TAG" >> $GITHUB_OUTPUT
+            echo "Found existing release $EXISTING_TAG for current commit"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "tag=" >> $GITHUB_OUTPUT
+            echo "No existing release found for current commit"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build binaries only if no release exists for current commit
   build-release:
     name: Build Release
+    needs: prepare-release
+    if: needs.prepare-release.outputs.release_exists == 'false'
     runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push' || github.actor == github.repository_owner
     strategy:
       matrix:
         include:
@@ -47,11 +127,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Get version from package.json
-        id: version
-        shell: bash
-        run: echo "version=v$(node -p "require('./packages/vscode-extension/package.json').version")" >> $GITHUB_OUTPUT
-
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
 
@@ -77,7 +152,8 @@ jobs:
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'push' && github.ref_name || steps.version.outputs.version }}
+          tag_name: ${{ needs.prepare-release.outputs.version }}
+          name: ${{ needs.prepare-release.outputs.version }}
           files: ${{ matrix.asset_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -88,9 +164,57 @@ jobs:
           name: server-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
+  # Download binaries from existing release
+  download-existing-release:
+    name: Download Existing Release
+    needs: prepare-release
+    if: needs.prepare-release.outputs.release_exists == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        run: |
+          mkdir -p binaries
+          TAG="${{ needs.prepare-release.outputs.existing_tag }}"
+
+          gh release download "$TAG" \
+            --pattern "wat-lsp-rust-linux-x86_64" \
+            --pattern "wat-lsp-rust-windows-x86_64.exe" \
+            --pattern "wat-lsp-rust-macos-x86_64" \
+            --pattern "wat-lsp-rust-macos-aarch64" \
+            --dir binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Upload Linux binary artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-x86_64-unknown-linux-gnu
+          path: binaries/wat-lsp-rust-linux-x86_64
+
+      - name: Upload Windows binary artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-x86_64-pc-windows-msvc
+          path: binaries/wat-lsp-rust-windows-x86_64.exe
+
+      - name: Upload macOS x86_64 binary artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-x86_64-apple-darwin
+          path: binaries/wat-lsp-rust-macos-x86_64
+
+      - name: Upload macOS ARM64 binary artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-aarch64-apple-darwin
+          path: binaries/wat-lsp-rust-macos-aarch64
+
   publish-vscode-extension:
     name: Publish VS Code Extension
-    needs: build-release
+    needs: [prepare-release, build-release, download-existing-release]
+    # Run if either build or download succeeded (one will be skipped)
+    if: always() && needs.prepare-release.result == 'success' && (needs.build-release.result == 'success' || needs.download-existing-release.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -109,11 +233,41 @@ jobs:
       - name: Organize server binaries
         run: |
           mkdir -p packages/vscode-extension/server
-          cp server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-linux-x64
-          cp server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust.exe packages/vscode-extension/server/wat-lsp-rust-win32-x64.exe
-          cp server-binaries/server-x86_64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-x64
-          cp server-binaries/server-aarch64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-arm64
+
+          # Handle different artifact structures (from build vs download)
+          if [ -f "server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust" ]; then
+            cp server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-linux-x64
+          else
+            cp server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust-linux-x86_64 packages/vscode-extension/server/wat-lsp-rust-linux-x64
+          fi
+
+          if [ -f "server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust.exe" ]; then
+            cp server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust.exe packages/vscode-extension/server/wat-lsp-rust-win32-x64.exe
+          else
+            cp server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust-windows-x86_64.exe packages/vscode-extension/server/wat-lsp-rust-win32-x64.exe
+          fi
+
+          if [ -f "server-binaries/server-x86_64-apple-darwin/wat-lsp-rust" ]; then
+            cp server-binaries/server-x86_64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-x64
+          else
+            cp server-binaries/server-x86_64-apple-darwin/wat-lsp-rust-macos-x86_64 packages/vscode-extension/server/wat-lsp-rust-darwin-x64
+          fi
+
+          if [ -f "server-binaries/server-aarch64-apple-darwin/wat-lsp-rust" ]; then
+            cp server-binaries/server-aarch64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-arm64
+          else
+            cp server-binaries/server-aarch64-apple-darwin/wat-lsp-rust-macos-aarch64 packages/vscode-extension/server/wat-lsp-rust-darwin-arm64
+          fi
+
           chmod +x packages/vscode-extension/server/wat-lsp-rust-*
+
+      - name: Update package.json version
+        working-directory: packages/vscode-extension
+        run: |
+          VERSION="${{ needs.prepare-release.outputs.version }}"
+          # Remove 'v' prefix for package.json
+          VERSION_NUM="${VERSION#v}"
+          npm version "$VERSION_NUM" --no-git-tag-version --allow-same-version
 
       - name: Install extension dependencies
         working-directory: packages/vscode-extension
