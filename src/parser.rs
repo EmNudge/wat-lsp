@@ -273,7 +273,11 @@ fn extract_imported_global(desc_node: &Node, source: &str, index: usize) -> Opti
                             var_type = extract_value_type(&mut_child, source);
                         }
                     }
+                } else if type_child.kind() == "global_type_imm" {
+                    // Immutable globals: global_type_imm contains the type directly
+                    var_type = extract_value_type(&type_child, source);
                 } else if type_child.kind() == "value_type" {
+                    // Fallback for other grammar structures
                     var_type = extract_value_type(&type_child, source);
                 }
             }
@@ -860,8 +864,11 @@ fn extract_global(global_node: &Node, source: &str, index: usize) -> Option<Glob
                             var_type = extract_value_type(&mut_child, source);
                         }
                     }
+                } else if type_child.kind() == "global_type_imm" {
+                    // Immutable globals: global_type_imm contains the type directly
+                    var_type = extract_value_type(&type_child, source);
                 } else if type_child.kind() == "value_type" {
-                    // Non-mutable globals have value_type directly under global_type
+                    // Fallback: Non-mutable globals might have value_type directly under global_type
                     var_type = extract_value_type(&type_child, source);
                 }
             }

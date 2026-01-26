@@ -2778,6 +2778,60 @@ Example:
 ```
 ---
 
+## i8x16
+SIMD shape annotation for v128 interpreted as 16 lanes of 8-bit integers. Used with v128.const and SIMD operations.
+
+Example:
+```wat
+(v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+```
+---
+
+## i16x8
+SIMD shape annotation for v128 interpreted as 8 lanes of 16-bit integers. Used with v128.const and SIMD operations.
+
+Example:
+```wat
+(v128.const i16x8 0 1 2 3 4 5 6 7)
+```
+---
+
+## i32x4
+SIMD shape annotation for v128 interpreted as 4 lanes of 32-bit integers. Used with v128.const and SIMD operations.
+
+Example:
+```wat
+(v128.const i32x4 1 2 3 4)
+```
+---
+
+## i64x2
+SIMD shape annotation for v128 interpreted as 2 lanes of 64-bit integers. Used with v128.const and SIMD operations.
+
+Example:
+```wat
+(v128.const i64x2 1 2)
+```
+---
+
+## f32x4
+SIMD shape annotation for v128 interpreted as 4 lanes of 32-bit floats. Used with v128.const and SIMD operations.
+
+Example:
+```wat
+(v128.const f32x4 1.0 2.0 3.0 4.0)
+```
+---
+
+## f64x2
+SIMD shape annotation for v128 interpreted as 2 lanes of 64-bit floats. Used with v128.const and SIMD operations.
+
+Example:
+```wat
+(v128.const f64x2 1.0 2.0)
+```
+---
+
 ## funcref
 Reference type for functions. Can be null.
 
@@ -3659,6 +3713,226 @@ Example:
 ```
 ---
 
+## f32x4.sub
+Subtract two f32x4 vectors lane-wise (first minus second).
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.sub (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.div
+Divide two f32x4 vectors lane-wise (first divided by second).
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.div (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.sqrt
+Compute square root of each lane in an f32x4 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.sqrt (local.get $a))
+```
+---
+
+## f32x4.neg
+Negate each lane in an f32x4 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.neg (local.get $a))
+```
+---
+
+## f32x4.abs
+Compute absolute value of each lane in an f32x4 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.abs (local.get $a))
+```
+---
+
+## f32x4.min
+Compute lane-wise minimum of two f32x4 vectors. Returns NaN if either operand is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.min (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.max
+Compute lane-wise maximum of two f32x4 vectors. Returns NaN if either operand is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.max (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.pmin
+Pseudo-minimum: lane-wise `a < b ? a : b`. Unlike f32x4.min, returns second operand if first is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.pmin (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.pmax
+Pseudo-maximum: lane-wise `a > b ? a : b`. Unlike f32x4.max, returns second operand if first is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.pmax (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.ceil
+Round each lane to the nearest integer towards positive infinity.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.ceil (local.get $a))
+```
+---
+
+## f32x4.floor
+Round each lane to the nearest integer towards negative infinity.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.floor (local.get $a))
+```
+---
+
+## f32x4.trunc
+Round each lane to the nearest integer towards zero.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.trunc (local.get $a))
+```
+---
+
+## f32x4.nearest
+Round each lane to the nearest integer, with ties to even.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.nearest (local.get $a))
+```
+---
+
+## f32x4.eq
+Compare two f32x4 vectors for equality lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.eq (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.ne
+Compare two f32x4 vectors for inequality lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.ne (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.lt
+Compare two f32x4 vectors for less-than lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.lt (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.gt
+Compare two f32x4 vectors for greater-than lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.gt (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.le
+Compare two f32x4 vectors for less-than-or-equal lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.le (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.ge
+Compare two f32x4 vectors for greater-than-or-equal lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f32x4.ge (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.splat
+Create an f32x4 vector with all lanes set to the same f32 value.
+
+Signature: `(param f32) (result v128)`
+
+Example:
+```wat
+(f32x4.splat (f32.const 1.0))
+```
+---
+
 ## f64x2.add
 Add two f64x2 vectors lane-wise.
 
@@ -3667,6 +3941,237 @@ Signature: `(param v128 v128) (result v128)`
 Example:
 ```wat
 (f64x2.add (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.sub
+Subtract two f64x2 vectors lane-wise (first minus second).
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.sub (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.mul
+Multiply two f64x2 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.mul (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.div
+Divide two f64x2 vectors lane-wise (first divided by second).
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.div (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.sqrt
+Compute square root of each lane in an f64x2 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f64x2.sqrt (local.get $a))
+```
+---
+
+## f64x2.neg
+Negate each lane in an f64x2 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f64x2.neg (local.get $a))
+```
+---
+
+## f64x2.abs
+Compute absolute value of each lane in an f64x2 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f64x2.abs (local.get $a))
+```
+---
+
+## f64x2.min
+Compute lane-wise minimum of two f64x2 vectors. Returns NaN if either operand is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.min (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.max
+Compute lane-wise maximum of two f64x2 vectors. Returns NaN if either operand is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.max (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.pmin
+Pseudo-minimum: lane-wise `a < b ? a : b`. Unlike f64x2.min, returns second operand if first is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.pmin (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.pmax
+Pseudo-maximum: lane-wise `a > b ? a : b`. Unlike f64x2.max, returns second operand if first is NaN.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.pmax (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.ceil
+Round each lane to the nearest integer towards positive infinity.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f64x2.ceil (local.get $a))
+```
+---
+
+## f64x2.floor
+Round each lane to the nearest integer towards negative infinity.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f64x2.floor (local.get $a))
+```
+---
+
+## f64x2.trunc
+Round each lane to the nearest integer towards zero.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f64x2.trunc (local.get $a))
+```
+---
+
+## f64x2.nearest
+Round each lane to the nearest integer, with ties to even.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f64x2.nearest (local.get $a))
+```
+---
+
+## f64x2.eq
+Compare two f64x2 vectors for equality lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.eq (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.ne
+Compare two f64x2 vectors for inequality lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.ne (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.lt
+Compare two f64x2 vectors for less-than lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.lt (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.gt
+Compare two f64x2 vectors for greater-than lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.gt (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.le
+Compare two f64x2 vectors for less-than-or-equal lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.le (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.ge
+Compare two f64x2 vectors for greater-than-or-equal lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(f64x2.ge (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.splat
+Create an f64x2 vector with all lanes set to the same f64 value.
+
+Signature: `(param f64) (result v128)`
+
+Example:
+```wat
+(f64x2.splat (f64.const 1.0))
 ```
 ---
 
