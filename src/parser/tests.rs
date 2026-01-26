@@ -109,6 +109,26 @@ fn test_parse_globals() {
 }
 
 #[test]
+fn test_parse_immutable_globals() {
+    let wat = r#"
+(module
+  (global $immutable i32 (i32.const 42))
+  (global $pi f32 (f32.const 3.14159)))
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.globals.len(), 2);
+
+    let immutable = symbols.get_global_by_name("$immutable").unwrap();
+    assert!(!immutable.is_mutable);
+    assert_eq!(immutable.var_type, ValueType::I32);
+
+    let pi = symbols.get_global_by_name("$pi").unwrap();
+    assert!(!pi.is_mutable);
+    assert_eq!(pi.var_type, ValueType::F32);
+}
+
+#[test]
 fn test_parse_tables() {
     let wat = r#"
 (module
