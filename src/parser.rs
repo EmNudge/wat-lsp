@@ -243,6 +243,7 @@ fn extract_imported_function(desc_node: &Node, source: &str, index: usize) -> Op
         start_byte: desc_node.start_byte(),
         end_byte: desc_node.end_byte(),
         range: name_range,
+        doc_comment: None, // Imported functions don't have doc comments
     })
 }
 
@@ -578,6 +579,115 @@ fn extract_functions_with_offset(
     }
 }
 
+/// Extract doc comment from comments immediately preceding a node.
+/// Looks for comment nodes that appear on lines immediately before the target node,
+/// similar to how JSDoc works.
+///
+/// Tree structure: module_field_func's parent is module_field, whose parent is module.
+/// Comments appear as siblings of module_field under the module node.
+fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
+    let node_start_line = node.range().start_point.row;
+    if node_start_line == 0 {
+        return None;
+    }
+
+    // module_field_func -> module_field -> module
+    // We need to find comments that are siblings of module_field (our grandparent)
+    let parent = node.parent()?; // module_field
+    let grandparent = parent.parent()?; // module
+
+    let parent_start_byte = parent.start_byte();
+
+    let mut comments = Vec::new();
+    let mut cursor = grandparent.walk();
+
+    // Collect all comment nodes that appear before the module_field
+    for sibling in grandparent.children(&mut cursor) {
+        // Stop when we reach or pass our target node's parent
+        if sibling.start_byte() >= parent_start_byte {
+            break;
+        }
+
+        let kind = sibling.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = kind.as_str();
+
+        if kind == "comment_line" || kind == "comment_block" {
+            let comment_end_line = sibling.range().end_point.row;
+            comments.push((comment_end_line, node_text(&sibling, source)));
+        }
+    }
+
+    if comments.is_empty() {
+        return None;
+    }
+
+    // Filter to only include comments that form a contiguous block ending at the line before the function
+    let mut relevant_comments = Vec::new();
+    let mut expected_line = node_start_line - 1;
+
+    // Process comments in reverse order (from closest to function to furthest)
+    for (end_line, text) in comments.into_iter().rev() {
+        // Allow for blank lines between comments (up to 1 blank line)
+        if end_line <= expected_line && expected_line - end_line <= 1 {
+            relevant_comments.push(text);
+            // Update expected line to look for comments before this one
+            expected_line = end_line.saturating_sub(1);
+        } else if relevant_comments.is_empty() {
+            // If we haven't found any comments yet and this one isn't adjacent, skip
+            continue;
+        } else {
+            // Stop if there's a gap
+            break;
+        }
+    }
+
+    if relevant_comments.is_empty() {
+        return None;
+    }
+
+    // Reverse to get comments in original order (top to bottom)
+    relevant_comments.reverse();
+
+    // Process comment text: remove comment delimiters and clean up
+    let processed: Vec<String> = relevant_comments
+        .iter()
+        .map(|c| {
+            let trimmed = c.trim();
+            if let Some(stripped) = trimmed.strip_prefix(";;") {
+                // Line comment: remove ;; prefix
+                stripped.trim().to_string()
+            } else if let Some(inner) = trimmed
+                .strip_prefix("(;")
+                .and_then(|s| s.strip_suffix(";)"))
+            {
+                // Block comment: remove (; and ;) delimiters
+                // Handle multi-line block comments by preserving line structure
+                inner
+                    .lines()
+                    .map(|line| {
+                        let l = line.trim();
+                        // Remove leading * if present (common doc comment style)
+                        l.strip_prefix('*').map(|s| s.trim()).unwrap_or(l)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .trim()
+                    .to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if processed.is_empty() {
+        None
+    } else {
+        Some(processed.join("\n"))
+    }
+}
+
 /// Extract a single function from a func node
 fn extract_function(func_node: &Node, source: &str, index: usize) -> Option<Function> {
     let range = func_node.range();
@@ -598,6 +708,9 @@ fn extract_function(func_node: &Node, source: &str, index: usize) -> Option<Func
     let locals = extract_locals(func_node, source);
     let blocks = extract_blocks(func_node, source);
 
+    // Extract doc comment from preceding comments
+    let doc_comment = extract_doc_comment(func_node, source);
+
     Some(Function {
         name,
         index,
@@ -610,6 +723,7 @@ fn extract_function(func_node: &Node, source: &str, index: usize) -> Option<Func
         start_byte: func_node.start_byte(),
         end_byte: func_node.end_byte(),
         range: name_range,
+        doc_comment,
     })
 }
 

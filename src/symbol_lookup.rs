@@ -229,6 +229,7 @@ mod tests {
             start_byte: 0,
             end_byte: 100,
             range: Some(Range::from_coords(1, 6, 1, 10)),
+            doc_comment: None,
         });
         symbols.add_global(Global {
             name: Some("$counter".to_string()),

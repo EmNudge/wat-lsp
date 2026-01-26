@@ -62,6 +62,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                             start_byte: import.span.offset(),
                             end_byte: import.span.offset(),
                             range,
+                            doc_comment: None, // Imported functions don't have doc comments
                         });
                         func_index += 1;
                     }
@@ -136,6 +137,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                     start_byte: func.span.offset(),
                     end_byte: func.span.offset(),
                     range: func.id.map(|id| id_to_range(id, source)),
+                    doc_comment: None, // wast parser doesn't extract comments
                 });
                 func_index += 1;
             }

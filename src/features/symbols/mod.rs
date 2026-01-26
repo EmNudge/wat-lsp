@@ -181,6 +181,8 @@ pub struct Function {
     pub end_byte: usize, // Byte offset where function ends
     #[allow(dead_code)] // Useful for go-to-definition
     pub range: Option<Range>,
+    /// Documentation comment extracted from comments preceding the function
+    pub doc_comment: Option<String>,
 }
 
 #[derive(Debug, Clone)]

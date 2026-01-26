@@ -25,6 +25,7 @@ fn test_add_function() {
         start_byte: 0,
         end_byte: 100,
         range: None,
+        doc_comment: None,
     };
 
     table.add_function(func);
@@ -134,6 +135,7 @@ fn test_get_function_by_index() {
             start_byte: 0,
             end_byte: 100,
             range: None,
+            doc_comment: None,
         };
         table.add_function(func);
     }
@@ -184,6 +186,7 @@ fn test_unnamed_symbols() {
         start_byte: 0,
         end_byte: 100,
         range: None,
+        doc_comment: None,
     };
     table.add_function(func);
 
@@ -210,6 +213,7 @@ fn test_multiple_symbols_same_type() {
             start_byte: 0,
             end_byte: 100,
             range: None,
+            doc_comment: None,
         };
         table.add_function(func);
     }
@@ -314,6 +318,7 @@ fn test_complex_function() {
         start_byte: 0,
         end_byte: 500,
         range: None,
+        doc_comment: None,
     };
 
     assert_eq!(func.parameters.len(), 2);
