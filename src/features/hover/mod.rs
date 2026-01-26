@@ -434,7 +434,15 @@ fn provide_index_hover(
 // ============================================================================
 
 fn format_function_hover(func: &Function) -> HoverResult {
-    HoverResult::new(format!("```wat\n{}\n```", format_function_signature(func)))
+    let mut content = format!("```wat\n{}\n```", format_function_signature(func));
+
+    // Add doc comment if present
+    if let Some(ref doc) = func.doc_comment {
+        content.push_str("\n\n---\n\n");
+        content.push_str(doc);
+    }
+
+    HoverResult::new(content)
 }
 
 fn format_global_hover(word: &str, global: &Global) -> HoverResult {

@@ -492,3 +492,120 @@ fn test_parse_011_host_watlings() {
         "$log_some_numbers should be found"
     );
 }
+
+#[test]
+fn test_parse_function_with_line_comment_doc() {
+    // Test that line comments before a function are extracted as doc comments
+    let wat = r#"(module
+  ;; Adds two numbers together
+  (func $add (param $a i32) (param $b i32) (result i32)
+    (i32.add (local.get $a) (local.get $b)))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+    let func = &symbols.functions[0];
+
+    assert_eq!(func.name, Some("$add".to_string()));
+    assert!(
+        func.doc_comment.is_some(),
+        "Expected doc_comment, got {:?}",
+        func.doc_comment
+    );
+    assert!(func
+        .doc_comment
+        .as_ref()
+        .unwrap()
+        .contains("Adds two numbers"));
+}
+
+#[test]
+fn test_parse_function_with_block_comment_doc() {
+    // Test that block comments before a function are extracted as doc comments
+    let wat = r#"
+(module
+  (; Multiplies two numbers together ;)
+  (func $mul (param $a i32) (param $b i32) (result i32)
+    (i32.mul (local.get $a) (local.get $b)))
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    let func = &symbols.functions[0];
+
+    assert_eq!(func.name, Some("$mul".to_string()));
+    assert!(func.doc_comment.is_some());
+    assert!(func
+        .doc_comment
+        .as_ref()
+        .unwrap()
+        .contains("Multiplies two numbers"));
+}
+
+#[test]
+fn test_parse_function_with_multiline_doc_comment() {
+    // Test multiple line comments form a single doc comment
+    let wat = r#"
+(module
+  ;; Calculates the factorial of n
+  ;; Uses recursive algorithm
+  (func $factorial (param $n i32) (result i32)
+    (if (result i32) (i32.le_s (local.get $n) (i32.const 1))
+      (then (i32.const 1))
+      (else (i32.mul (local.get $n)
+        (call $factorial (i32.sub (local.get $n) (i32.const 1)))))))
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    let func = &symbols.functions[0];
+
+    assert_eq!(func.name, Some("$factorial".to_string()));
+    assert!(func.doc_comment.is_some());
+    let doc = func.doc_comment.as_ref().unwrap();
+    assert!(doc.contains("factorial"));
+    assert!(doc.contains("recursive"));
+}
+
+#[test]
+fn test_parse_function_without_doc_comment() {
+    // Test that functions without preceding comments have no doc comment
+    let wat = r#"
+(module
+  (func $simple (result i32)
+    (i32.const 42))
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    let func = &symbols.functions[0];
+
+    assert_eq!(func.name, Some("$simple".to_string()));
+    assert!(func.doc_comment.is_none());
+}
+
+#[test]
+fn test_parse_function_comment_with_one_blank_line() {
+    // Test that comments with one blank line between them and function are still captured
+    let wat = r#"(module
+  ;; This comment has one blank line before function
+
+  (func $spaced (result i32)
+    (i32.const 0))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+    let func = &symbols.functions[0];
+
+    assert_eq!(func.name, Some("$spaced".to_string()));
+    // The comment should be captured because we allow up to 1 blank line
+    assert!(
+        func.doc_comment.is_some(),
+        "Expected doc_comment with 1 blank line gap, got {:?}",
+        func.doc_comment
+    );
+    assert!(func
+        .doc_comment
+        .as_ref()
+        .unwrap()
+        .contains("one blank line"));
+}

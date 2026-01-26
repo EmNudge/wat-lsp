@@ -51,6 +51,7 @@ fn create_test_symbols() -> SymbolTable {
         start_byte: 0,
         end_byte: 300,
         range: None,
+        doc_comment: None,
     };
     table.add_function(func);
 
@@ -411,6 +412,7 @@ fn test_format_function_signature() {
         start_byte: 0,
         end_byte: 150,
         range: None,
+        doc_comment: None,
     };
 
     let sig = format_function_signature(&func);
@@ -483,4 +485,50 @@ fn test_hover_outside_comment() {
     // Hover should work for instruction outside comment
     let hover = provide_hover(document, &symbols, &tree, position.into());
     assert!(hover.is_some());
+}
+
+#[test]
+fn test_hover_includes_doc_comment() {
+    use crate::parser;
+
+    // Hover over "call $add" - we need a call site
+    let doc_with_call = r#"(module
+  ;; Adds two 32-bit integers
+  (func $add (param $a i32) (param $b i32) (result i32)
+    (i32.add (local.get $a) (local.get $b)))
+  (func $main
+    (call $add (i32.const 1) (i32.const 2)))
+)"#;
+
+    let symbols_with_call = parser::parse_document(doc_with_call).unwrap();
+    let tree_with_call = create_test_tree(doc_with_call);
+
+    // Position on "$add" in the call instruction (line 5, around column 10)
+    let position = Position::new(5, 10);
+
+    let hover = provide_hover(
+        doc_with_call,
+        &symbols_with_call,
+        &tree_with_call,
+        position.into(),
+    );
+    assert!(hover.is_some(), "Expected hover for function call");
+
+    let content = match hover.unwrap().contents {
+        tower_lsp::lsp_types::HoverContents::Markup(m) => m.value,
+        _ => panic!("Expected Markup content"),
+    };
+
+    // Verify the hover contains the doc comment
+    assert!(
+        content.contains("Adds two 32-bit integers"),
+        "Hover should include doc comment. Got: {}",
+        content
+    );
+
+    // Also verify the function signature is present
+    assert!(
+        content.contains("func $add"),
+        "Hover should include function signature"
+    );
 }

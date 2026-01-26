@@ -45,6 +45,7 @@ fn create_test_symbols() -> SymbolTable {
         start_byte: 0,
         end_byte: 250,
         range: None,
+        doc_comment: None,
     };
     table.add_function(func);
 

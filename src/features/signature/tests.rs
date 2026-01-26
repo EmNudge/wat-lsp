@@ -37,6 +37,7 @@ fn create_test_symbols() -> SymbolTable {
         start_byte: 0,
         end_byte: 200,
         range: None,
+        doc_comment: None,
     };
     table.add_function(func);
 
@@ -71,6 +72,7 @@ fn create_test_symbols() -> SymbolTable {
         start_byte: 0,
         end_byte: 300,
         range: None,
+        doc_comment: None,
     };
     table.add_function(multi_param_func);
 
@@ -268,6 +270,7 @@ fn test_format_function_signature_simple() {
         start_byte: 0,
         end_byte: 100,
         range: None,
+        doc_comment: None,
     };
 
     let sig = format_function_signature(&func);
@@ -293,6 +296,7 @@ fn test_format_function_signature_with_params() {
         start_byte: 0,
         end_byte: 100,
         range: None,
+        doc_comment: None,
     };
 
     let sig = format_function_signature(&func);
@@ -315,6 +319,7 @@ fn test_format_function_signature_with_results() {
         start_byte: 0,
         end_byte: 100,
         range: None,
+        doc_comment: None,
     };
 
     let sig = format_function_signature(&func);
@@ -342,6 +347,7 @@ fn test_format_function_signature_unnamed_params() {
         start_byte: 0,
         end_byte: 100,
         range: None,
+        doc_comment: None,
     };
 
     let sig = format_function_signature(&func);
