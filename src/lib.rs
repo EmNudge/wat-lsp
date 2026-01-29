@@ -38,7 +38,7 @@ pub use features::symbols;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub use features::hover;
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "wasm"))]
 pub use features::completion;
 
 #[cfg(feature = "native")]

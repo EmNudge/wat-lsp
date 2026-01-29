@@ -1,5 +1,6 @@
 use std::time::Instant;
 use tower_lsp::lsp_types::Position;
+use wat_lsp_rust::core::types::Position as CorePosition;
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
 use wat_lsp_rust::utils::apply_text_edit;
 use wat_lsp_rust::{diagnostics, parser};
@@ -315,7 +316,7 @@ fn test_15k_line_completion_latency() {
 
     // Parse document
     let mut parser = create_parser();
-    let tree = parser.parse(&document, None).expect("Parse failed");
+    let _tree = parser.parse(&document, None).expect("Parse failed");
     let symbols = parser::parse_document(&document).expect("Symbol extraction failed");
 
     println!("Document parsed: {} functions", symbols.functions.len());
@@ -324,26 +325,23 @@ fn test_15k_line_completion_latency() {
     println!("\n=== Testing Completion Performance ===");
 
     // Position 1: Early in document (line 50)
-    let pos1 = Position::new(50, 10);
+    let pos1 = CorePosition::new(50, 10);
     let start = Instant::now();
-    let _completions1 =
-        wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos1);
+    let _completions1 = wat_lsp_rust::completion::provide_completion(&document, &symbols, pos1);
     let time1 = start.elapsed();
     println!("Completion at line 50: {:?}", time1);
 
     // Position 2: Middle of document (line 7500)
-    let pos2 = Position::new(7500, 10);
+    let pos2 = CorePosition::new(7500, 10);
     let start = Instant::now();
-    let _completions2 =
-        wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos2);
+    let _completions2 = wat_lsp_rust::completion::provide_completion(&document, &symbols, pos2);
     let time2 = start.elapsed();
     println!("Completion at line 7500: {:?}", time2);
 
     // Position 3: Near end (line 14500)
-    let pos3 = Position::new(14500, 10);
+    let pos3 = CorePosition::new(14500, 10);
     let start = Instant::now();
-    let _completions3 =
-        wat_lsp_rust::completion::provide_completion(&document, &symbols, &tree, pos3);
+    let _completions3 = wat_lsp_rust::completion::provide_completion(&document, &symbols, pos3);
     let time3 = start.elapsed();
     println!("Completion at line 14500: {:?}", time3);
 

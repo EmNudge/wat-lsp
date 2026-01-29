@@ -1,14 +1,5 @@
 use super::*;
 use crate::parser;
-use crate::tree_sitter_bindings::create_parser;
-use tree_sitter::Tree;
-
-fn create_test_tree(document: &str) -> Tree {
-    let mut parser = create_parser();
-    parser
-        .parse(document, None)
-        .expect("Failed to parse test document")
-}
 
 fn create_test_symbols() -> SymbolTable {
     let mut table = SymbolTable::new();
@@ -69,7 +60,7 @@ fn test_number_constant_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 4);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     let completion = &completions[0];
@@ -86,7 +77,7 @@ fn test_float_constant_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 7);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     let completion = &completions[0];
@@ -103,7 +94,7 @@ fn test_underscore_number_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 12);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     let completion = &completions[0];
@@ -119,7 +110,7 @@ fn test_local_get_emmet() {
     let symbols = parser::parse_document(document).unwrap();
     let position = Position::new(1, 3); // After "l$"
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     // The emmet feature should trigger, even if specific local isn't found
     // This is because find_containing_function may not always work
     // Test passes if it doesn't crash
@@ -132,7 +123,7 @@ fn test_local_set_emmet() {
     let symbols = parser::parse_document(document).unwrap();
     let position = Position::new(1, 4); // After "l=$"
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     // The emmet feature should trigger
     // Test passes if it doesn't crash
     let _ = completions;
@@ -144,7 +135,7 @@ fn test_global_get_emmet() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 2);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     // Should suggest global variables
     assert!(completions.iter().any(|c| c.label.contains("counter")));
 }
@@ -155,7 +146,7 @@ fn test_global_set_emmet() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 3);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     // Should only suggest mutable globals
     assert!(completions.iter().any(|c| c.label.contains("counter")));
     assert!(completions.iter().any(|c| {
@@ -171,7 +162,7 @@ fn test_i32_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 4);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     // Should have arithmetic operations
@@ -187,7 +178,7 @@ fn test_f64_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 4);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     // Should have float-specific operations
@@ -202,7 +193,7 @@ fn test_local_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 6);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "get"));
@@ -216,7 +207,7 @@ fn test_global_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 7);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "get"));
@@ -229,7 +220,7 @@ fn test_memory_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 7);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "size"));
@@ -244,7 +235,7 @@ fn test_table_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 6);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "get"));
@@ -259,7 +250,7 @@ fn test_dollar_sign_function_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 6);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     // Should suggest functions
     assert!(completions.iter().any(|c| c.label.contains("add")));
 }
@@ -270,7 +261,7 @@ fn test_dollar_sign_global_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 12);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     // Should suggest globals
     assert!(completions.iter().any(|c| c.label.contains("counter")));
 }
@@ -282,7 +273,7 @@ fn test_dollar_sign_local_completion() {
     let symbols = parser::parse_document(document).unwrap();
     let position = Position::new(1, 13); // Position after the $ on line 2
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
 
     // Should suggest local parameters
     assert!(
@@ -298,7 +289,7 @@ fn test_jsdoc_tag_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 1);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(completions.iter().any(|c| c.label == "param"));
     assert!(completions.iter().any(|c| c.label == "result"));
     assert!(completions.iter().any(|c| c.label == "function"));
@@ -345,11 +336,11 @@ fn test_completion_item_kinds() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 4);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     // Type completions should have KEYWORD kind
     assert!(completions
         .iter()
-        .all(|c| c.kind == Some(CompletionItemKind::KEYWORD)));
+        .all(|c| c.kind == Some(CompletionItemKind::Keyword)));
 }
 
 #[test]
@@ -358,7 +349,7 @@ fn test_ref_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 4);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "null"));
@@ -375,7 +366,7 @@ fn test_struct_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 7);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "new"));
@@ -390,7 +381,7 @@ fn test_array_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 6);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "new"));
@@ -410,7 +401,7 @@ fn test_i31_instruction_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 4);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "get_s"));
@@ -423,7 +414,7 @@ fn test_br_on_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 6);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "null"));
@@ -438,7 +429,7 @@ fn test_any_convert_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 4);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "convert_extern"));
@@ -450,7 +441,7 @@ fn test_extern_convert_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 7);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(!completions.is_empty());
 
     assert!(completions.iter().any(|c| c.label == "convert_any"));
@@ -486,7 +477,7 @@ fn test_annotation_completion() {
     let symbols = create_test_symbols();
     let position = Position::new(0, 2);
 
-    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    let completions = provide_completion(document, &symbols, position);
     assert!(
         !completions.is_empty(),
         "Should have annotation completions"
@@ -533,7 +524,7 @@ fn test_annotation_completion_has_details() {
         );
         assert_eq!(
             completion.kind,
-            Some(CompletionItemKind::PROPERTY),
+            Some(CompletionItemKind::Property),
             "Annotation completions should be PROPERTY kind"
         );
     }

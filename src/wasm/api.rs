@@ -4,7 +4,10 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::core::types::{HoverResult, Position, Range};
+use crate::completion::provide_completion;
+use crate::core::types::{
+    CompletionItem, CompletionItemKind, HoverResult, InsertTextFormat, Position, Range,
+};
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
@@ -529,6 +532,88 @@ impl WatLSP {
 
         js_array.into()
     }
+
+    /// Provide code completion items at the given position
+    /// Returns an array of completion item objects
+    #[wasm_bindgen(js_name = provideCompletion)]
+    pub fn provide_completion(&self, line: u32, col: u32) -> JsValue {
+        let symbols = match &self.symbols {
+            Some(s) => s,
+            None => return js_sys::Array::new().into(),
+        };
+
+        let position = Position::new(line, col);
+        let completions = provide_completion(&self.document, symbols, position);
+
+        let js_array = js_sys::Array::new();
+        for item in completions {
+            js_array.push(&completion_item_to_js(&item));
+        }
+
+        js_array.into()
+    }
+}
+
+/// Convert a completion item to a JavaScript object
+fn completion_item_to_js(item: &CompletionItem) -> JsValue {
+    let obj = js_sys::Object::new();
+
+    js_sys::Reflect::set(&obj, &"label".into(), &item.label.clone().into()).ok();
+
+    if let Some(kind) = &item.kind {
+        // Map to Monaco CompletionItemKind values
+        let kind_value = match kind {
+            CompletionItemKind::Text => 1,
+            CompletionItemKind::Method => 0,
+            CompletionItemKind::Function => 1,
+            CompletionItemKind::Constructor => 2,
+            CompletionItemKind::Field => 3,
+            CompletionItemKind::Variable => 4,
+            CompletionItemKind::Class => 5,
+            CompletionItemKind::Interface => 7,
+            CompletionItemKind::Module => 8,
+            CompletionItemKind::Property => 9,
+            CompletionItemKind::Unit => 10,
+            CompletionItemKind::Value => 11,
+            CompletionItemKind::Enum => 12,
+            CompletionItemKind::Keyword => 13,
+            CompletionItemKind::Snippet => 14,
+            CompletionItemKind::Color => 15,
+            CompletionItemKind::File => 16,
+            CompletionItemKind::Reference => 17,
+            CompletionItemKind::Folder => 18,
+            CompletionItemKind::EnumMember => 19,
+            CompletionItemKind::Constant => 20,
+            CompletionItemKind::Struct => 21,
+            CompletionItemKind::Event => 22,
+            CompletionItemKind::Operator => 23,
+            CompletionItemKind::TypeParameter => 24,
+        };
+        js_sys::Reflect::set(&obj, &"kind".into(), &kind_value.into()).ok();
+    }
+
+    if let Some(detail) = &item.detail {
+        js_sys::Reflect::set(&obj, &"detail".into(), &detail.clone().into()).ok();
+    }
+
+    if let Some(insert_text) = &item.insert_text {
+        js_sys::Reflect::set(&obj, &"insertText".into(), &insert_text.clone().into()).ok();
+    }
+
+    if let Some(format) = &item.insert_text_format {
+        // 1 = PlainText, 2 = Snippet (matches Monaco InsertTextRule.InsertAsSnippet)
+        let rules = match format {
+            InsertTextFormat::PlainText => 0,
+            InsertTextFormat::Snippet => 4, // Monaco InsertTextRule.InsertAsSnippet
+        };
+        js_sys::Reflect::set(&obj, &"insertTextRules".into(), &rules.into()).ok();
+    }
+
+    if let Some(doc) = &item.documentation {
+        js_sys::Reflect::set(&obj, &"documentation".into(), &doc.clone().into()).ok();
+    }
+
+    obj.into()
 }
 
 /// Map a capture name from highlights.scm to (tokenType index, tokenModifiers bitmask)
