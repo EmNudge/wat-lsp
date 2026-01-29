@@ -1,7 +1,7 @@
 // Use modules from the library crate
 use wat_lsp_rust::{
-    completion, definition, diagnostics, document_symbols, hover, parser, references, signature,
-    symbols, tree_sitter_bindings, utils,
+    completion, definition, diagnostics, document_symbols, folding, hover, parser, references,
+    signature, symbols, tree_sitter_bindings, utils,
 };
 
 use dashmap::DashMap;
@@ -181,6 +181,7 @@ impl LanguageServer for Backend {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 ..Default::default()
             },
         })
@@ -575,6 +576,18 @@ impl LanguageServer for Backend {
                     .show_message(MessageType::WARNING, "No symbol found at position")
                     .await;
             }
+        }
+
+        Ok(None)
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let uri = params.text_document.uri.to_string();
+
+        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
+            return Ok(Some(folding::provide_folding_ranges_lsp(
+                &doc, &syms, &tree,
+            )));
         }
 
         Ok(None)
