@@ -8,6 +8,12 @@ use std::sync::OnceLock;
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
 
+/// Configuration for which checks to perform during tree walk
+struct DiagnosticConfig {
+    check_atomics: bool,  // Should warn about atomic ops on non-shared memory
+    check_memory64: bool, // Should emit hints about memory64 operations
+}
+
 /// Provide semantic diagnostics for undefined references and parameter count validation
 pub fn provide_semantic_diagnostics(
     tree: &Tree,
@@ -15,38 +21,122 @@ pub fn provide_semantic_diagnostics(
     symbols: &SymbolTable,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    walk_tree_for_undefined_references(tree.root_node(), source, symbols, &mut diagnostics);
-    walk_tree_for_parameter_counts(tree.root_node(), source, symbols, &mut diagnostics);
-    check_atomic_operations_shared_memory(tree.root_node(), source, symbols, &mut diagnostics);
-    check_memory64_operations(tree.root_node(), source, symbols, &mut diagnostics);
+
+    // Pre-compute configuration to avoid repeated checks during walk
+    let config = DiagnosticConfig {
+        // Only check atomics if there's no shared memory
+        check_atomics: !symbols.memories.is_empty() && !symbols.memories.iter().any(|m| m.shared),
+        // Only check memory64 if there are memory64 memories
+        check_memory64: symbols.memories.iter().any(|m| m.is_memory64),
+    };
+
+    // Single unified tree walk for all semantic checks
+    unified_tree_walk(tree.root_node(), source, symbols, &config, &mut diagnostics);
     diagnostics
 }
 
-/// Recursively walk the tree looking for undefined references
-fn walk_tree_for_undefined_references(
+/// Unified tree walk that performs all semantic checks in a single pass
+fn unified_tree_walk(
     node: Node,
     source: &str,
     symbols: &SymbolTable,
+    config: &DiagnosticConfig,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let kind = node.kind();
+
     // Special handling for catch_clause: first index is tag, second is label
-    if node.kind() == "catch_clause" {
+    if kind == "catch_clause" {
         check_catch_clause_references(&node, source, symbols, diagnostics);
         return;
     }
 
-    // Determine if this node is a reference instruction
-    let context = determine_instruction_context_at_node(&node, source);
+    // Check folded format instructions (expr1_plain)
+    // Must be checked BEFORE the reference context check because expr1_plain
+    // contains instr_plain as a child which would trigger early return
+    if kind == "expr1_plain" {
+        check_folded_instruction_parameter_count(&node, source, symbols, diagnostics);
 
+        let text = &source[node.byte_range()];
+        let first_token = text.split_whitespace().next().unwrap_or("");
+
+        // Check atomic operations in folded expressions
+        if config.check_atomics && is_atomic_memory_operation(first_token) {
+            let range = node_to_lsp_range(&node);
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(NumberOrString::String("atomic-non-shared".to_string())),
+                code_description: None,
+                source: Some("wat-lsp".to_string()),
+                message: format!(
+                    "Atomic operation '{}' requires shared memory. Declare memory with 'shared' keyword: (memory 1 1 shared)",
+                    first_token
+                ),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+
+        // Also check memory64 for folded expressions
+        if config.check_memory64 {
+            check_memory64_for_instruction(&node, source, symbols, first_token, diagnostics);
+        }
+        // Continue to recurse - nested expressions need to be checked
+    }
+
+    // Check for undefined references based on instruction context
+    // This handles instr_plain nodes and returns early after recursing into nested expr
+    let context = determine_instruction_context_at_node(&node, source);
     if context != InstructionContext::General {
-        // Check for undefined references in this instruction's direct indices only
         check_references(&node, source, symbols, diagnostics, &context);
+
+        // For instr_plain, also check atomic ops and memory64 (linear format)
+        if kind == "instr_plain" {
+            let text = &source[node.byte_range()];
+            let first_token = text.split_whitespace().next().unwrap_or("");
+
+            // Check atomic operations
+            if config.check_atomics && is_atomic_memory_operation(first_token) {
+                let range = node_to_lsp_range(&node);
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("atomic-non-shared".to_string())),
+                    code_description: None,
+                    source: Some("wat-lsp".to_string()),
+                    message: format!(
+                        "Atomic operation '{}' requires shared memory. Declare memory with 'shared' keyword: (memory 1 1 shared)",
+                        first_token
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
+
+            // Check memory64 operations for linear format only
+            // (folded format handled above in expr1_plain check)
+            let parent_is_expr1 = node
+                .parent()
+                .map(|p| p.kind() == "expr1_plain")
+                .unwrap_or(false);
+            if !parent_is_expr1 && config.check_memory64 {
+                check_memory64_for_instruction(&node, source, symbols, first_token, diagnostics);
+            }
+
+            // Check parameter count for linear format only
+            if !parent_is_expr1 {
+                check_instruction_parameter_count(&node, source, diagnostics);
+            }
+        }
+
         // Only recurse into nested expr nodes (which contain nested instructions)
-        // Don't recurse into other children to avoid double-checking
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "expr" {
-                walk_tree_for_undefined_references(child, source, symbols, diagnostics);
+                unified_tree_walk(child, source, symbols, config, diagnostics);
             }
         }
         return;
@@ -55,7 +145,87 @@ fn walk_tree_for_undefined_references(
     // Recursively check children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_tree_for_undefined_references(child, source, symbols, diagnostics);
+        unified_tree_walk(child, source, symbols, config, diagnostics);
+    }
+}
+
+/// Check memory64 hints for a specific instruction
+fn check_memory64_for_instruction(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    first_token: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Check memory.size and memory.grow
+    if first_token == "memory.size" || first_token == "memory.grow" {
+        if let Some(memory) = get_memory_for_instruction(node, source, symbols) {
+            if memory.is_memory64 {
+                let range = node_to_lsp_range(node);
+                let (return_type, param_info) = if first_token == "memory.size" {
+                    ("i64", "")
+                } else {
+                    ("i64", " and takes i64 delta parameter")
+                };
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(DiagnosticSeverity::HINT),
+                    code: Some(NumberOrString::String("memory64-type".to_string())),
+                    code_description: None,
+                    source: Some("wat-lsp".to_string()),
+                    message: format!(
+                        "'{}' on memory64 returns {}{}",
+                        first_token, return_type, param_info
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
+        }
+    }
+
+    // Check load/store operations
+    if is_memory_load_store(first_token) {
+        if let Some(memory) = get_memory_for_instruction(node, source, symbols) {
+            if memory.is_memory64 {
+                let range = node_to_lsp_range(node);
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(DiagnosticSeverity::HINT),
+                    code: Some(NumberOrString::String("memory64-address".to_string())),
+                    code_description: None,
+                    source: Some("wat-lsp".to_string()),
+                    message: format!("'{}' on memory64 requires i64 address operand", first_token),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
+        }
+    }
+
+    // Check bulk memory operations
+    if first_token == "memory.copy" || first_token == "memory.fill" {
+        if let Some(memory) = get_memory_for_instruction(node, source, symbols) {
+            if memory.is_memory64 {
+                let range = node_to_lsp_range(node);
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(DiagnosticSeverity::HINT),
+                    code: Some(NumberOrString::String("memory64-bulk".to_string())),
+                    code_description: None,
+                    source: Some("wat-lsp".to_string()),
+                    message: format!(
+                        "'{}' on memory64 requires i64 address operands",
+                        first_token
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
+        }
     }
 }
 
@@ -338,66 +508,6 @@ fn get_arity_map() -> &'static std::collections::HashMap<
     INSTRUCTION_ARITY.get_or_init(get_instruction_arity_map)
 }
 
-/// Check for atomic operations on non-shared memory
-/// Atomic operations require the memory to be declared as shared
-fn check_atomic_operations_shared_memory(
-    node: Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    // Skip if there are no memories (nothing to check against)
-    if symbols.memories.is_empty() {
-        return;
-    }
-
-    // Check if any memory is shared
-    let has_shared_memory = symbols.memories.iter().any(|m| m.shared);
-
-    // If there's shared memory, no need to warn
-    if has_shared_memory {
-        return;
-    }
-
-    // Walk the tree looking for atomic operations
-    walk_tree_for_atomic_ops(node, source, diagnostics);
-}
-
-/// Recursively find atomic operations and emit warnings
-fn walk_tree_for_atomic_ops(node: Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    // Only check instr_plain nodes (not expr1_plain which contains instr_plain as child)
-    // This avoids counting the same instruction twice
-    if node.kind() == "instr_plain" {
-        let text = &source[node.byte_range()];
-        let first_token = text.split_whitespace().next().unwrap_or("");
-
-        // Check if this is an atomic operation (but not atomic.fence which doesn't need shared memory)
-        if is_atomic_memory_operation(first_token) {
-            let range = node_to_lsp_range(&node);
-            diagnostics.push(Diagnostic {
-                range,
-                severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String("atomic-non-shared".to_string())),
-                code_description: None,
-                source: Some("wat-lsp".to_string()),
-                message: format!(
-                    "Atomic operation '{}' requires shared memory. Declare memory with 'shared' keyword: (memory 1 1 shared)",
-                    first_token
-                ),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
-        }
-    }
-
-    // Recursively check children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_tree_for_atomic_ops(child, source, diagnostics);
-    }
-}
-
 /// Check if an instruction is an atomic memory operation that requires shared memory
 fn is_atomic_memory_operation(instr: &str) -> bool {
     // atomic.fence doesn't require shared memory
@@ -407,33 +517,6 @@ fn is_atomic_memory_operation(instr: &str) -> bool {
 
     // All other atomic operations require shared memory
     instr.contains(".atomic.") || instr.starts_with("memory.atomic.")
-}
-
-/// Recursively walk the tree looking for instructions with incorrect parameter counts
-fn walk_tree_for_parameter_counts(
-    node: Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    // Validate linear format instructions
-    if node.kind() == "instr_plain" {
-        check_instruction_parameter_count(&node, source, diagnostics);
-        // Don't recurse - handled
-        return;
-    }
-
-    // Validate folded format instructions (e.g., (i32.add expr expr))
-    if node.kind() == "expr1_plain" {
-        check_folded_instruction_parameter_count(&node, source, symbols, diagnostics);
-        // Still recurse to check nested expressions
-    }
-
-    // Recursively check children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_tree_for_parameter_counts(child, source, symbols, diagnostics);
-    }
 }
 
 /// Check if an instruction has the correct number of parameters
@@ -822,121 +905,6 @@ fn create_operand_count_diagnostic(
         related_information: None,
         tags: None,
         data: None,
-    }
-}
-
-/// Check for memory64-specific semantic issues
-/// When a memory is declared with i64 address space (memory64), operations on it
-/// should use i64 addresses instead of i32
-fn check_memory64_operations(
-    node: Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    // Skip if there are no memory64 memories
-    let memory64_memories: Vec<_> = symbols.memories.iter().filter(|m| m.is_memory64).collect();
-
-    if memory64_memories.is_empty() {
-        return;
-    }
-
-    // Walk the tree looking for memory operations
-    walk_tree_for_memory64_ops(node, source, symbols, diagnostics);
-}
-
-/// Recursively find memory operations and validate memory64 usage
-fn walk_tree_for_memory64_ops(
-    node: Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if node.kind() == "instr_plain" || node.kind() == "expr1_plain" {
-        let text = &source[node.byte_range()];
-        let first_token = text.split_whitespace().next().unwrap_or("");
-
-        // Check memory.size and memory.grow - these have different return/param types for memory64
-        if first_token == "memory.size" || first_token == "memory.grow" {
-            if let Some(memory) = get_memory_for_instruction(&node, source, symbols) {
-                if memory.is_memory64 {
-                    let range = node_to_lsp_range(&node);
-                    let (return_type, param_info) = if first_token == "memory.size" {
-                        ("i64", "")
-                    } else {
-                        ("i64", " and takes i64 delta parameter")
-                    };
-                    diagnostics.push(Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::HINT),
-                        code: Some(NumberOrString::String("memory64-type".to_string())),
-                        code_description: None,
-                        source: Some("wat-lsp".to_string()),
-                        message: format!(
-                            "'{}' on memory64 returns {}{}",
-                            first_token, return_type, param_info
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    });
-                }
-            }
-        }
-
-        // Check load/store operations
-        if is_memory_load_store(first_token) {
-            if let Some(memory) = get_memory_for_instruction(&node, source, symbols) {
-                if memory.is_memory64 {
-                    let range = node_to_lsp_range(&node);
-                    diagnostics.push(Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::HINT),
-                        code: Some(NumberOrString::String("memory64-address".to_string())),
-                        code_description: None,
-                        source: Some("wat-lsp".to_string()),
-                        message: format!(
-                            "'{}' on memory64 requires i64 address operand",
-                            first_token
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    });
-                }
-            }
-        }
-
-        // Check bulk memory operations
-        if first_token == "memory.copy" || first_token == "memory.fill" {
-            // For memory.copy, check both source and dest memories
-            // For memory.fill, check the target memory
-            if let Some(memory) = get_memory_for_instruction(&node, source, symbols) {
-                if memory.is_memory64 {
-                    let range = node_to_lsp_range(&node);
-                    diagnostics.push(Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::HINT),
-                        code: Some(NumberOrString::String("memory64-bulk".to_string())),
-                        code_description: None,
-                        source: Some("wat-lsp".to_string()),
-                        message: format!(
-                            "'{}' on memory64 requires i64 address operands",
-                            first_token
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    });
-                }
-            }
-        }
-    }
-
-    // Recursively check children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_tree_for_memory64_ops(child, source, symbols, diagnostics);
     }
 }
 

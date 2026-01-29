@@ -50,35 +50,48 @@ impl Backend {
         Some((doc, syms, tree))
     }
 
-    async fn update_document(&self, uri: String, text: String) {
-        // Parse with tree-sitter and cache the tree
+    /// Parse and generate immediate diagnostics for a document.
+    /// Returns the parsed tree if successful.
+    /// This is shared between update_document and did_change to avoid duplication.
+    async fn parse_and_publish_immediate_diagnostics(
+        &self,
+        uri: &str,
+        text: &str,
+        old_tree: Option<&Tree>,
+    ) -> Option<Tree> {
         let mut parser = tree_sitter_bindings::create_parser();
-        if let Some(tree) = parser.parse(&text, None) {
-            // Generate IMMEDIATE syntax diagnostics only
-            let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, &text);
+        let tree = parser.parse(text, old_tree)?;
 
-            // Extract symbols from the document (needed for semantic diagnostics)
-            let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(&text) {
-                // Generate diagnostics first, then move symbol_table into the map to avoid clone
-                let diags = diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table);
-                self.symbol_map.insert(uri.clone(), symbol_table);
-                diags
-            } else {
-                vec![]
-            };
+        // Generate IMMEDIATE syntax diagnostics
+        let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, text);
 
-            // Merge syntax and semantic diagnostics
-            let mut combined = syntax_diagnostics;
-            combined.extend(semantic_diagnostics);
+        // Extract symbols and generate semantic diagnostics
+        let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(text) {
+            let diags = diagnostics::provide_semantic_diagnostics(&tree, text, &symbol_table);
+            self.symbol_map.insert(uri.to_string(), symbol_table);
+            diags
+        } else {
+            vec![]
+        };
 
-            // Publish immediate diagnostics
-            if let Ok(lsp_uri) = uri.parse() {
-                self.client
-                    .publish_diagnostics(lsp_uri, combined, None)
-                    .await;
-            }
+        // Merge and publish diagnostics
+        let mut combined = syntax_diagnostics;
+        combined.extend(semantic_diagnostics);
 
-            // Cache the parsed tree
+        if let Ok(lsp_uri) = uri.parse() {
+            self.client
+                .publish_diagnostics(lsp_uri, combined, None)
+                .await;
+        }
+
+        Some(tree)
+    }
+
+    async fn update_document(&self, uri: String, text: String) {
+        if let Some(tree) = self
+            .parse_and_publish_immediate_diagnostics(&uri, &text, None)
+            .await
+        {
             self.tree_map.insert(uri.clone(), tree);
         }
         self.document_map.insert(uri.clone(), text.clone());
@@ -266,34 +279,11 @@ impl LanguageServer for Backend {
             }
         }
 
-        // Reparse with the edited tree for better performance
-        let mut parser = tree_sitter_bindings::create_parser();
-        if let Some(tree) = parser.parse(&text, old_tree.as_ref()) {
-            // Generate IMMEDIATE syntax diagnostics
-            let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, &text);
-
-            // Extract symbols and generate semantic diagnostics
-            let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(&text) {
-                // Generate diagnostics first, then move symbol_table into the map to avoid clone
-                let diags = diagnostics::provide_semantic_diagnostics(&tree, &text, &symbol_table);
-                self.symbol_map.insert(uri.clone(), symbol_table);
-                diags
-            } else {
-                vec![]
-            };
-
-            // Merge syntax and semantic diagnostics
-            let mut combined = syntax_diagnostics;
-            combined.extend(semantic_diagnostics);
-
-            // Publish immediate diagnostics
-            if let Ok(lsp_uri) = uri.parse() {
-                self.client
-                    .publish_diagnostics(lsp_uri, combined, None)
-                    .await;
-            }
-
-            // Cache the new tree
+        // Reparse with the edited tree and publish diagnostics
+        if let Some(tree) = self
+            .parse_and_publish_immediate_diagnostics(&uri, &text, old_tree.as_ref())
+            .await
+        {
             self.tree_map.insert(uri.clone(), tree);
         }
 
