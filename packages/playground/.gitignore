@@ -2,4 +2,5 @@ dist/
 node_modules/
 public/wat.tmLanguage.json
 public/tree-sitter.wasm
+public/wat_lsp_rust_bg.wasm
 public/onig.wasm

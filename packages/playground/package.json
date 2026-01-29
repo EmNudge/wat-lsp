@@ -6,8 +6,9 @@
   "scripts": {
     "setup": "mkdir -p public && cp node_modules/@emnudge/wat-lsp/dist/wasm/wat_lsp_rust_bg.wasm public/ && cp node_modules/@emnudge/wat-lsp/dist/wasm/tree-sitter.wasm public/ && cp node_modules/vscode-oniguruma/release/onig.wasm public/ && cp ../vscode-extension/syntaxes/wat.tmLanguage.json public/",
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsgo && vite build",
     "preview": "vite preview",
+    "typecheck": "tsgo --noEmit",
     "test": "playwright test",
     "test:headed": "playwright test --headed"
   },
@@ -22,6 +23,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",
+    "@types/node": "^20.10.0",
+    "@typescript/native-preview": "^7.0.0-dev.20250129.1",
     "vite": "^5.0.0"
   }
 }

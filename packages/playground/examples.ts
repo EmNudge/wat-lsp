@@ -1,6 +1,16 @@
 // Example WAT programs for the playground
-export const watExamples = {
-  hello: `(module
+
+export interface ExampleDefinition {
+  id: string;
+  label: string;
+  code: string;
+}
+
+export const examples: ExampleDefinition[] = [
+  {
+    id: 'hello',
+    label: 'Hello World (Add)',
+    code: `(module
   ;; A simple module that adds two numbers
 
   ;; Export the add function
@@ -19,8 +29,11 @@ export const watExamples = {
   (func (export "answer") (result i32)
     (i32.const 42)))
 `,
-
-  factorial: `(module
+  },
+  {
+    id: 'factorial',
+    label: 'Factorial',
+    code: `(module
   ;; Compute factorial using recursion
 
   (func $factorial (export "factorial") (param $n i32) (result i32)
@@ -61,8 +74,11 @@ export const watExamples = {
 
     (local.get $result)))
 `,
-
-  fibonacci: `(module
+  },
+  {
+    id: 'fibonacci',
+    label: 'Fibonacci',
+    code: `(module
   ;; Compute Fibonacci numbers
 
   ;; Recursive Fibonacci (slow for large n)
@@ -112,8 +128,11 @@ export const watExamples = {
 
         (local.get $b)))))
 `,
-
-  memory: `(module
+  },
+  {
+    id: 'memory',
+    label: 'Memory Operations',
+    code: `(module
   ;; Memory operations example
   ;; Shows how to use linear memory
 
@@ -187,8 +206,11 @@ export const watExamples = {
   (func (export "mem_grow") (param $pages i32) (result i32)
     (memory.grow (local.get $pages))))
 `,
-
-  imports: `(module
+  },
+  {
+    id: 'imports',
+    label: 'Imports & Exports',
+    code: `(module
   ;; Example showing imports and exports
 
   ;; Import a logging function from the host
@@ -262,8 +284,11 @@ export const watExamples = {
     (call $log (local.get $result))
     (local.get $result)))
 `,
-
-  annotations: `(module
+  },
+  {
+    id: 'annotations',
+    label: 'Annotations',
+    code: `(module
   ;; Annotations Example
   ;; Demonstrates WebAssembly annotation syntax for metadata
   ;; Try hovering over @name, @producers, or @custom!
@@ -305,8 +330,11 @@ export const watExamples = {
       (i32.add (global.get $counter) (i32.const 1)))
     (global.get $counter)))
 `,
-
-  simd: `(module
+  },
+  {
+    id: 'simd',
+    label: 'SIMD',
+    code: `(module
   ;; SIMD (Single Instruction Multiple Data) Example
   ;; Demonstrates v128 operations for parallel computation
 
@@ -383,5 +411,16 @@ export const watExamples = {
       (i32.add
         (i32x4.extract_lane 2 (local.get $vec))
         (i32x4.extract_lane 3 (local.get $vec))))))
-`
-};
+`,
+  },
+];
+
+// Helper to get example by ID
+export function getExampleById(id: string): ExampleDefinition | undefined {
+  return examples.find((ex) => ex.id === id);
+}
+
+// Helper to get the default example
+export function getDefaultExample(): ExampleDefinition {
+  return examples[0];
+}
