@@ -9,6 +9,10 @@ pub mod completion;
 #[cfg(feature = "native")]
 pub mod definition;
 
+// Document symbols - provides outline/symbol tree for a document
+#[cfg(feature = "native")]
+pub mod document_symbols;
+
 // Hover - provides hover documentation
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod hover;

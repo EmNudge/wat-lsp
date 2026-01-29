@@ -45,6 +45,9 @@ pub use features::completion;
 pub use features::definition;
 
 #[cfg(feature = "native")]
+pub use features::document_symbols;
+
+#[cfg(feature = "native")]
 pub use features::references;
 
 #[cfg(feature = "native")]

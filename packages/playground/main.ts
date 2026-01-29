@@ -69,6 +69,24 @@ interface WatLSP {
   getSymbolTableHTML(): string;
   getSemanticTokensLegend(): monaco.languages.SemanticTokensLegend;
   provideSemanticTokens(): Uint32Array;
+  provideDocumentSymbols?(): Array<{
+    name: string;
+    detail?: string;
+    kind: number;
+    range: {
+      start: { line: number; character: number };
+      end: { line: number; character: number };
+    };
+    children?: Array<{
+      name: string;
+      detail?: string;
+      kind: number;
+      range: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+      };
+    }>;
+  }>;
 }
 
 // Global state
@@ -100,6 +118,7 @@ let elements: {
   diagnosticsView: HTMLElement;
   symbolTableView: HTMLElement;
   hoverDebug: HTMLElement;
+  outlineView: HTMLElement;
   testLine: HTMLInputElement;
   testCol: HTMLInputElement;
   testHoverBtn: HTMLButtonElement;
@@ -415,6 +434,57 @@ async function initMonaco(): Promise<void> {
     },
   });
 
+  // Register document symbol provider for outline view
+  monaco.languages.registerDocumentSymbolProvider('wat', {
+    provideDocumentSymbols: (
+      model: monaco.editor.ITextModel
+    ): monaco.languages.ProviderResult<monaco.languages.DocumentSymbol[]> => {
+      if (!watLSP || !watLSP.ready || !watLSP.provideDocumentSymbols) return [];
+
+      // Parse latest content
+      watLSP.parse(model.getValue());
+
+      const symbols = watLSP.provideDocumentSymbols();
+      if (!symbols || symbols.length === 0) return [];
+
+      // Convert to Monaco DocumentSymbol format (recursively handle children)
+      function convertSymbol(sym: {
+        name: string;
+        detail?: string;
+        kind: number;
+        range: { start: { line: number; character: number }; end: { line: number; character: number } };
+        children?: Array<{ name: string; detail?: string; kind: number; range: { start: { line: number; character: number }; end: { line: number; character: number } } }>;
+      }): monaco.languages.DocumentSymbol {
+        const range = sym.range
+          ? new monaco.Range(
+              sym.range.start.line + 1,
+              sym.range.start.character + 1,
+              sym.range.end.line + 1,
+              sym.range.end.character + 1
+            )
+          : new monaco.Range(1, 1, 1, 1);
+
+        const result: monaco.languages.DocumentSymbol = {
+          name: sym.name,
+          detail: sym.detail || '',
+          kind: sym.kind as monaco.languages.SymbolKind,
+          range: range,
+          selectionRange: range,
+          children: [],
+          tags: [],
+        };
+
+        if (sym.children && sym.children.length > 0) {
+          result.children = sym.children.map(convertSymbol);
+        }
+
+        return result;
+      }
+
+      return symbols.map(convertSymbol);
+    },
+  });
+
   // Define custom theme matching VS Code Dark+ colors
   monaco.editor.defineTheme('wat-dark', {
     base: 'vs-dark',
@@ -555,6 +625,70 @@ function updateDiagnostics(): void {
 function updateLSPDebugPanel(): void {
   if (!watLSP) return;
   elements.symbolTableView.innerHTML = watLSP.getSymbolTableHTML();
+  updateOutlineView();
+}
+
+// Symbol kind to icon/class mapping
+const kindInfo: Record<number, { icon: string; class: string; label: string }> = {
+  11: { icon: 'I', class: 'interface', label: 'type' },     // Interface (type)
+  12: { icon: 'F', class: 'function', label: 'function' },   // Function
+  13: { icon: 'V', class: 'variable', label: 'variable' },   // Variable
+  14: { icon: 'C', class: 'constant', label: 'global' },     // Constant (global)
+  15: { icon: 'S', class: 'string', label: 'data' },         // String (data)
+  18: { icon: 'A', class: 'array', label: 'table/elem' },    // Array (table/elem)
+  19: { icon: 'M', class: 'object', label: 'memory' },       // Object (memory)
+  20: { icon: 'L', class: 'key', label: 'label' },           // Key (block label)
+  24: { icon: 'T', class: 'event', label: 'tag' },           // Event (tag)
+};
+
+// Update outline view with document symbols
+function updateOutlineView(): void {
+  if (!elements.outlineView || !watLSP || !watLSP.ready || !watLSP.provideDocumentSymbols) {
+    if (elements.outlineView) {
+      elements.outlineView.innerHTML = '<p class="placeholder">No symbols found</p>';
+    }
+    return;
+  }
+
+  const symbols = watLSP.provideDocumentSymbols();
+  if (!symbols || symbols.length === 0) {
+    elements.outlineView.innerHTML = '<p class="placeholder">No symbols found</p>';
+    return;
+  }
+
+  interface SymbolInfo {
+    name: string;
+    detail?: string;
+    kind: number;
+    range?: { start: { line: number; character: number }; end: { line: number; character: number } };
+    children?: SymbolInfo[];
+  }
+
+  function renderSymbol(sym: SymbolInfo, depth: number = 0): string {
+    const info = kindInfo[sym.kind] || { icon: '?', class: 'unknown', label: 'unknown' };
+    const line = sym.range?.start?.line ?? 0;
+    const hasChildren = sym.children && sym.children.length > 0;
+
+    let html = `
+      <div class="outline-item depth-${depth}" onclick="goToLine(${line + 1}, 1)" title="${info.label}: ${sym.name}${sym.detail ? ' - ' + sym.detail : ''}">
+        <span class="outline-icon ${info.class}">${info.icon}</span>
+        <span class="outline-name">${escapeHtml(sym.name)}</span>
+        ${sym.detail ? `<span class="outline-detail">${escapeHtml(sym.detail)}</span>` : ''}
+      </div>
+    `;
+
+    if (hasChildren) {
+      html += `<div class="outline-children">`;
+      for (const child of sym.children!) {
+        html += renderSymbol(child, depth + 1);
+      }
+      html += `</div>`;
+    }
+
+    return html;
+  }
+
+  elements.outlineView.innerHTML = symbols.map((sym) => renderSymbol(sym)).join('');
 }
 
 // Update hover debug info
@@ -648,10 +782,11 @@ async function initLSP(): Promise<boolean> {
   setLSPStatus(false, 'Loading WASM LSP...');
 
   try {
-    watLSP = await createWatLSP({
+    const lsp = await createWatLSP({
       treeSitterWasmPath: '/tree-sitter.wasm',
       watLspWasmPath: '/wat_lsp_rust_bg.wasm',
     });
+    watLSP = lsp as WatLSP;
 
     setLSPStatus(true, 'LSP Ready (Rust WASM)');
     consoleOutput.info('LSP initialized with @emnudge/wat-lsp');
@@ -661,13 +796,13 @@ async function initLSP(): Promise<boolean> {
 
     registerSemanticTokensProvider();
 
-    if (editor) {
+    if (editor && watLSP) {
       watLSP.parse(editor.getValue());
       updateDiagnostics();
       updateLSPDebugPanel();
     }
 
-    (window as unknown as { watLSP: WatLSP }).watLSP = watLSP;
+    (window as unknown as { watLSP: WatLSP | null }).watLSP = watLSP;
 
     return true;
   } catch (error) {
@@ -1110,6 +1245,7 @@ function initElements(): void {
     diagnosticsView: document.getElementById('diagnostics-view')!,
     symbolTableView: document.getElementById('symbol-table-view')!,
     hoverDebug: document.getElementById('hover-debug')!,
+    outlineView: document.getElementById('outline-view')!,
     testLine: document.getElementById('test-line') as HTMLInputElement,
     testCol: document.getElementById('test-col') as HTMLInputElement,
     testHoverBtn: document.getElementById(

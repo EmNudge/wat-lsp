@@ -590,6 +590,113 @@ footer {
   word-break: break-word;
 }
 
+/* Outline view */
+.outline-tree {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.85rem;
+}
+
+.outline-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background-color 0.1s ease;
+}
+
+.outline-item:hover {
+  background: var(--bg-hover);
+}
+
+.outline-item.depth-1 {
+  padding-left: 24px;
+}
+
+.outline-item.depth-2 {
+  padding-left: 40px;
+}
+
+.outline-item.depth-3 {
+  padding-left: 56px;
+}
+
+.outline-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.outline-icon.function {
+  background: var(--accent-purple);
+  color: white;
+}
+
+.outline-icon.variable {
+  background: var(--accent-blue);
+  color: white;
+}
+
+.outline-icon.constant {
+  background: var(--accent-green);
+  color: white;
+}
+
+.outline-icon.interface {
+  background: var(--accent-orange);
+  color: white;
+}
+
+.outline-icon.string {
+  background: #ce9178;
+  color: white;
+}
+
+.outline-icon.array {
+  background: #569cd6;
+  color: white;
+}
+
+.outline-icon.object {
+  background: #4ec9b0;
+  color: white;
+}
+
+.outline-icon.key {
+  background: #9cdcfe;
+  color: #1e1e1e;
+}
+
+.outline-icon.event {
+  background: #c586c0;
+  color: white;
+}
+
+.outline-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.outline-detail {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline-children {
+  border-left: 1px solid var(--border-color);
+  margin-left: 12px;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .main-content {
