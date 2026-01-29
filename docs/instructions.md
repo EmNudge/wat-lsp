@@ -5424,3 +5424,291 @@ Example:
   (i32.const 10))      ;; number of elements to copy
 ```
 ---
+
+## f32x4.relaxed_madd
+Relaxed fused multiply-add: `a * b + c` for each f32 lane. The result may be computed with or without intermediate rounding, depending on the host platform. This allows efficient use of native FMA instructions where available.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Compute a * b + c with relaxed precision
+(f32x4.relaxed_madd
+  (local.get $a)   ;; multiplicand
+  (local.get $b)   ;; multiplier
+  (local.get $c))  ;; addend
+```
+---
+
+## f32x4.relaxed_nmadd
+Relaxed fused negative multiply-add: `-a * b + c` for each f32 lane. The result may be computed with or without intermediate rounding, depending on the host platform.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Compute -a * b + c with relaxed precision
+(f32x4.relaxed_nmadd
+  (local.get $a)   ;; multiplicand (negated)
+  (local.get $b)   ;; multiplier
+  (local.get $c))  ;; addend
+```
+---
+
+## f64x2.relaxed_madd
+Relaxed fused multiply-add: `a * b + c` for each f64 lane. The result may be computed with or without intermediate rounding, depending on the host platform. This allows efficient use of native FMA instructions where available.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Compute a * b + c with relaxed precision (64-bit floats)
+(f64x2.relaxed_madd
+  (local.get $a)   ;; multiplicand
+  (local.get $b)   ;; multiplier
+  (local.get $c))  ;; addend
+```
+---
+
+## f64x2.relaxed_nmadd
+Relaxed fused negative multiply-add: `-a * b + c` for each f64 lane. The result may be computed with or without intermediate rounding, depending on the host platform.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Compute -a * b + c with relaxed precision (64-bit floats)
+(f64x2.relaxed_nmadd
+  (local.get $a)   ;; multiplicand (negated)
+  (local.get $b)   ;; multiplier
+  (local.get $c))  ;; addend
+```
+---
+
+## i8x16.relaxed_swizzle
+Relaxed byte swizzle operation. Selects bytes from the first vector using indices from the second vector. Unlike i8x16.swizzle, the behavior for out-of-range indices (>= 16) is implementation-defined rather than returning 0.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Swizzle bytes with relaxed out-of-range behavior
+(i8x16.relaxed_swizzle
+  (local.get $data)     ;; source bytes
+  (local.get $indices)) ;; lane indices (0-15 for defined behavior)
+```
+---
+
+## i32x4.relaxed_trunc_f32x4_s
+Relaxed truncation of f32x4 to signed i32x4. Unlike i32x4.trunc_sat_f32x4_s, the behavior for NaN and out-of-range values is implementation-defined, allowing more efficient code generation.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+;; Truncate f32 lanes to signed i32 with relaxed semantics
+(i32x4.relaxed_trunc_f32x4_s (local.get $floats))
+```
+---
+
+## i32x4.relaxed_trunc_f32x4_u
+Relaxed truncation of f32x4 to unsigned i32x4. Unlike i32x4.trunc_sat_f32x4_u, the behavior for NaN and out-of-range values is implementation-defined, allowing more efficient code generation.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+;; Truncate f32 lanes to unsigned i32 with relaxed semantics
+(i32x4.relaxed_trunc_f32x4_u (local.get $floats))
+```
+---
+
+## i32x4.relaxed_trunc_f64x2_s_zero
+Relaxed truncation of f64x2 to signed i32x4 with zero extension. Converts two f64 lanes to i32 and sets the upper two i32 lanes to zero. Behavior for NaN and out-of-range values is implementation-defined.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+;; Truncate two f64 lanes to signed i32, upper lanes zeroed
+(i32x4.relaxed_trunc_f64x2_s_zero (local.get $doubles))
+```
+---
+
+## i32x4.relaxed_trunc_f64x2_u_zero
+Relaxed truncation of f64x2 to unsigned i32x4 with zero extension. Converts two f64 lanes to u32 and sets the upper two i32 lanes to zero. Behavior for NaN and out-of-range values is implementation-defined.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+;; Truncate two f64 lanes to unsigned i32, upper lanes zeroed
+(i32x4.relaxed_trunc_f64x2_u_zero (local.get $doubles))
+```
+---
+
+## f32x4.relaxed_min
+Relaxed lane-wise minimum of two f32x4 vectors. Unlike f32x4.min, the behavior for NaN inputs is implementation-defined, allowing use of efficient native min instructions.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Relaxed minimum with implementation-defined NaN handling
+(f32x4.relaxed_min (local.get $a) (local.get $b))
+```
+---
+
+## f32x4.relaxed_max
+Relaxed lane-wise maximum of two f32x4 vectors. Unlike f32x4.max, the behavior for NaN inputs is implementation-defined, allowing use of efficient native max instructions.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Relaxed maximum with implementation-defined NaN handling
+(f32x4.relaxed_max (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.relaxed_min
+Relaxed lane-wise minimum of two f64x2 vectors. Unlike f64x2.min, the behavior for NaN inputs is implementation-defined, allowing use of efficient native min instructions.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Relaxed minimum with implementation-defined NaN handling (64-bit)
+(f64x2.relaxed_min (local.get $a) (local.get $b))
+```
+---
+
+## f64x2.relaxed_max
+Relaxed lane-wise maximum of two f64x2 vectors. Unlike f64x2.max, the behavior for NaN inputs is implementation-defined, allowing use of efficient native max instructions.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Relaxed maximum with implementation-defined NaN handling (64-bit)
+(f64x2.relaxed_max (local.get $a) (local.get $b))
+```
+---
+
+## i8x16.relaxed_laneselect
+Relaxed lane select for i8x16 vectors. Selects bytes from the first or second vector based on the mask. The exact selection semantics (whether it uses the high bit or all bits of each mask byte) is implementation-defined.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Select bytes based on mask with relaxed semantics
+(i8x16.relaxed_laneselect
+  (local.get $a)      ;; selected when mask bit is set
+  (local.get $b)      ;; selected when mask bit is clear
+  (local.get $mask))  ;; selection mask
+```
+---
+
+## i16x8.relaxed_laneselect
+Relaxed lane select for i16x8 vectors. Selects 16-bit lanes from the first or second vector based on the mask. The exact selection semantics is implementation-defined.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Select 16-bit lanes based on mask with relaxed semantics
+(i16x8.relaxed_laneselect
+  (local.get $a)      ;; selected when mask bit is set
+  (local.get $b)      ;; selected when mask bit is clear
+  (local.get $mask))  ;; selection mask
+```
+---
+
+## i32x4.relaxed_laneselect
+Relaxed lane select for i32x4 vectors. Selects 32-bit lanes from the first or second vector based on the mask. The exact selection semantics is implementation-defined.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Select 32-bit lanes based on mask with relaxed semantics
+(i32x4.relaxed_laneselect
+  (local.get $a)      ;; selected when mask bit is set
+  (local.get $b)      ;; selected when mask bit is clear
+  (local.get $mask))  ;; selection mask
+```
+---
+
+## i64x2.relaxed_laneselect
+Relaxed lane select for i64x2 vectors. Selects 64-bit lanes from the first or second vector based on the mask. The exact selection semantics is implementation-defined.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Select 64-bit lanes based on mask with relaxed semantics
+(i64x2.relaxed_laneselect
+  (local.get $a)      ;; selected when mask bit is set
+  (local.get $b)      ;; selected when mask bit is clear
+  (local.get $mask))  ;; selection mask
+```
+---
+
+## i16x8.relaxed_q15mulr_s
+Relaxed Q15 rounding multiply returning high half for signed i16x8 lanes. Computes `(a * b + 0x4000) >> 15` with implementation-defined overflow behavior. Useful for fixed-point DSP operations.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Q15 fixed-point multiply with relaxed overflow
+(i16x8.relaxed_q15mulr_s (local.get $a) (local.get $b))
+```
+---
+
+## i16x8.relaxed_dot_i8x16_i7x16_s
+Relaxed dot product of i8x16 and i7x16 (7-bit unsigned) vectors, producing i16x8 results. Multiplies pairs of 8-bit values and sums adjacent products. The behavior when the second operand has the high bit set is implementation-defined.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+;; Dot product: sum of pairwise products of 8-bit lanes
+(i16x8.relaxed_dot_i8x16_i7x16_s
+  (local.get $a)   ;; signed 8-bit values
+  (local.get $b))  ;; 7-bit unsigned values (high bit behavior undefined)
+```
+---
+
+## i32x4.relaxed_dot_i8x16_i7x16_add_s
+Relaxed dot product of i8x16 and i7x16 vectors with i32x4 accumulation. Multiplies pairs of 8-bit values, sums groups of four products, and adds to the accumulator. The behavior when the second operand has the high bit set is implementation-defined.
+
+Signature: `(param v128 v128 v128) (result v128)`
+
+Example:
+```wat
+;; Dot product with accumulation: useful for neural network inference
+(i32x4.relaxed_dot_i8x16_i7x16_add_s
+  (local.get $a)     ;; signed 8-bit values
+  (local.get $b)     ;; 7-bit unsigned values
+  (local.get $acc))  ;; i32x4 accumulator
+```
+---
+
+## func.bind
+Partially apply a function, binding some arguments to produce a new function reference with a reduced signature. This is part of the typed function references proposal and allows creating closures over function arguments.
+
+Signature: `(param funcref args...) (result funcref)`
+
+Example:
+```wat
+(type $binary (func (param i32 i32) (result i32)))
+(type $unary (func (param i32) (result i32)))
+
+;; Bind the first argument of an add function to create an "add 5" function
+(func.bind (type $unary)
+  (ref.func $add)      ;; function to partially apply
+  (i32.const 5))       ;; bound first argument
+```
+---

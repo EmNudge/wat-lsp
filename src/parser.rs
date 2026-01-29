@@ -370,12 +370,9 @@ fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Opti
         if child.kind() == "memory_type" {
             let mut type_cursor = child.walk();
             for type_child in child.children(&mut type_cursor) {
-                // Check for i64 keyword indicating memory64
-                if type_child.kind() == "value_type" {
-                    let type_text = node_text(&type_child, source);
-                    if type_text == "i64" {
-                        is_memory64 = true;
-                    }
+                // Check for memory64_type (i64 keyword) indicating memory64
+                if type_child.kind() == "memory64_type" {
+                    is_memory64 = true;
                 }
                 if type_child.kind() == "limits" {
                     let mut limits_cursor = type_child.walk();
@@ -1697,32 +1694,23 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
 
     let mut cursor = memory_node.walk();
     for child in memory_node.children(&mut cursor) {
-        // Check for i64 keyword at memory node level indicating memory64
-        if child.kind() == "value_type" {
-            let type_text = node_text(&child, source);
-            if type_text == "i64" {
-                is_memory64 = true;
-            }
+        // Check for memory64_type (i64 keyword) at memory node level
+        if child.kind() == "memory64_type" {
+            is_memory64 = true;
         }
         if child.kind() == "memory_fields_type" {
             let mut fields_cursor = child.walk();
             for fields_child in child.children(&mut fields_cursor) {
-                // Check for i64 keyword in memory_fields_type
-                if fields_child.kind() == "value_type" {
-                    let type_text = node_text(&fields_child, source);
-                    if type_text == "i64" {
-                        is_memory64 = true;
-                    }
+                // Check for memory64_type in memory_fields_type
+                if fields_child.kind() == "memory64_type" {
+                    is_memory64 = true;
                 }
                 if fields_child.kind() == "memory_type" {
                     let mut type_cursor = fields_child.walk();
                     for type_child in fields_child.children(&mut type_cursor) {
-                        // Check for i64 keyword in memory_type
-                        if type_child.kind() == "value_type" {
-                            let type_text = node_text(&type_child, source);
-                            if type_text == "i64" {
-                                is_memory64 = true;
-                            }
+                        // Check for memory64_type in memory_type
+                        if type_child.kind() == "memory64_type" {
+                            is_memory64 = true;
                         }
                         if type_child.kind() == "limits" {
                             extract_limits(
@@ -1739,12 +1727,9 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
             // Handle direct memory_type (without wrapper)
             let mut type_cursor = child.walk();
             for type_child in child.children(&mut type_cursor) {
-                // Check for i64 keyword in memory_type
-                if type_child.kind() == "value_type" {
-                    let type_text = node_text(&type_child, source);
-                    if type_text == "i64" {
-                        is_memory64 = true;
-                    }
+                // Check for memory64_type in memory_type
+                if type_child.kind() == "memory64_type" {
+                    is_memory64 = true;
                 }
                 if type_child.kind() == "limits" {
                     extract_limits(&type_child, &mut min_limit, &mut max_limit, &mut shared);

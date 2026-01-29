@@ -714,7 +714,12 @@ module.exports = grammar({
 
     memory_fields_type: $ => seq(optional($.import), $.memory_type),
 
-    memory_type: $ => $.limits,
+    // proposal: memory64
+    // Memory type can optionally include 'i64' keyword for 64-bit addressing
+    memory_type: $ => seq(optional($.memory64_type), $.limits),
+
+    // proposal: memory64
+    memory64_type: $ => "i64",
 
     memory_use: $ => seq("(", "memory", $.index, ")"),
 
