@@ -53,6 +53,9 @@ pub use features::references;
 #[cfg(feature = "native")]
 pub use features::signature;
 
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub use features::folding;
+
 // Diagnostics (native only)
 #[cfg(feature = "native")]
 pub mod diagnostics;

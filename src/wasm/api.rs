@@ -5,6 +5,7 @@
 use wasm_bindgen::prelude::*;
 
 use crate::core::types::{HoverResult, Position, Range};
+use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
 use crate::symbol_lookup::{find_symbol_definition_range, IndexContext};
@@ -490,6 +491,43 @@ impl WatLSP {
         js_sys::Reflect::set(&obj, &"tokenModifiers".into(), &modifiers).ok();
 
         obj.into()
+    }
+
+    /// Provide folding ranges for the current document
+    /// Returns an array of folding range objects with startLine, endLine, and kind
+    #[wasm_bindgen(js_name = provideFoldingRanges)]
+    pub fn provide_folding_ranges(&self) -> JsValue {
+        let symbols = match &self.symbols {
+            Some(s) => s,
+            None => return js_sys::Array::new().into(),
+        };
+
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return js_sys::Array::new().into(),
+        };
+
+        let ranges = provide_folding_ranges(&self.document, symbols, tree);
+
+        let js_array = js_sys::Array::new();
+        for range in ranges {
+            let obj = js_sys::Object::new();
+            js_sys::Reflect::set(&obj, &"startLine".into(), &range.start_line.into()).ok();
+            js_sys::Reflect::set(&obj, &"endLine".into(), &range.end_line.into()).ok();
+            js_sys::Reflect::set(
+                &obj,
+                &"kind".into(),
+                &match range.kind {
+                    FoldingRangeKind::Region => "region",
+                    FoldingRangeKind::Comment => "comment",
+                }
+                .into(),
+            )
+            .ok();
+            js_array.push(&obj);
+        }
+
+        js_array.into()
     }
 }
 

@@ -13,6 +13,10 @@ pub mod definition;
 #[cfg(feature = "native")]
 pub mod document_symbols;
 
+// Folding - code folding ranges
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod folding;
+
 // Hover - provides hover documentation
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod hover;
