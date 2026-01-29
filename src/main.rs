@@ -1,7 +1,7 @@
 // Use modules from the library crate
 use wat_lsp_rust::{
-    completion, definition, diagnostics, hover, parser, references, signature, symbols,
-    tree_sitter_bindings, utils,
+    completion, definition, diagnostics, document_symbols, hover, parser, references, signature,
+    symbols, tree_sitter_bindings, utils,
 };
 
 use dashmap::DashMap;
@@ -176,6 +176,7 @@ impl LanguageServer for Backend {
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -425,6 +426,20 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::WARNING, "No document/symbols/tree found")
             .await;
+
+        Ok(None)
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri.to_string();
+
+        if let Some(syms) = self.symbol_map.get(&uri) {
+            let symbols = document_symbols::provide_document_symbols(&syms);
+            return Ok(Some(DocumentSymbolResponse::Nested(symbols)));
+        }
 
         Ok(None)
     }

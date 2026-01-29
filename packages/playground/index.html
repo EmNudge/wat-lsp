@@ -42,6 +42,7 @@
         <div class="resize-handle"></div>
         <div class="tabs">
           <button class="tab active" data-tab="module-info">Module Info</button>
+          <button class="tab" data-tab="outline">Outline</button>
           <button class="tab" data-tab="console">Console</button>
           <button class="tab" data-tab="hex">Hex View</button>
           <button class="tab" data-tab="lsp-debug">LSP Debug</button>
@@ -71,6 +72,12 @@
                 <button id="call-fn-btn" class="btn btn-small" disabled>Call</button>
               </div>
               <div id="fn-result" class="fn-result"></div>
+            </div>
+          </div>
+
+          <div id="outline" class="tab-pane">
+            <div id="outline-view" class="outline-tree">
+              <p class="placeholder">Parse document to see outline</p>
             </div>
           </div>
 
@@ -116,7 +123,7 @@
     </div>
 
     <footer>
-      <span>WAT LSP Playground - Hover, Go to Definition (F12), Find References (Shift+F12)</span>
+      <span>WAT LSP Playground - Hover, Go to Definition (F12), Find References (Shift+F12), Outline</span>
       <span id="status">Ready</span>
     </footer>
   </div>
