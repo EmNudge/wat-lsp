@@ -196,8 +196,7 @@ fn test_parse_shared_memory() {
 
 #[test]
 fn test_parse_memory64() {
-    // Note: The tree-sitter grammar may parse this differently
-    // This test verifies the parser handles the syntax
+    // Test that memory64 (i64-addressed memory) is properly detected
     let wat = r#"
 (module
   (memory $mem64 i64 1)
@@ -205,9 +204,14 @@ fn test_parse_memory64() {
 "#;
 
     let symbols = parse_document(wat).unwrap();
-    // Just verify parsing doesn't fail
-    // Memory64 detection depends on grammar support
-    let _ = symbols.memories.len(); // Parsing succeeded
+    assert_eq!(symbols.memories.len(), 1, "Should have 1 memory");
+
+    let mem = &symbols.memories[0];
+    eprintln!(
+        "Memory name: {:?}, is_memory64: {}",
+        mem.name, mem.is_memory64
+    );
+    assert!(mem.is_memory64, "Memory should be detected as memory64");
 }
 
 #[test]
@@ -311,4 +315,161 @@ fn test_subtype_final_parsing() {
     // Both types should exist
     assert!(symbols.get_type_by_name("$base").is_some());
     assert!(symbols.get_type_by_name("$derived").is_some());
+}
+
+// =============================================================================
+// Multi-Memory Tests
+// =============================================================================
+
+#[test]
+fn test_parse_multi_memory_definitions() {
+    let wat = r#"
+(module
+  (memory $mem0 1)
+  (memory $mem1 2 4)
+  (memory $mem2 1 1)
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.memories.len(), 3, "Should have 3 memories");
+
+    // Verify each memory was parsed
+    assert!(symbols.get_memory_by_name("$mem0").is_some());
+    assert!(symbols.get_memory_by_name("$mem1").is_some());
+    assert!(symbols.get_memory_by_name("$mem2").is_some());
+}
+
+#[test]
+fn test_parse_multi_memory_with_import() {
+    let wat = r#"
+(module
+  (import "env" "external_mem" (memory $imported 1))
+  (memory $local 2)
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(
+        symbols.memories.len(),
+        2,
+        "Should have 2 memories (1 imported, 1 local)"
+    );
+
+    assert!(symbols.get_memory_by_name("$imported").is_some());
+    assert!(symbols.get_memory_by_name("$local").is_some());
+}
+
+#[test]
+fn test_parse_memory_size_with_index() {
+    // Test that memory.size with explicit index parses correctly
+    let wat = r#"
+(module
+  (memory $mem0 1)
+  (memory $mem1 1)
+  (func $test (result i32)
+    (memory.size $mem1)
+  )
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.memories.len(), 2);
+    assert_eq!(symbols.functions.len(), 1);
+}
+
+#[test]
+fn test_parse_memory_grow_with_index() {
+    // Test that memory.grow with explicit index parses correctly
+    let wat = r#"
+(module
+  (memory $mem0 1)
+  (memory $mem1 1)
+  (func $test (result i32)
+    (memory.grow $mem1 (i32.const 1))
+  )
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.memories.len(), 2);
+    assert_eq!(symbols.functions.len(), 1);
+}
+
+#[test]
+fn test_parse_memory_copy_between_memories() {
+    // Test memory.copy with two memory indices (dest, src)
+    let wat = r#"
+(module
+  (memory $mem0 1)
+  (memory $mem1 1)
+  (func $test
+    (memory.copy $mem0 $mem1
+      (i32.const 0)
+      (i32.const 0)
+      (i32.const 10))
+  )
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.memories.len(), 2);
+    assert_eq!(symbols.functions.len(), 1);
+}
+
+#[test]
+fn test_parse_memory_fill_with_index() {
+    // Test memory.fill with explicit memory index
+    let wat = r#"
+(module
+  (memory $mem0 1)
+  (memory $mem1 1)
+  (func $test
+    (memory.fill $mem1
+      (i32.const 0)
+      (i32.const 0)
+      (i32.const 10))
+  )
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.memories.len(), 2);
+    assert_eq!(symbols.functions.len(), 1);
+}
+
+#[test]
+fn test_parse_data_segment_with_memory_index() {
+    // Test data segments targeting specific memories
+    let wat = r#"
+(module
+  (memory $mem0 1)
+  (memory $mem1 1)
+  (data $d0 (memory $mem0) (i32.const 0) "hello")
+  (data $d1 (memory $mem1) (i32.const 0) "world")
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.memories.len(), 2);
+    assert_eq!(symbols.data_segments.len(), 2);
+}
+
+#[test]
+fn test_parse_load_store_with_memory_index() {
+    // Test load/store operations with explicit memory index
+    let wat = r#"
+(module
+  (memory $mem0 1)
+  (memory $mem1 1)
+  (func $test (param $addr i32) (result i32)
+    (i32.store $mem1 (local.get $addr) (i32.const 42))
+    (i32.load $mem0 (local.get $addr))
+  )
+)
+"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(symbols.memories.len(), 2);
+    assert_eq!(symbols.functions.len(), 1);
 }

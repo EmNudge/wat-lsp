@@ -18,6 +18,7 @@ pub fn provide_semantic_diagnostics(
     walk_tree_for_undefined_references(tree.root_node(), source, symbols, &mut diagnostics);
     walk_tree_for_parameter_counts(tree.root_node(), source, symbols, &mut diagnostics);
     check_atomic_operations_shared_memory(tree.root_node(), source, symbols, &mut diagnostics);
+    check_memory64_operations(tree.root_node(), source, symbols, &mut diagnostics);
     diagnostics
 }
 
@@ -822,6 +823,176 @@ fn create_operand_count_diagnostic(
         tags: None,
         data: None,
     }
+}
+
+/// Check for memory64-specific semantic issues
+/// When a memory is declared with i64 address space (memory64), operations on it
+/// should use i64 addresses instead of i32
+fn check_memory64_operations(
+    node: Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Skip if there are no memory64 memories
+    let memory64_memories: Vec<_> = symbols.memories.iter().filter(|m| m.is_memory64).collect();
+
+    if memory64_memories.is_empty() {
+        return;
+    }
+
+    // Walk the tree looking for memory operations
+    walk_tree_for_memory64_ops(node, source, symbols, diagnostics);
+}
+
+/// Recursively find memory operations and validate memory64 usage
+fn walk_tree_for_memory64_ops(
+    node: Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if node.kind() == "instr_plain" || node.kind() == "expr1_plain" {
+        let text = &source[node.byte_range()];
+        let first_token = text.split_whitespace().next().unwrap_or("");
+
+        // Check memory.size and memory.grow - these have different return/param types for memory64
+        if first_token == "memory.size" || first_token == "memory.grow" {
+            if let Some(memory) = get_memory_for_instruction(&node, source, symbols) {
+                if memory.is_memory64 {
+                    let range = node_to_lsp_range(&node);
+                    let (return_type, param_info) = if first_token == "memory.size" {
+                        ("i64", "")
+                    } else {
+                        ("i64", " and takes i64 delta parameter")
+                    };
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::HINT),
+                        code: Some(NumberOrString::String("memory64-type".to_string())),
+                        code_description: None,
+                        source: Some("wat-lsp".to_string()),
+                        message: format!(
+                            "'{}' on memory64 returns {}{}",
+                            first_token, return_type, param_info
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    });
+                }
+            }
+        }
+
+        // Check load/store operations
+        if is_memory_load_store(first_token) {
+            if let Some(memory) = get_memory_for_instruction(&node, source, symbols) {
+                if memory.is_memory64 {
+                    let range = node_to_lsp_range(&node);
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::HINT),
+                        code: Some(NumberOrString::String("memory64-address".to_string())),
+                        code_description: None,
+                        source: Some("wat-lsp".to_string()),
+                        message: format!(
+                            "'{}' on memory64 requires i64 address operand",
+                            first_token
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    });
+                }
+            }
+        }
+
+        // Check bulk memory operations
+        if first_token == "memory.copy" || first_token == "memory.fill" {
+            // For memory.copy, check both source and dest memories
+            // For memory.fill, check the target memory
+            if let Some(memory) = get_memory_for_instruction(&node, source, symbols) {
+                if memory.is_memory64 {
+                    let range = node_to_lsp_range(&node);
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::HINT),
+                        code: Some(NumberOrString::String("memory64-bulk".to_string())),
+                        code_description: None,
+                        source: Some("wat-lsp".to_string()),
+                        message: format!(
+                            "'{}' on memory64 requires i64 address operands",
+                            first_token
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Recursively check children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_tree_for_memory64_ops(child, source, symbols, diagnostics);
+    }
+}
+
+/// Get the memory referenced by an instruction
+/// Returns the memory at index 0 if no explicit memory index is specified
+fn get_memory_for_instruction<'a>(
+    node: &Node,
+    source: &str,
+    symbols: &'a SymbolTable,
+) -> Option<&'a crate::symbols::Memory> {
+    // Try to find an explicit memory index in the instruction
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" {
+            let index_text = &source[child.byte_range()];
+            // Check if it's a named memory reference
+            if index_text.starts_with('$') {
+                return symbols.get_memory_by_name(index_text);
+            }
+            // Check if it's a numeric index
+            if let Ok(idx) = index_text.parse::<usize>() {
+                return symbols.memories.get(idx);
+            }
+        }
+    }
+
+    // Default to memory 0
+    symbols.memories.first()
+}
+
+/// Check if an instruction is a memory load or store operation
+fn is_memory_load_store(instr: &str) -> bool {
+    // Load operations
+    if instr.ends_with(".load")
+        || instr.contains(".load8_")
+        || instr.contains(".load16_")
+        || instr.contains(".load32_")
+    {
+        return true;
+    }
+
+    // Store operations
+    if instr.ends_with(".store")
+        || instr.contains(".store8")
+        || instr.contains(".store16")
+        || instr.contains(".store32")
+    {
+        return true;
+    }
+
+    // SIMD load/store operations
+    if instr.starts_with("v128.load") || instr.starts_with("v128.store") {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -1785,5 +1956,149 @@ mod tests {
         assert!(!is_atomic_memory_operation("i32.load"));
         assert!(!is_atomic_memory_operation("i64.store"));
         assert!(!is_atomic_memory_operation("memory.grow"));
+    }
+
+    // Memory64 tests
+
+    #[test]
+    fn test_memory64_no_hints_for_regular_memory() {
+        // Regular memory should not produce memory64 hints
+        let document = r#"(module
+  (memory 1)
+
+  (func $test (result i32)
+    (memory.size)
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory64_hints: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("memory64-type".to_string())))
+            .collect();
+        assert_eq!(
+            memory64_hints.len(),
+            0,
+            "Regular memory should not produce memory64 hints"
+        );
+    }
+
+    #[test]
+    fn test_memory64_hints_for_memory_size() {
+        // memory64 memory should produce hints for memory.size
+        let document = r#"(module
+  (memory i64 1)
+
+  (func $test (result i64)
+    (memory.size)
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        // Verify memory64 was detected
+        assert!(
+            symbols
+                .memories
+                .first()
+                .map(|m| m.is_memory64)
+                .unwrap_or(false),
+            "Memory should be detected as memory64"
+        );
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory64_hints: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("memory64"))
+            .collect();
+        assert!(
+            !memory64_hints.is_empty(),
+            "memory64 should produce hints for memory.size"
+        );
+    }
+
+    #[test]
+    fn test_memory64_hints_for_memory_grow() {
+        // memory64 memory should produce hints for memory.grow
+        let document = r#"(module
+  (memory i64 1)
+
+  (func $test (result i64)
+    (memory.grow (i64.const 1))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory64_hints: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("memory64") && d.message.contains("memory.grow"))
+            .collect();
+        assert!(
+            !memory64_hints.is_empty(),
+            "memory64 should produce hints for memory.grow"
+        );
+    }
+
+    #[test]
+    fn test_memory64_hints_for_load_store() {
+        // memory64 memory should produce hints for load/store
+        let document = r#"(module
+  (memory i64 1)
+
+  (func $test (result i32)
+    (i32.load (i64.const 0))
+  )
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory64_hints: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("i64 address"))
+            .collect();
+        assert!(
+            !memory64_hints.is_empty(),
+            "memory64 should produce hints about i64 address for load"
+        );
+    }
+
+    #[test]
+    fn test_is_memory_load_store() {
+        // Test the helper function
+        assert!(is_memory_load_store("i32.load"));
+        assert!(is_memory_load_store("i64.load"));
+        assert!(is_memory_load_store("f32.load"));
+        assert!(is_memory_load_store("f64.load"));
+        assert!(is_memory_load_store("i32.load8_s"));
+        assert!(is_memory_load_store("i32.load8_u"));
+        assert!(is_memory_load_store("i32.load16_s"));
+        assert!(is_memory_load_store("i64.load32_u"));
+
+        assert!(is_memory_load_store("i32.store"));
+        assert!(is_memory_load_store("i64.store"));
+        assert!(is_memory_load_store("f32.store"));
+        assert!(is_memory_load_store("i32.store8"));
+        assert!(is_memory_load_store("i64.store32"));
+
+        assert!(is_memory_load_store("v128.load"));
+        assert!(is_memory_load_store("v128.store"));
+
+        // Non-memory operations should not match
+        assert!(!is_memory_load_store("i32.add"));
+        assert!(!is_memory_load_store("memory.size"));
+        assert!(!is_memory_load_store("local.get"));
     }
 }

@@ -331,9 +331,25 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("i64.store16", InstructionArity::mem_store());
     map.insert("i64.store32", InstructionArity::mem_store());
 
-    // Memory management (nullary in linear, but memory.grow consumes 1 in folded)
-    map.insert("memory.size", InstructionArity::nullary());
-    map.insert("memory.grow", InstructionArity::unary_op());
+    // Memory management - support optional memory index (multi-memory proposal)
+    map.insert(
+        "memory.size",
+        InstructionArity {
+            min_params: 0,
+            max_params: 1,
+            param_description: "optional memory index",
+            operand_mode: OperandMode::Fixed(0), // produces i32 (current size)
+        },
+    );
+    map.insert(
+        "memory.grow",
+        InstructionArity {
+            min_params: 0,
+            max_params: 1,
+            param_description: "optional memory index",
+            operand_mode: OperandMode::Fixed(1), // consumes delta, produces i32 (previous size or -1)
+        },
+    );
 
     // WasmGC Instructions
     // Structs
@@ -442,10 +458,34 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
         InstructionArity::exact(2, "type and elem index", 4),
     ); // array, dst, src, len
 
-    // Bulk memory operations
-    map.insert("memory.copy", InstructionArity::exact(0, "", 3)); // dest, src, len
-    map.insert("memory.fill", InstructionArity::exact(0, "", 3)); // dest, val, len
-    map.insert("memory.init", InstructionArity::exact(1, "data index", 3)); // dest, offset, len
+    // Bulk memory operations - support optional memory indices (multi-memory proposal)
+    map.insert(
+        "memory.copy",
+        InstructionArity {
+            min_params: 0,
+            max_params: 2,
+            param_description: "optional dest and src memory indices",
+            operand_mode: OperandMode::Fixed(3), // dest offset, src offset, len
+        },
+    );
+    map.insert(
+        "memory.fill",
+        InstructionArity {
+            min_params: 0,
+            max_params: 1,
+            param_description: "optional memory index",
+            operand_mode: OperandMode::Fixed(3), // dest, val, len
+        },
+    );
+    map.insert(
+        "memory.init",
+        InstructionArity {
+            min_params: 1,
+            max_params: 2,
+            param_description: "data index and optional memory index",
+            operand_mode: OperandMode::Fixed(3), // dest, offset, len
+        },
+    );
     map.insert("data.drop", InstructionArity::exact(1, "data index", 0));
 
     // Table operations
