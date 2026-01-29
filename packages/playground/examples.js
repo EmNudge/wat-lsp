@@ -263,6 +263,49 @@ export const watExamples = {
     (local.get $result)))
 `,
 
+  annotations: `(module
+  ;; Annotations Example
+  ;; Demonstrates WebAssembly annotation syntax for metadata
+  ;; Try hovering over @name, @producers, or @custom!
+
+  ;; Module-level annotations
+  (@name "math_utils")
+  (@producers
+    (language "WAT" "1.0")
+    (processed-by "wat-lsp" "0.1.0"))
+  (@custom "version" "1.2.3")
+
+  (memory (export "memory") 1)
+
+  ;; Function with name annotation for debugging
+  (func $add (@name "integer_addition")
+    (export "add")
+    (param $a i32) (param $b i32) (result i32)
+    (i32.add (local.get $a) (local.get $b)))
+
+  ;; Another annotated function
+  (func $factorial (@name "factorial_recursive")
+    (export "factorial")
+    (param $n i32) (result i32)
+    (if (result i32) (i32.le_s (local.get $n) (i32.const 1))
+      (then (i32.const 1))
+      (else
+        (i32.mul
+          (local.get $n)
+          (call $factorial
+            (i32.sub (local.get $n) (i32.const 1)))))))
+
+  ;; Global with descriptive name
+  (global $counter (mut i32) (i32.const 0))
+
+  (func $increment (@name "increment_counter")
+    (export "increment")
+    (result i32)
+    (global.set $counter
+      (i32.add (global.get $counter) (i32.const 1)))
+    (global.get $counter)))
+`,
+
   simd: `(module
   ;; SIMD (Single Instruction Multiple Data) Example
   ;; Demonstrates v128 operations for parallel computation

@@ -5,7 +5,8 @@ use crate::symbol_lookup::{
 use crate::symbols::*;
 use crate::utils::{
     determine_context_with_fallback, find_containing_function, format_function_signature,
-    get_line_at_position, get_word_at_position, is_inside_comment, InstructionContext, STRUCT_OPS,
+    get_line_at_position, get_word_at_position, is_inside_comment, node_at_position,
+    InstructionContext, STRUCT_OPS,
 };
 
 // Use the appropriate tree-sitter types based on feature
@@ -33,6 +34,11 @@ pub fn provide_hover_core(
     // Don't provide hover for content inside comments
     if is_inside_comment(tree, document, position) {
         return None;
+    }
+
+    // Check if inside an annotation
+    if let Some(hover) = provide_annotation_hover(tree, document, position) {
+        return Some(hover);
     }
 
     let word = get_word_at_position(document, position)?;
@@ -546,6 +552,88 @@ fn format_elem_hover(word: &str, elem: &ElemSegment) -> HoverResult {
         "```wat\n(elem {} func {})\n```",
         word, funcs_preview
     ))
+}
+
+/// Provide hover for annotations (e.g., @name, @producers, @custom)
+fn provide_annotation_hover(
+    tree: &Tree,
+    document: &str,
+    position: Position,
+) -> Option<HoverResult> {
+    let node = node_at_position(tree, document, position)?;
+
+    // Walk up the tree to find if we're inside an annotation
+    let mut current = node;
+    loop {
+        #[cfg(feature = "native")]
+        let kind = current.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = current.kind();
+
+        if kind == "annotation" {
+            // Found annotation - extract the name from identifier_pattern child
+            #[cfg(feature = "native")]
+            let mut cursor = current.walk();
+            #[cfg(feature = "native")]
+            let children_iter = current.children(&mut cursor);
+
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let children_iter = (0..current.child_count()).filter_map(|i| current.child(i));
+
+            for child in children_iter {
+                #[cfg(feature = "native")]
+                let child_kind = child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let child_kind = child.kind();
+
+                if child_kind == "identifier_pattern" {
+                    #[cfg(feature = "native")]
+                    let start = child.start_byte();
+                    #[cfg(feature = "native")]
+                    let end = child.end_byte();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let start = child.start_byte();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let end = child.end_byte();
+
+                    let annotation_name = &document[start..end];
+                    return Some(format_annotation_hover(annotation_name));
+                }
+            }
+            return None;
+        }
+
+        #[cfg(feature = "native")]
+        {
+            if let Some(parent) = current.parent() {
+                current = parent;
+            } else {
+                break;
+            }
+        }
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        {
+            if let Some(parent) = current.parent() {
+                current = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
+/// Format hover content for an annotation
+fn format_annotation_hover(name: &str) -> HoverResult {
+    if let Some(doc) = crate::docs::get_annotation_doc(name) {
+        HoverResult::new(format!("**@{}** (annotation)\n\n{}", name, doc))
+    } else {
+        HoverResult::new(format!(
+            "**@{}** (custom annotation)\n\nNo documentation available for this annotation.",
+            name
+        ))
+    }
 }
 
 fn get_instruction_doc(word: &str) -> Option<String> {

@@ -1,7 +1,8 @@
-//! Documentation access module for WAT instruction documentation
+//! Documentation access module for WAT instruction and annotation documentation
 //!
-//! This module provides programmatic access to the instruction documentation
-//! that is generated at build time from `docs/instructions.md`.
+//! This module provides programmatic access to the instruction and annotation
+//! documentation that is generated at build time from `docs/instructions.md`
+//! and `docs/annotations.md`.
 
 use std::collections::HashMap;
 
@@ -12,7 +13,13 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/instruction_docs.rs"));
 }
 
+mod generated_annotations {
+    // Include the auto-generated annotation documentation
+    include!(concat!(env!("OUT_DIR"), "/annotation_docs.rs"));
+}
+
 use generated::INSTRUCTION_DOCS;
+use generated_annotations::ANNOTATION_DOCS;
 
 /// Get documentation for a specific instruction
 pub fn get_instruction_doc(name: &str) -> Option<&'static str> {
@@ -56,6 +63,27 @@ pub fn search_instruction_names(pattern: &str) -> Vec<&'static str> {
         .collect();
     results.sort();
     results
+}
+
+// ============================================================================
+// Annotation Documentation
+// ============================================================================
+
+/// Get documentation for a specific annotation (without @ prefix)
+pub fn get_annotation_doc(name: &str) -> Option<&'static str> {
+    ANNOTATION_DOCS.get(name).copied()
+}
+
+/// Get all annotation names
+pub fn annotation_names() -> Vec<&'static str> {
+    let mut names: Vec<_> = ANNOTATION_DOCS.keys().copied().collect();
+    names.sort();
+    names
+}
+
+/// Get all annotation documentation as a reference to the underlying HashMap
+pub fn all_annotations() -> &'static HashMap<&'static str, &'static str> {
+    &ANNOTATION_DOCS
 }
 
 #[cfg(test)]
@@ -208,5 +236,49 @@ mod tests {
         assert!(results.contains(&"i64.add"));
         assert!(results.contains(&"f32.add"));
         assert!(results.contains(&"f64.add"));
+    }
+
+    // Annotation documentation tests
+
+    #[test]
+    fn test_get_annotation_doc_exists() {
+        // Test that common annotations have documentation
+        assert!(get_annotation_doc("name").is_some());
+        assert!(get_annotation_doc("producers").is_some());
+        assert!(get_annotation_doc("custom").is_some());
+    }
+
+    #[test]
+    fn test_get_annotation_doc_not_exists() {
+        // Test that non-existent annotations return None
+        assert!(get_annotation_doc("not_an_annotation").is_none());
+        assert!(get_annotation_doc("").is_none());
+    }
+
+    #[test]
+    fn test_get_annotation_doc_content() {
+        // Test that documentation contains expected content
+        let doc = get_annotation_doc("name").unwrap();
+        assert!(doc.to_lowercase().contains("name"));
+    }
+
+    #[test]
+    fn test_annotation_names_not_empty() {
+        let names = annotation_names();
+        assert!(!names.is_empty());
+    }
+
+    #[test]
+    fn test_annotation_names_sorted() {
+        let names = annotation_names();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+    }
+
+    #[test]
+    fn test_all_annotations_not_empty() {
+        let all = all_annotations();
+        assert!(!all.is_empty());
     }
 }

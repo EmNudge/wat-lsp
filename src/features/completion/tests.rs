@@ -479,3 +479,62 @@ fn test_new_keyword_completions() {
     assert!(keywords.iter().any(|c| c.label == "throw"));
     assert!(keywords.iter().any(|c| c.label == "try_table"));
 }
+
+#[test]
+fn test_annotation_completion() {
+    let document = "(@";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 2);
+
+    let completions = provide_completion(document, &symbols, &create_test_tree(document), position);
+    assert!(
+        !completions.is_empty(),
+        "Should have annotation completions"
+    );
+
+    // Check that common annotations are present
+    assert!(
+        completions.iter().any(|c| c.label == "name"),
+        "Should have @name completion"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "producers"),
+        "Should have @producers completion"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "custom"),
+        "Should have @custom completion"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "interface"),
+        "Should have @interface completion"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "use"),
+        "Should have @use completion"
+    );
+}
+
+#[test]
+fn test_annotation_completion_has_details() {
+    let annotations = get_annotation_completions();
+
+    // All annotation completions should have detail and documentation
+    for completion in &annotations {
+        assert!(
+            completion.detail.is_some(),
+            "Annotation {} should have detail",
+            completion.label
+        );
+        assert!(
+            completion.documentation.is_some(),
+            "Annotation {} should have documentation",
+            completion.label
+        );
+        assert_eq!(
+            completion.kind,
+            Some(CompletionItemKind::PROPERTY),
+            "Annotation completions should be PROPERTY kind"
+        );
+    }
+}
