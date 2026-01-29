@@ -1,4 +1,10 @@
 (module
+  ;; Module metadata annotations
+  (@name "example_module")
+  (@producers
+    (language "WAT" "1.0")
+    (processed-by "wat-lsp" "0.1.0"))
+
   ;; Global counter variable
   (global $counter (mut i32) (i32.const 0))
 
@@ -6,7 +12,7 @@
   (memory $mem 1)
 
   ;; Add two numbers function
-  (func $add (param $a i32) (param $b i32) (result i32)
+  (func $add (@name "addition") (param $a i32) (param $b i32) (result i32)
     (local $result i32)
 
     ;; Add the parameters

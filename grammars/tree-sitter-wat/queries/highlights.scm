@@ -205,5 +205,13 @@
 (index
   (identifier) @variable)
 
+; Annotations (@name, @producers, @custom, etc.)
+(annotation
+  (identifier_pattern) @attribute)
+(annotation_part
+  (identifier) @variable)
+(annotation_part
+  (string) @string)
+
 ; Brackets - let TextMate handle these
 ; ["(" ")"] @punctuation.bracket

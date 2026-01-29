@@ -155,6 +155,12 @@ pub fn provide_completion(
         return completions;
     }
 
+    // Annotation completion (e.g., (@ -> @name, @producers, @custom)
+    if line_prefix.ends_with("(@") {
+        completions.extend(get_annotation_completions());
+        return completions;
+    }
+
     // Type-prefixed instruction completion (e.g., i32., f64.)
     if line_prefix.ends_with("i32.") {
         completions.extend(get_type_completions("i32"));
@@ -603,3 +609,72 @@ fn make_completion(label: &str, detail: &str) -> CompletionItem {
 
 static NUMBER_CONST_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap());
+
+/// Get completions for annotation names
+fn get_annotation_completions() -> Vec<CompletionItem> {
+    vec![
+        CompletionItem {
+            label: "name".to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some("Custom name section".to_string()),
+            documentation: Some(Documentation::String(
+                "Provides human-readable names for debugging".to_string(),
+            )),
+            ..Default::default()
+        },
+        CompletionItem {
+            label: "producers".to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some("Producer metadata".to_string()),
+            documentation: Some(Documentation::String(
+                "Records information about tools that produced this module".to_string(),
+            )),
+            ..Default::default()
+        },
+        CompletionItem {
+            label: "custom".to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some("Custom section".to_string()),
+            documentation: Some(Documentation::String(
+                "Embed arbitrary data in the WebAssembly binary".to_string(),
+            )),
+            ..Default::default()
+        },
+        CompletionItem {
+            label: "interface".to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some("Component model interface".to_string()),
+            documentation: Some(Documentation::String(
+                "Used in WebAssembly Component Model".to_string(),
+            )),
+            ..Default::default()
+        },
+        CompletionItem {
+            label: "use".to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some("Component model import".to_string()),
+            documentation: Some(Documentation::String(
+                "References types from other interfaces".to_string(),
+            )),
+            ..Default::default()
+        },
+        CompletionItem {
+            label: "metadata.code.branch_hint".to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some("Branch hint metadata".to_string()),
+            documentation: Some(Documentation::String(
+                "Provides hints for branch optimization".to_string(),
+            )),
+            ..Default::default()
+        },
+        CompletionItem {
+            label: "dylink".to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some("Dynamic linking metadata".to_string()),
+            documentation: Some(Documentation::String(
+                "Contains information for dynamic linking".to_string(),
+            )),
+            ..Default::default()
+        },
+    ]
+}

@@ -532,3 +532,77 @@ fn test_hover_includes_doc_comment() {
         "Hover should include function signature"
     );
 }
+
+#[test]
+fn test_hover_on_annotation_name() {
+    let document = r#"(module (@name "test_module"))"#;
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    let position = Position::new(0, 11); // On "name"
+
+    let hover = provide_hover(document, &symbols, &tree, position.into());
+    assert!(hover.is_some(), "Expected hover on annotation name");
+
+    if let Some(h) = hover {
+        match h.contents {
+            HoverContents::Markup(content) => {
+                assert!(
+                    content.value.contains("@name"),
+                    "Hover should contain annotation name"
+                );
+                assert!(
+                    content.value.contains("annotation"),
+                    "Hover should indicate it's an annotation"
+                );
+            }
+            _ => panic!("Expected Markup content"),
+        }
+    }
+}
+
+#[test]
+fn test_hover_on_annotation_producers() {
+    let document = r#"(module (@producers (language "Rust")))"#;
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    let position = Position::new(0, 12); // On "producers"
+
+    let hover = provide_hover(document, &symbols, &tree, position.into());
+    assert!(hover.is_some(), "Expected hover on producers annotation");
+
+    if let Some(h) = hover {
+        match h.contents {
+            HoverContents::Markup(content) => {
+                assert!(
+                    content.value.contains("@producers"),
+                    "Hover should contain annotation name"
+                );
+            }
+            _ => panic!("Expected Markup content"),
+        }
+    }
+}
+
+#[test]
+fn test_hover_on_custom_annotation() {
+    // Test an unknown annotation that should show "custom annotation" fallback
+    let document = r#"(module (@unknown_annotation "value"))"#;
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    let position = Position::new(0, 15); // On "unknown_annotation"
+
+    let hover = provide_hover(document, &symbols, &tree, position.into());
+    assert!(hover.is_some(), "Expected hover on custom annotation");
+
+    if let Some(h) = hover {
+        match h.contents {
+            HoverContents::Markup(content) => {
+                assert!(
+                    content.value.contains("custom annotation"),
+                    "Hover should indicate it's a custom annotation"
+                );
+            }
+            _ => panic!("Expected Markup content"),
+        }
+    }
+}
