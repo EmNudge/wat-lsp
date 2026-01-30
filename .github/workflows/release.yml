@@ -70,30 +70,21 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Determined version: $VERSION"
 
-      - name: Check if release exists for current commit
+      - name: Check if release exists for version
         id: check-release
         run: |
-          CURRENT_SHA=$(git rev-parse HEAD)
-          echo "Current commit: $CURRENT_SHA"
+          VERSION="${{ steps.determine-version.outputs.version }}"
+          echo "Checking for existing release: $VERSION"
 
-          # Check all releases to find one pointing to this commit
-          EXISTING_TAG=""
-          for tag in $(gh release list --json tagName -q '.[].tagName'); do
-            TAG_SHA=$(git rev-parse "$tag" 2>/dev/null || echo "")
-            if [ "$TAG_SHA" == "$CURRENT_SHA" ]; then
-              EXISTING_TAG="$tag"
-              break
-            fi
-          done
-
-          if [ -n "$EXISTING_TAG" ]; then
+          # Check if a release with this version tag already exists
+          if gh release view "$VERSION" &>/dev/null; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "tag=$EXISTING_TAG" >> $GITHUB_OUTPUT
-            echo "Found existing release $EXISTING_TAG for current commit"
+            echo "tag=$VERSION" >> $GITHUB_OUTPUT
+            echo "Found existing release $VERSION"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "tag=" >> $GITHUB_OUTPUT
-            echo "No existing release found for current commit"
+            echo "No existing release found for $VERSION"
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -110,7 +101,7 @@ jobs:
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "Publish target: $TARGET"
 
-  # Build binaries only if no release exists for current commit and target includes vscode
+  # Build binaries only if no release exists for the specified version and target includes vscode
   build-release:
     name: Build Release
     needs: prepare-release
@@ -346,6 +337,17 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
+      - name: Generate tree-sitter parser
+        working-directory: grammars/tree-sitter-wat
+        run: tree-sitter generate
+
+      - name: Build tree-sitter WASM
+        working-directory: grammars/tree-sitter-wat
+        run: tree-sitter build --wasm
 
       - name: Update package.json version
         working-directory: packages/wat-lsp
