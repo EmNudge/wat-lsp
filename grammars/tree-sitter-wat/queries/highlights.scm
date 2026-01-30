@@ -34,6 +34,8 @@
   "nullref"
   "nullfuncref"
   "nullexternref"
+  "exnref"
+  "nullexnref"
 ] @type.builtin
 
 ; Heap type keywords (used in ref.null, ref.cast, etc.)
@@ -53,11 +55,16 @@
   "br_table"
   "call_indirect"
   "try"
+  "try_table"
   "catch"
+  "catch_ref"
   "catch_all"
+  "catch_all_ref"
   "throw"
+  "throw_ref"
   "rethrow"
   "delegate"
+  "do"
 ] @keyword.control
 
 ; Module structure keywords
