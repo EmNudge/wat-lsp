@@ -124,7 +124,7 @@ module.exports = grammar({
 
     expr: $ => seq("(", $.expr1, ")"),
 
-    expr1: $ => choice($.expr1_plain, $.expr1_call, $.expr1_block, $.expr1_loop, $.expr1_if, $.expr1_try_table),
+    expr1: $ => choice($.expr1_plain, $.expr1_call, $.expr1_block, $.expr1_loop, $.expr1_if, $.expr1_try_table, $.expr1_try),
 
     expr1_block: $ =>
       seq(
@@ -164,6 +164,31 @@ module.exports = grammar({
         repeat($.catch_clause),
         optional($.instr_list),
       ),
+
+    // Folded form of legacy try: (try (result ...) (do ...) (catch ...) ...)
+    expr1_try: $ =>
+      seq(
+        "try",
+        optional($.identifier),
+        seq(optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results)),
+        $.try_do_clause,
+        choice(
+          // Either catch clauses (with optional catch_all)
+          seq(repeat1($.try_catch_clause), optional($.try_catch_all_clause)),
+          // Or just catch_all
+          $.try_catch_all_clause,
+          // Or delegate
+          $.try_delegate_clause,
+        ),
+      ),
+
+    try_do_clause: $ => seq("(", "do", optional($.instr_list), ")"),
+
+    try_catch_clause: $ => seq("(", "catch", $.index, optional($.instr_list), ")"),
+
+    try_catch_all_clause: $ => seq("(", "catch_all", optional($.instr_list), ")"),
+
+    try_delegate_clause: $ => seq("(", "delegate", $.index, ")"),
 
     float: $ => seq(optional($.sign), choice($.dec_float, $.hex_float, "inf", $.nan)),
 
@@ -872,13 +897,13 @@ module.exports = grammar({
     offset_value: $ => seq("offset", imm("="), $.align_offset_value),
 
     // proposal: reference-types
-    ref_kind: $ => /extern|func|struct|array|i31|any|eq|null|none|noextern|nofunc/,
+    ref_kind: $ => /extern|func|struct|array|i31|any|eq|null|none|noextern|nofunc|exn|noexn/,
 
     // Helper for instructions that take either a heap type or (ref ...) form
     _heap_type_or_ref: $ => choice($.ref_kind, $.index, $.ref_type_ref),
 
     // proposal: reference-types
-    ref_type: $ => choice($.ref_type_externref, $.ref_type_funcref, $.ref_type_ref, "anyref", "eqref", "i31ref", "structref", "arrayref", "nullref", "nullfuncref", "nullexternref", "nullref"),
+    ref_type: $ => choice($.ref_type_externref, $.ref_type_funcref, $.ref_type_ref, "anyref", "eqref", "i31ref", "structref", "arrayref", "nullref", "nullfuncref", "nullexternref", "exnref", "nullexnref"),
 
     ref_type_concrete: $ =>
       seq("(", "ref", optional("null"), $.index, ")"),
