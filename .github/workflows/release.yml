@@ -336,7 +336,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
@@ -367,4 +366,4 @@ jobs:
 
       - name: Publish to npm
         working-directory: packages/wat-lsp
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --registry https://registry.npmjs.org
