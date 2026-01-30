@@ -56,6 +56,18 @@ export interface Diagnostic {
 }
 
 /**
+ * Completion item from the LSP
+ */
+export interface CompletionItem {
+  label: string;
+  kind?: number;
+  detail?: string;
+  insertText?: string;
+  insertTextRules?: number;
+  documentation?: string;
+}
+
+/**
  * Semantic tokens legend
  */
 export interface SemanticTokensLegend {
@@ -139,6 +151,9 @@ export interface WatLSP {
   /** Provide diagnostics for the current document */
   provideDiagnostics(): Diagnostic[];
 
+  /** Provide code completion at position */
+  provideCompletion(line: number, col: number): CompletionItem[];
+
   /** Provide semantic tokens for syntax highlighting */
   provideSemanticTokens(): Uint32Array;
 
@@ -189,6 +204,9 @@ export class WatLanguageServer {
 
   /** Provide diagnostics */
   provideDiagnostics(): Diagnostic[];
+
+  /** Provide code completion */
+  provideCompletion(line: number, character: number): CompletionItem[];
 
   /** Provide semantic tokens */
   provideSemanticTokens(): Uint32Array;

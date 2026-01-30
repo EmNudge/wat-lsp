@@ -1,19 +1,19 @@
+use crate::core::types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position};
 use crate::symbols::*;
 use crate::utils::{
     determine_context_from_line, find_containing_function, get_line_at_position, InstructionContext,
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tower_lsp::lsp_types::*;
-use tree_sitter::Tree;
 
 #[cfg(test)]
 mod tests;
 
+/// Provide completion items at the given position in the document.
+/// This is the core completion function using protocol-independent types.
 pub fn provide_completion(
     document: &str,
     symbols: &SymbolTable,
-    _tree: &Tree, // Kept for API compatibility; completion uses line-based context detection
     position: Position,
 ) -> Vec<CompletionItem> {
     let mut completions = Vec::new();
@@ -32,49 +32,40 @@ pub fn provide_completion(
         let clean_number = number.replace('_', "");
         let insert_text = format!("({}.const {})", type_str, clean_number);
 
-        completions.push(CompletionItem {
-            label: format!("{}{}", number, type_str),
-            kind: Some(CompletionItemKind::SNIPPET),
-            detail: Some(format!("Expand to: {}", insert_text)),
-            insert_text: Some(insert_text),
-            ..Default::default()
-        });
+        completions.push(
+            CompletionItem::new(format!("{}{}", number, type_str))
+                .with_kind(CompletionItemKind::Snippet)
+                .with_detail(format!("Expand to: {}", insert_text))
+                .with_insert_text(insert_text),
+        );
         return completions;
     }
 
     // Emmet-like local.get expansion (e.g., l$var -> (local.get $var))
     if line_prefix.ends_with("l$") {
-        if let Some(func) = find_containing_function(symbols, position.into()) {
+        if let Some(func) = find_containing_function(symbols, position) {
             for param in &func.parameters {
                 if let Some(ref name) = param.name {
                     let insert_text = format!("(local.get {})", name);
-                    completions.push(CompletionItem {
-                        label: format!("l{}", name),
-                        kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(param) {}", param.param_type)),
-                        insert_text: Some(insert_text.clone()),
-                        documentation: Some(Documentation::String(format!(
-                            "Expands to: {}",
-                            insert_text
-                        ))),
-                        ..Default::default()
-                    });
+                    completions.push(
+                        CompletionItem::new(format!("l{}", name))
+                            .with_kind(CompletionItemKind::Snippet)
+                            .with_detail(format!("(param) {}", param.param_type))
+                            .with_insert_text(insert_text.clone())
+                            .with_documentation(format!("Expands to: {}", insert_text)),
+                    );
                 }
             }
             for local in &func.locals {
                 if let Some(ref name) = local.name {
                     let insert_text = format!("(local.get {})", name);
-                    completions.push(CompletionItem {
-                        label: format!("l{}", name),
-                        kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(local) {}", local.var_type)),
-                        insert_text: Some(insert_text.clone()),
-                        documentation: Some(Documentation::String(format!(
-                            "Expands to: {}",
-                            insert_text
-                        ))),
-                        ..Default::default()
-                    });
+                    completions.push(
+                        CompletionItem::new(format!("l{}", name))
+                            .with_kind(CompletionItemKind::Snippet)
+                            .with_detail(format!("(local) {}", local.var_type))
+                            .with_insert_text(insert_text.clone())
+                            .with_documentation(format!("Expands to: {}", insert_text)),
+                    );
                 }
             }
         }
@@ -83,31 +74,29 @@ pub fn provide_completion(
 
     // Emmet-like local.set expansion (e.g., l=$var -> (local.set $var ))
     if line_prefix.ends_with("l=$") {
-        if let Some(func) = find_containing_function(symbols, position.into()) {
+        if let Some(func) = find_containing_function(symbols, position) {
             for param in &func.parameters {
                 if let Some(ref name) = param.name {
                     let insert_text = format!("(local.set {} $0)", name);
-                    completions.push(CompletionItem {
-                        label: format!("l={}", name),
-                        kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(param) {}", param.param_type)),
-                        insert_text_format: Some(InsertTextFormat::SNIPPET),
-                        insert_text: Some(insert_text.clone()),
-                        ..Default::default()
-                    });
+                    completions.push(
+                        CompletionItem::new(format!("l={}", name))
+                            .with_kind(CompletionItemKind::Snippet)
+                            .with_detail(format!("(param) {}", param.param_type))
+                            .with_insert_text_format(InsertTextFormat::Snippet)
+                            .with_insert_text(insert_text),
+                    );
                 }
             }
             for local in &func.locals {
                 if let Some(ref name) = local.name {
                     let insert_text = format!("(local.set {} $0)", name);
-                    completions.push(CompletionItem {
-                        label: format!("l={}", name),
-                        kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(local) {}", local.var_type)),
-                        insert_text_format: Some(InsertTextFormat::SNIPPET),
-                        insert_text: Some(insert_text.clone()),
-                        ..Default::default()
-                    });
+                    completions.push(
+                        CompletionItem::new(format!("l={}", name))
+                            .with_kind(CompletionItemKind::Snippet)
+                            .with_detail(format!("(local) {}", local.var_type))
+                            .with_insert_text_format(InsertTextFormat::Snippet)
+                            .with_insert_text(insert_text),
+                    );
                 }
             }
         }
@@ -119,17 +108,13 @@ pub fn provide_completion(
         for global in &symbols.globals {
             if let Some(ref name) = global.name {
                 let insert_text = format!("(global.get {})", name);
-                completions.push(CompletionItem {
-                    label: format!("g{}", name),
-                    kind: Some(CompletionItemKind::SNIPPET),
-                    detail: Some(format!("(global) {}", global.var_type)),
-                    insert_text: Some(insert_text.clone()),
-                    documentation: Some(Documentation::String(format!(
-                        "Expands to: {}",
-                        insert_text
-                    ))),
-                    ..Default::default()
-                });
+                completions.push(
+                    CompletionItem::new(format!("g{}", name))
+                        .with_kind(CompletionItemKind::Snippet)
+                        .with_detail(format!("(global) {}", global.var_type))
+                        .with_insert_text(insert_text.clone())
+                        .with_documentation(format!("Expands to: {}", insert_text)),
+                );
             }
         }
         return completions;
@@ -141,14 +126,13 @@ pub fn provide_completion(
             if let Some(ref name) = global.name {
                 if global.is_mutable {
                     let insert_text = format!("(global.set {} $0)", name);
-                    completions.push(CompletionItem {
-                        label: format!("g={}", name),
-                        kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(format!("(global mut) {}", global.var_type)),
-                        insert_text_format: Some(InsertTextFormat::SNIPPET),
-                        insert_text: Some(insert_text.clone()),
-                        ..Default::default()
-                    });
+                    completions.push(
+                        CompletionItem::new(format!("g={}", name))
+                            .with_kind(CompletionItemKind::Snippet)
+                            .with_detail(format!("(global mut) {}", global.var_type))
+                            .with_insert_text_format(InsertTextFormat::Snippet)
+                            .with_insert_text(insert_text),
+                    );
                 }
             }
         }
@@ -347,24 +331,23 @@ pub fn provide_completion(
                             .collect::<Vec<_>>()
                             .join(" ");
 
-                        completions.push(CompletionItem {
-                            label: name[1..].to_string(), // Remove $ prefix
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            detail: Some(format!(
-                                "({}) -> ({})",
-                                if params_str.is_empty() {
-                                    "no params"
-                                } else {
-                                    &params_str
-                                },
-                                if results_str.is_empty() {
-                                    "no result"
-                                } else {
-                                    &results_str
-                                }
-                            )),
-                            ..Default::default()
-                        });
+                        completions.push(
+                            CompletionItem::new(&name[1..]) // Remove $ prefix
+                                .with_kind(CompletionItemKind::Function)
+                                .with_detail(format!(
+                                    "({}) -> ({})",
+                                    if params_str.is_empty() {
+                                        "no params"
+                                    } else {
+                                        &params_str
+                                    },
+                                    if results_str.is_empty() {
+                                        "no result"
+                                    } else {
+                                        &results_str
+                                    }
+                                )),
+                        );
                     }
                 }
             }
@@ -372,58 +355,54 @@ pub fn provide_completion(
                 // Global variable completions
                 for global in &symbols.globals {
                     if let Some(ref name) = global.name {
-                        completions.push(CompletionItem {
-                            label: name[1..].to_string(), // Remove $ prefix
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            detail: Some(format!(
-                                "(global{}) {}",
-                                if global.is_mutable { " mut" } else { "" },
-                                global.var_type
-                            )),
-                            ..Default::default()
-                        });
+                        completions.push(
+                            CompletionItem::new(&name[1..]) // Remove $ prefix
+                                .with_kind(CompletionItemKind::Variable)
+                                .with_detail(format!(
+                                    "(global{}) {}",
+                                    if global.is_mutable { " mut" } else { "" },
+                                    global.var_type
+                                )),
+                        );
                     }
                 }
             }
             InstructionContext::Local => {
                 // Local variable completions
-                if let Some(func) = find_containing_function(symbols, position.into()) {
+                if let Some(func) = find_containing_function(symbols, position) {
                     for param in &func.parameters {
                         if let Some(ref name) = param.name {
-                            completions.push(CompletionItem {
-                                label: name[1..].to_string(), // Remove $ prefix
-                                kind: Some(CompletionItemKind::VARIABLE),
-                                detail: Some(format!("(param) {}", param.param_type)),
-                                ..Default::default()
-                            });
+                            completions.push(
+                                CompletionItem::new(&name[1..]) // Remove $ prefix
+                                    .with_kind(CompletionItemKind::Variable)
+                                    .with_detail(format!("(param) {}", param.param_type)),
+                            );
                         }
                     }
                     for local in &func.locals {
                         if let Some(ref name) = local.name {
-                            completions.push(CompletionItem {
-                                label: name[1..].to_string(), // Remove $ prefix
-                                kind: Some(CompletionItemKind::VARIABLE),
-                                detail: Some(format!("(local) {}", local.var_type)),
-                                ..Default::default()
-                            });
+                            completions.push(
+                                CompletionItem::new(&name[1..]) // Remove $ prefix
+                                    .with_kind(CompletionItemKind::Variable)
+                                    .with_detail(format!("(local) {}", local.var_type)),
+                            );
                         }
                     }
                 }
             }
             InstructionContext::Branch => {
                 // Block label completions
-                if let Some(func) = find_containing_function(symbols, position.into()) {
+                if let Some(func) = find_containing_function(symbols, position) {
                     for block in &func.blocks {
-                        completions.push(CompletionItem {
-                            label: block.label[1..].to_string(), // Remove $ prefix
-                            kind: Some(CompletionItemKind::CONSTANT),
-                            detail: Some(format!(
-                                "{} at line {}",
-                                block.block_type,
-                                block.line + 1
-                            )),
-                            ..Default::default()
-                        });
+                        completions.push(
+                            CompletionItem::new(&block.label[1..]) // Remove $ prefix
+                                .with_kind(CompletionItemKind::Constant)
+                                .with_detail(format!(
+                                    "{} at line {}",
+                                    block.block_type,
+                                    block.line + 1
+                                )),
+                        );
                     }
                 }
             }
@@ -433,22 +412,20 @@ pub fn provide_completion(
                 // General $ completions - show everything
                 for func in &symbols.functions {
                     if let Some(ref name) = func.name {
-                        completions.push(CompletionItem {
-                            label: name[1..].to_string(),
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            detail: Some("function".to_string()),
-                            ..Default::default()
-                        });
+                        completions.push(
+                            CompletionItem::new(&name[1..])
+                                .with_kind(CompletionItemKind::Function)
+                                .with_detail("function"),
+                        );
                     }
                 }
                 for global in &symbols.globals {
                     if let Some(ref name) = global.name {
-                        completions.push(CompletionItem {
-                            label: name[1..].to_string(),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            detail: Some("global".to_string()),
-                            ..Default::default()
-                        });
+                        completions.push(
+                            CompletionItem::new(&name[1..])
+                                .with_kind(CompletionItemKind::Variable)
+                                .with_detail("global"),
+                        );
                     }
                 }
             }
@@ -599,12 +576,9 @@ fn get_keyword_completions() -> Vec<CompletionItem> {
 }
 
 fn make_completion(label: &str, detail: &str) -> CompletionItem {
-    CompletionItem {
-        label: label.to_string(),
-        kind: Some(CompletionItemKind::KEYWORD),
-        detail: Some(detail.to_string()),
-        ..Default::default()
-    }
+    CompletionItem::new(label)
+        .with_kind(CompletionItemKind::Keyword)
+        .with_detail(detail)
 }
 
 static NUMBER_CONST_REGEX: Lazy<Regex> =
@@ -613,68 +587,33 @@ static NUMBER_CONST_REGEX: Lazy<Regex> =
 /// Get completions for annotation names
 fn get_annotation_completions() -> Vec<CompletionItem> {
     vec![
-        CompletionItem {
-            label: "name".to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some("Custom name section".to_string()),
-            documentation: Some(Documentation::String(
-                "Provides human-readable names for debugging".to_string(),
-            )),
-            ..Default::default()
-        },
-        CompletionItem {
-            label: "producers".to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some("Producer metadata".to_string()),
-            documentation: Some(Documentation::String(
-                "Records information about tools that produced this module".to_string(),
-            )),
-            ..Default::default()
-        },
-        CompletionItem {
-            label: "custom".to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some("Custom section".to_string()),
-            documentation: Some(Documentation::String(
-                "Embed arbitrary data in the WebAssembly binary".to_string(),
-            )),
-            ..Default::default()
-        },
-        CompletionItem {
-            label: "interface".to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some("Component model interface".to_string()),
-            documentation: Some(Documentation::String(
-                "Used in WebAssembly Component Model".to_string(),
-            )),
-            ..Default::default()
-        },
-        CompletionItem {
-            label: "use".to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some("Component model import".to_string()),
-            documentation: Some(Documentation::String(
-                "References types from other interfaces".to_string(),
-            )),
-            ..Default::default()
-        },
-        CompletionItem {
-            label: "metadata.code.branch_hint".to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some("Branch hint metadata".to_string()),
-            documentation: Some(Documentation::String(
-                "Provides hints for branch optimization".to_string(),
-            )),
-            ..Default::default()
-        },
-        CompletionItem {
-            label: "dylink".to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some("Dynamic linking metadata".to_string()),
-            documentation: Some(Documentation::String(
-                "Contains information for dynamic linking".to_string(),
-            )),
-            ..Default::default()
-        },
+        CompletionItem::new("name")
+            .with_kind(CompletionItemKind::Property)
+            .with_detail("Custom name section")
+            .with_documentation("Provides human-readable names for debugging"),
+        CompletionItem::new("producers")
+            .with_kind(CompletionItemKind::Property)
+            .with_detail("Producer metadata")
+            .with_documentation("Records information about tools that produced this module"),
+        CompletionItem::new("custom")
+            .with_kind(CompletionItemKind::Property)
+            .with_detail("Custom section")
+            .with_documentation("Embed arbitrary data in the WebAssembly binary"),
+        CompletionItem::new("interface")
+            .with_kind(CompletionItemKind::Property)
+            .with_detail("Component model interface")
+            .with_documentation("Used in WebAssembly Component Model"),
+        CompletionItem::new("use")
+            .with_kind(CompletionItemKind::Property)
+            .with_detail("Component model import")
+            .with_documentation("References types from other interfaces"),
+        CompletionItem::new("metadata.code.branch_hint")
+            .with_kind(CompletionItemKind::Property)
+            .with_detail("Branch hint metadata")
+            .with_documentation("Provides hints for branch optimization"),
+        CompletionItem::new("dylink")
+            .with_kind(CompletionItemKind::Property)
+            .with_detail("Dynamic linking metadata")
+            .with_documentation("Contains information for dynamic linking"),
     ]
 }

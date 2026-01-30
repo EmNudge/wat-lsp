@@ -81,6 +81,7 @@ mod hover_integration {
 mod completion_integration {
     use super::*;
     use wat_lsp_rust::completion;
+    use wat_lsp_rust::core::types::Position as CorePosition;
 
     #[test]
     fn test_completion_in_function_context() {
@@ -90,10 +91,9 @@ mod completion_integration {
   )"#;
 
         let symbols = parser::parse_document(wat).unwrap();
-        let position = Position::new(2, 13); // After "$"
+        let position = CorePosition::new(2, 13); // After "$"
 
-        let completions =
-            completion::provide_completion(wat, &symbols, &create_test_tree(wat), position);
+        let completions = completion::provide_completion(wat, &symbols, position);
 
         // Should suggest local parameters
         assert!(completions.iter().any(|c| c.label.contains("x")));
@@ -105,10 +105,9 @@ mod completion_integration {
     fn test_emmet_expansion_workflow() {
         let wat = "5i32";
         let symbols = SymbolTable::new();
-        let position = Position::new(0, 4);
+        let position = CorePosition::new(0, 4);
 
-        let completions =
-            completion::provide_completion(wat, &symbols, &create_test_tree(wat), position);
+        let completions = completion::provide_completion(wat, &symbols, position);
         assert!(!completions.is_empty());
 
         let first = &completions[0];
@@ -260,6 +259,7 @@ mod parser_integration {
 
 mod end_to_end {
     use super::*;
+    use wat_lsp_rust::core::types::Position as CorePosition;
     use wat_lsp_rust::{completion, hover, signature};
 
     #[test]
@@ -285,13 +285,8 @@ mod end_to_end {
 
         // Step 3: Provide completions after "i32."
         let completion_doc = "i32.";
-        let completion_pos = Position::new(0, 4);
-        let completions = completion::provide_completion(
-            completion_doc,
-            &symbols,
-            &create_test_tree(completion_doc),
-            completion_pos,
-        );
+        let completion_pos = CorePosition::new(0, 4);
+        let completions = completion::provide_completion(completion_doc, &symbols, completion_pos);
         assert!(completions.iter().any(|c| c.label == "add"));
 
         // Step 4: Provide signature help in function call
@@ -314,9 +309,8 @@ mod end_to_end {
         // User types "5i32" - should get emmet completion
         wat.push_str("5i32");
         let symbols = parser::parse_document(&wat).unwrap();
-        let pos = Position::new(2, 8);
-        let completions =
-            completion::provide_completion(&wat, &symbols, &create_test_tree(&wat), pos);
+        let pos = CorePosition::new(2, 8);
+        let completions = completion::provide_completion(&wat, &symbols, pos);
         assert!(completions.iter().any(|c| {
             c.insert_text
                 .as_ref()

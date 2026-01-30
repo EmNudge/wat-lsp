@@ -2,7 +2,7 @@
 // Each module implements a specific Language Server Protocol capability
 
 // Completion - provides code completion suggestions
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "wasm"))]
 pub mod completion;
 
 // Definition - implements go-to-definition

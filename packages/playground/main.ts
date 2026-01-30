@@ -66,6 +66,17 @@ interface WatLSP {
     message: string;
     severity: number;
   }>;
+  provideCompletion(
+    line: number,
+    col: number
+  ): Array<{
+    label: string;
+    kind?: number;
+    detail?: string;
+    insertText?: string;
+    insertTextRules?: number;
+    documentation?: string;
+  }>;
   getSymbolTableHTML(): string;
   getSemanticTokensLegend(): monaco.languages.SemanticTokensLegend;
   provideSemanticTokens(): Uint32Array;
@@ -305,12 +316,42 @@ async function initMonaco(): Promise<void> {
 
   console.log('TextMate token provider registered');
 
-  // Register completion provider
+  // Register completion provider - uses WASM LSP when available, falls back to static completions
   monaco.languages.registerCompletionItemProvider('wat', {
+    triggerCharacters: ['.', '$', '@', '2', '4'], // Match LSP trigger characters
     provideCompletionItems: (
       model: monaco.editor.ITextModel,
       position: monaco.Position
     ): monaco.languages.ProviderResult<monaco.languages.CompletionList> => {
+      // Use WASM-based completion if LSP is ready
+      if (watLSP && watLSP.ready) {
+        // Parse latest content
+        watLSP.parse(model.getValue());
+
+        const completions = watLSP.provideCompletion(
+          position.lineNumber - 1, // Monaco is 1-indexed
+          position.column - 1
+        );
+
+        const suggestions = completions.map((item) => ({
+          label: item.label,
+          kind: item.kind ?? monaco.languages.CompletionItemKind.Keyword,
+          insertText: item.insertText || item.label,
+          insertTextRules: item.insertTextRules || 0,
+          documentation: item.documentation,
+          detail: item.detail,
+          range: {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          },
+        }));
+
+        return { suggestions };
+      }
+
+      // Fall back to static completions if LSP not ready
       const suggestions = watLanguage.completionItems.map((item) => ({
         label: item.label,
         kind:

@@ -331,9 +331,10 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, syms, _tree)) = self.get_document_context(&uri) {
+            let completions = completion::provide_completion(&doc, &syms, position.into());
             return Ok(Some(CompletionResponse::Array(
-                completion::provide_completion(&doc, &syms, &tree, position),
+                completions.into_iter().map(|c| c.into()).collect(),
             )));
         }
 

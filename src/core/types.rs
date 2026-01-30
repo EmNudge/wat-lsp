@@ -8,6 +8,96 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "native")]
 use tower_lsp::lsp_types as lsp;
 
+/// Completion item kind (matches LSP CompletionItemKind values)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum CompletionItemKind {
+    Text = 1,
+    Method = 2,
+    Function = 3,
+    Constructor = 4,
+    Field = 5,
+    Variable = 6,
+    Class = 7,
+    Interface = 8,
+    Module = 9,
+    Property = 10,
+    Unit = 11,
+    Value = 12,
+    Enum = 13,
+    Keyword = 14,
+    Snippet = 15,
+    Color = 16,
+    File = 17,
+    Reference = 18,
+    Folder = 19,
+    EnumMember = 20,
+    Constant = 21,
+    Struct = 22,
+    Event = 23,
+    Operator = 24,
+    TypeParameter = 25,
+}
+
+/// Insert text format for completion items
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum InsertTextFormat {
+    PlainText = 1,
+    Snippet = 2,
+}
+
+/// A completion item for code suggestions
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionItem {
+    /// The label shown in the completion list
+    pub label: String,
+    /// The kind of completion item (function, variable, etc.)
+    pub kind: Option<CompletionItemKind>,
+    /// A short description shown next to the label
+    pub detail: Option<String>,
+    /// The text to insert when this item is selected
+    pub insert_text: Option<String>,
+    /// The format of the insert text (plain or snippet)
+    pub insert_text_format: Option<InsertTextFormat>,
+    /// Longer documentation about this item
+    pub documentation: Option<String>,
+}
+
+impl CompletionItem {
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_kind(mut self, kind: CompletionItemKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn with_insert_text(mut self, text: impl Into<String>) -> Self {
+        self.insert_text = Some(text.into());
+        self
+    }
+
+    pub fn with_insert_text_format(mut self, format: InsertTextFormat) -> Self {
+        self.insert_text_format = Some(format);
+        self
+    }
+
+    pub fn with_documentation(mut self, doc: impl Into<String>) -> Self {
+        self.documentation = Some(doc.into());
+        self
+    }
+}
+
 /// A position in a text document (0-indexed line and character)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Position {
@@ -110,6 +200,64 @@ impl From<Range> for lsp::Range {
         Self {
             start: r.start.into(),
             end: r.end.into(),
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl From<CompletionItemKind> for lsp::CompletionItemKind {
+    fn from(kind: CompletionItemKind) -> Self {
+        match kind {
+            CompletionItemKind::Text => lsp::CompletionItemKind::TEXT,
+            CompletionItemKind::Method => lsp::CompletionItemKind::METHOD,
+            CompletionItemKind::Function => lsp::CompletionItemKind::FUNCTION,
+            CompletionItemKind::Constructor => lsp::CompletionItemKind::CONSTRUCTOR,
+            CompletionItemKind::Field => lsp::CompletionItemKind::FIELD,
+            CompletionItemKind::Variable => lsp::CompletionItemKind::VARIABLE,
+            CompletionItemKind::Class => lsp::CompletionItemKind::CLASS,
+            CompletionItemKind::Interface => lsp::CompletionItemKind::INTERFACE,
+            CompletionItemKind::Module => lsp::CompletionItemKind::MODULE,
+            CompletionItemKind::Property => lsp::CompletionItemKind::PROPERTY,
+            CompletionItemKind::Unit => lsp::CompletionItemKind::UNIT,
+            CompletionItemKind::Value => lsp::CompletionItemKind::VALUE,
+            CompletionItemKind::Enum => lsp::CompletionItemKind::ENUM,
+            CompletionItemKind::Keyword => lsp::CompletionItemKind::KEYWORD,
+            CompletionItemKind::Snippet => lsp::CompletionItemKind::SNIPPET,
+            CompletionItemKind::Color => lsp::CompletionItemKind::COLOR,
+            CompletionItemKind::File => lsp::CompletionItemKind::FILE,
+            CompletionItemKind::Reference => lsp::CompletionItemKind::REFERENCE,
+            CompletionItemKind::Folder => lsp::CompletionItemKind::FOLDER,
+            CompletionItemKind::EnumMember => lsp::CompletionItemKind::ENUM_MEMBER,
+            CompletionItemKind::Constant => lsp::CompletionItemKind::CONSTANT,
+            CompletionItemKind::Struct => lsp::CompletionItemKind::STRUCT,
+            CompletionItemKind::Event => lsp::CompletionItemKind::EVENT,
+            CompletionItemKind::Operator => lsp::CompletionItemKind::OPERATOR,
+            CompletionItemKind::TypeParameter => lsp::CompletionItemKind::TYPE_PARAMETER,
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl From<InsertTextFormat> for lsp::InsertTextFormat {
+    fn from(format: InsertTextFormat) -> Self {
+        match format {
+            InsertTextFormat::PlainText => lsp::InsertTextFormat::PLAIN_TEXT,
+            InsertTextFormat::Snippet => lsp::InsertTextFormat::SNIPPET,
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl From<CompletionItem> for lsp::CompletionItem {
+    fn from(item: CompletionItem) -> Self {
+        lsp::CompletionItem {
+            label: item.label,
+            kind: item.kind.map(|k| k.into()),
+            detail: item.detail,
+            insert_text: item.insert_text,
+            insert_text_format: item.insert_text_format.map(|f| f.into()),
+            documentation: item.documentation.map(lsp::Documentation::String),
+            ..Default::default()
         }
     }
 }
