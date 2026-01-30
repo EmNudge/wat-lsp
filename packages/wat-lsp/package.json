@@ -28,7 +28,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EmNudge/wat-lsp-rust.git",
+    "url": "git+https://github.com/EmNudge/wat-lsp.git",
     "directory": "packages/wat-lsp"
   },
   "keywords": [
@@ -43,9 +43,9 @@
   "author": "EmNudge",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/EmNudge/wat-lsp-rust/issues"
+    "url": "https://github.com/EmNudge/wat-lsp/issues"
   },
-  "homepage": "https://github.com/EmNudge/wat-lsp-rust#readme",
+  "homepage": "https://github.com/EmNudge/wat-lsp#readme",
   "devDependencies": {
     "web-tree-sitter": "^0.25.3"
   },
