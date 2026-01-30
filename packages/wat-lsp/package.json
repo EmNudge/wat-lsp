@@ -19,7 +19,7 @@
     "dist"
   ],
   "scripts": {
-    "build:wasm": "cd ../.. && wasm-pack build --target web --no-opt -- --features wasm --no-default-features && mkdir -p packages/wat-lsp/dist/wasm && cp pkg/wat_lsp_rust.js pkg/wat_lsp_rust.d.ts pkg/wat_lsp_rust_bg.wasm packages/wat-lsp/dist/wasm/",
+    "build:wasm": "cd ../.. && wasm-pack build --target web --no-opt --no-pack -- --features wasm --no-default-features && mkdir -p packages/wat-lsp/dist/wasm && cp pkg/wat_lsp_rust.js pkg/wat_lsp_rust.d.ts pkg/wat_lsp_rust_bg.wasm packages/wat-lsp/dist/wasm/",
     "build:wrapper": "mkdir -p dist && cp src/*.js dist/ && cp src/*.d.ts dist/",
     "build:assets": "node scripts/copy-assets.js",
     "build": "npm run build:wasm && npm run build:wrapper && npm run build:assets",
