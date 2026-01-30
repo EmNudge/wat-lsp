@@ -907,7 +907,12 @@ module.exports = grammar({
 
     table_fields_type: $ => seq(optional($.import), $.table_type),
 
-    table_type: $ => seq($.limits, $.ref_type),
+    // proposal: table64
+    // Table type can optionally include 'i64' keyword for 64-bit indexing
+    table_type: $ => seq(optional($.table64_type), $.limits, $.ref_type),
+
+    // proposal: table64
+    table64_type: $ => "i64",
 
     table_use: $ => seq("(", "table", $.index, ")"),
 
