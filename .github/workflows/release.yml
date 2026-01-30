@@ -326,6 +326,9 @@ jobs:
       needs.prepare-release.result == 'success' &&
       (needs.prepare-release.outputs.publish_target == 'both' || needs.prepare-release.outputs.publish_target == 'npm')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -362,6 +365,4 @@ jobs:
 
       - name: Publish to npm
         working-directory: packages/wat-lsp
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
