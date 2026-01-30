@@ -10,6 +10,15 @@ on:
         description: 'Version to release (e.g., 0.1.5). Leave empty to auto-bump minor version from latest release.'
         required: false
         type: string
+      publish_target:
+        description: 'What to publish'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - vscode
+          - npm
 
 permissions:
   contents: write
@@ -24,6 +33,7 @@ jobs:
       version: ${{ steps.determine-version.outputs.version }}
       release_exists: ${{ steps.check-release.outputs.exists }}
       existing_tag: ${{ steps.check-release.outputs.tag }}
+      publish_target: ${{ steps.set-publish-target.outputs.target }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -88,11 +98,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Build binaries only if no release exists for current commit
+      - name: Set publish target
+        id: set-publish-target
+        run: |
+          # Default to 'both' for tag pushes, use input for manual dispatch
+          if [ "${{ github.event_name }}" == "push" ]; then
+            TARGET="both"
+          else
+            TARGET="${{ inputs.publish_target }}"
+          fi
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "Publish target: $TARGET"
+
+  # Build binaries only if no release exists for current commit and target includes vscode
   build-release:
     name: Build Release
     needs: prepare-release
-    if: needs.prepare-release.outputs.release_exists == 'false'
+    if: |
+      needs.prepare-release.outputs.release_exists == 'false' &&
+      (needs.prepare-release.outputs.publish_target == 'both' || needs.prepare-release.outputs.publish_target == 'vscode')
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -164,11 +188,13 @@ jobs:
           name: server-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
-  # Download binaries from existing release
+  # Download binaries from existing release (only if publishing vscode extension)
   download-existing-release:
     name: Download Existing Release
     needs: prepare-release
-    if: needs.prepare-release.outputs.release_exists == 'true'
+    if: |
+      needs.prepare-release.outputs.release_exists == 'true' &&
+      (needs.prepare-release.outputs.publish_target == 'both' || needs.prepare-release.outputs.publish_target == 'vscode')
     runs-on: ubuntu-latest
     steps:
       - name: Download release assets
@@ -213,8 +239,12 @@ jobs:
   publish-vscode-extension:
     name: Publish VS Code Extension
     needs: [prepare-release, build-release, download-existing-release]
-    # Run if either build or download succeeded (one will be skipped)
-    if: always() && needs.prepare-release.result == 'success' && (needs.build-release.result == 'success' || needs.download-existing-release.result == 'success')
+    # Run if either build or download succeeded (one will be skipped) AND target includes vscode
+    if: |
+      always() &&
+      needs.prepare-release.result == 'success' &&
+      (needs.build-release.result == 'success' || needs.download-existing-release.result == 'success') &&
+      (needs.prepare-release.outputs.publish_target == 'both' || needs.prepare-release.outputs.publish_target == 'vscode')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -288,3 +318,50 @@ jobs:
         working-directory: packages/vscode-extension
         continue-on-error: true
         run: npx vsce publish --pat ${{ secrets.VSCE_PAT }}
+
+  publish-npm-package:
+    name: Publish npm Package
+    needs: [prepare-release]
+    if: |
+      needs.prepare-release.result == 'success' &&
+      (needs.prepare-release.outputs.publish_target == 'both' || needs.prepare-release.outputs.publish_target == 'npm')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update package.json version
+        working-directory: packages/wat-lsp
+        run: |
+          VERSION="${{ needs.prepare-release.outputs.version }}"
+          # Remove 'v' prefix for package.json
+          VERSION_NUM="${VERSION#v}"
+          npm version "$VERSION_NUM" --no-git-tag-version --allow-same-version
+
+      - name: Install dependencies
+        working-directory: packages/wat-lsp
+        run: npm install
+
+      - name: Build npm package
+        working-directory: packages/wat-lsp
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: packages/wat-lsp
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

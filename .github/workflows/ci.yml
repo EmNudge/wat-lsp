@@ -222,6 +222,8 @@ jobs:
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
 
       - name: Install Node.js
         uses: actions/setup-node@v6
@@ -268,6 +270,8 @@ jobs:
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
 
       - name: Install Node.js
         uses: actions/setup-node@v6
