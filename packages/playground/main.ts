@@ -115,7 +115,7 @@ let elements: {
   lspIndicator: HTMLElement;
   lspStatusText: HTMLElement;
   consoleOutput: HTMLElement;
-  examplesSelect: HTMLSelectElement;
+  fileTree: HTMLElement;
   compileBtn: HTMLButtonElement;
   runBtn: HTMLButtonElement;
   downloadBtn: HTMLButtonElement;
@@ -180,18 +180,83 @@ function setLSPStatus(ready: boolean, message: string): void {
   elements.lspStatusText.textContent = message;
 }
 
-// Populate the examples dropdown from the examples data
-function populateExamplesDropdown(): void {
-  const select = elements.examplesSelect;
-  select.innerHTML = '';
+// Populate the file tree from the examples data
+function populateFileTree(): void {
+  const container = elements.fileTree;
 
-  // Add all examples
-  for (const example of examples) {
-    const option = document.createElement('option');
-    option.value = example.id;
-    option.textContent = example.label;
-    select.appendChild(option);
+  // Separate valid and invalid examples
+  const validExamples = examples.filter(ex => !ex.id.startsWith('invalid_'));
+  const invalidExamples = examples.filter(ex => ex.id.startsWith('invalid_'));
+
+  // Helper to create a folder element
+  function createFolder(name: string, expanded: boolean = false): HTMLElement {
+    const folder = document.createElement('div');
+    folder.className = 'tree-folder';
+
+    const header = document.createElement('div');
+    header.className = 'tree-folder-header';
+    header.innerHTML = `<span class="tree-chevron">${expanded ? '▼' : '▶'}</span><span class="folder-icon">📁</span> ${name}`;
+
+    const children = document.createElement('div');
+    children.className = 'tree-folder-children';
+    if (!expanded) children.style.display = 'none';
+
+    header.addEventListener('click', () => {
+      const isExpanded = children.style.display !== 'none';
+      children.style.display = isExpanded ? 'none' : 'block';
+      header.querySelector('.tree-chevron')!.textContent = isExpanded ? '▶' : '▼';
+    });
+
+    folder.appendChild(header);
+    folder.appendChild(children);
+    return folder;
   }
+
+  // Helper to create a file item
+  function createFileItem(id: string, label: string, icon: string = '📄'): HTMLElement {
+    const item = document.createElement('div');
+    item.className = 'tree-item';
+    item.setAttribute('data-id', id);
+    item.innerHTML = `<span class="file-icon">${icon}</span> ${escapeHtml(label)}`;
+
+    item.addEventListener('click', () => {
+      // Remove selection from all items
+      container.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+      // Select this item
+      item.classList.add('selected');
+      // Load the example
+      loadExample(id);
+    });
+
+    return item;
+  }
+
+  // Build the tree
+  const tree = document.createElement('div');
+  tree.className = 'file-tree';
+
+  // Add valid examples folder
+  const validFolder = createFolder('examples', true);
+  const validChildren = validFolder.querySelector('.tree-folder-children')!;
+  for (const example of validExamples) {
+    validChildren.appendChild(createFileItem(example.id, example.label));
+  }
+  tree.appendChild(validFolder);
+
+  // Add invalid examples folder if there are any
+  if (invalidExamples.length > 0) {
+    const invalidFolder = createFolder('invalid', false);
+    const invalidChildren = invalidFolder.querySelector('.tree-folder-children')!;
+    for (const example of invalidExamples) {
+      // Remove "Failure - " prefix for cleaner display in tree
+      const displayLabel = example.label.replace(/^Failure - /, '');
+      invalidChildren.appendChild(createFileItem(example.id, displayLabel, '⚠️'));
+    }
+    tree.appendChild(invalidFolder);
+  }
+
+  container.innerHTML = '';
+  container.appendChild(tree);
 }
 
 // Map TextMate scopes to Monaco token types
@@ -574,6 +639,12 @@ async function initMonaco(): Promise<void> {
   // Expose editor and monaco for testing
   (window as unknown as { monacoEditor: typeof editor; monaco: typeof monaco }).monacoEditor = editor;
   (window as unknown as { monaco: typeof monaco }).monaco = monaco;
+
+  // Set initial editor title
+  const editorTitle = document.getElementById('editor-title');
+  if (editorTitle) {
+    editorTitle.textContent = `${defaultExample.id}.wat`;
+  }
 
   // Override theme's getTokenStyleMetadata for semantic token coloring
   try {
@@ -1174,6 +1245,12 @@ function loadExample(id: string): void {
   editor.setValue(example.code);
   monaco.editor.setModelMarkers(editor.getModel()!, 'wat', []);
 
+  // Update editor title with file name
+  const editorTitle = document.getElementById('editor-title');
+  if (editorTitle) {
+    editorTitle.textContent = `${id}.wat`;
+  }
+
   // Reset state
   wasmModule = null;
   wasmInstance = null;
@@ -1267,6 +1344,51 @@ function initResizablePanel(): void {
   });
 }
 
+// Initialize resizable file tree panel
+function initFileTreeResize(): void {
+  const resizeHandle = document.getElementById('file-tree-resize');
+  const fileTreePanel = document.getElementById('file-tree-panel');
+
+  if (!resizeHandle || !fileTreePanel) return;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText =
+    'position: fixed; inset: 0; z-index: 9999; cursor: col-resize; display: none;';
+  document.body.appendChild(overlay);
+
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = fileTreePanel.offsetWidth;
+    resizeHandle.classList.add('active');
+    overlay.style.display = 'block';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+
+    const delta = e.clientX - startX;
+    const newWidth = Math.min(
+      Math.max(startWidth + delta, 150),
+      400
+    );
+    fileTreePanel.style.width = `${newWidth}px`;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      resizeHandle.classList.remove('active');
+      overlay.style.display = 'none';
+    }
+  });
+}
+
 // Initialize DOM element references
 function initElements(): void {
   elements = {
@@ -1274,7 +1396,7 @@ function initElements(): void {
     lspIndicator: document.getElementById('lsp-indicator')!,
     lspStatusText: document.getElementById('lsp-status-text')!,
     consoleOutput: document.getElementById('console-output')!,
-    examplesSelect: document.getElementById('examples') as HTMLSelectElement,
+    fileTree: document.getElementById('file-tree')!,
     compileBtn: document.getElementById('compile-btn') as HTMLButtonElement,
     runBtn: document.getElementById('run-btn') as HTMLButtonElement,
     downloadBtn: document.getElementById('download-btn') as HTMLButtonElement,
@@ -1305,11 +1427,12 @@ async function init(): Promise<void> {
   initElements();
   consoleOutput.info('Initializing WAT LSP Playground...');
 
-  // Populate examples dropdown from data
-  populateExamplesDropdown();
+  // Populate file tree from data
+  populateFileTree();
 
   initTabs();
   initResizablePanel();
+  initFileTreeResize();
 
   // Initialize Monaco, wabt, and LSP in parallel
   await Promise.all([initMonaco(), initWabt(), initLSP()]);
@@ -1319,9 +1442,6 @@ async function init(): Promise<void> {
   elements.runBtn.addEventListener('click', run);
   elements.downloadBtn.addEventListener('click', downloadWasm);
   elements.callFnBtn.addEventListener('click', callExportedFunction);
-  elements.examplesSelect.addEventListener('change', (e) => {
-    loadExample((e.target as HTMLSelectElement).value);
-  });
 
   // LSP Debug test hover button
   elements.testHoverBtn.addEventListener('click', () => {
