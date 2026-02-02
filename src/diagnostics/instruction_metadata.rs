@@ -14,70 +14,103 @@ pub struct InstructionArity {
     pub param_description: &'static str,
     /// Number of operands this instruction consumes from the stack (for folded expressions)
     pub operand_mode: OperandMode,
+    /// Number of values this instruction pushes to the stack
+    pub produces: usize,
 }
 
 impl InstructionArity {
-    const fn exact(count: usize, description: &'static str, stack_operands: usize) -> Self {
+    const fn exact(
+        count: usize,
+        description: &'static str,
+        stack_operands: usize,
+        produces: usize,
+    ) -> Self {
         Self {
             min_params: count,
             max_params: count,
             param_description: description,
             operand_mode: OperandMode::Fixed(stack_operands),
+            produces,
         }
     }
 
     // For instructions with dynamic arity (like struct.new)
-    const fn dynamic(min_params: usize, max_params: usize, description: &'static str) -> Self {
+    const fn dynamic(
+        min_params: usize,
+        max_params: usize,
+        description: &'static str,
+        produces: usize,
+    ) -> Self {
         Self {
             min_params,
             max_params,
             param_description: description,
             operand_mode: OperandMode::Dynamic,
+            produces,
         }
     }
 
     /// Index-based instruction (local.get, global.get, etc.) - produces a value
     const fn index(description: &'static str) -> Self {
-        Self::exact(1, description, 0)
+        Self::exact(1, description, 0, 1)
+    }
+
+    /// Index-based instruction that consumes a value (local.set, global.set)
+    const fn index_set(description: &'static str) -> Self {
+        Self::exact(1, description, 1, 0)
+    }
+
+    /// Index-based instruction that consumes and produces a value (local.tee)
+    const fn index_tee(description: &'static str) -> Self {
+        Self::exact(1, description, 1, 1)
     }
 
     /// Constant instruction (i32.const, f64.const) - produces a value
     const fn constant(description: &'static str) -> Self {
-        Self::exact(1, description, 0)
+        Self::exact(1, description, 0, 1)
     }
 
-    /// Binary operator (i32.add, i32.mul, etc.) - consumes 2 values
+    /// Binary operator (i32.add, i32.mul, etc.) - consumes 2 values, produces 1
     const fn binary_op() -> Self {
-        Self::exact(0, "", 2)
+        Self::exact(0, "", 2, 1)
     }
 
-    /// Unary operator (i32.eqz, i32.clz, etc.) - consumes 1 value
+    /// Unary operator (i32.eqz, i32.clz, etc.) - consumes 1 value, produces 1
     const fn unary_op() -> Self {
-        Self::exact(0, "", 1)
+        Self::exact(0, "", 1, 1)
     }
 
-    /// Nullary instruction with no params or operands (drop, nop, return, unreachable)
+    /// Nullary instruction with no params or operands and no production (nop)
     const fn nullary() -> Self {
-        Self::exact(0, "", 0)
+        Self::exact(0, "", 0, 0)
+    }
+
+    /// Instruction that consumes 1 value and produces nothing (drop)
+    const fn drop_op() -> Self {
+        Self::exact(0, "", 1, 0)
     }
 
     /// Memory load operation - can take optional memory index (multi-memory proposal)
+    /// Consumes address, produces value
     const fn mem_load() -> Self {
         Self {
             min_params: 0,
             max_params: 1,
             param_description: "optional memory index",
             operand_mode: OperandMode::Fixed(1), // consumes address
+            produces: 1,
         }
     }
 
     /// Memory store operation - can take optional memory index (multi-memory proposal)
+    /// Consumes address and value, produces nothing
     const fn mem_store() -> Self {
         Self {
             min_params: 0,
             max_params: 1,
             param_description: "optional memory index",
             operand_mode: OperandMode::Fixed(2), // consumes address and value
+            produces: 0,
         }
     }
 
@@ -128,21 +161,21 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
 
     // Local variable instructions (index-based, produce values)
     map.insert("local.get", InstructionArity::index("index"));
-    map.insert("local.set", InstructionArity::exact(1, "index", 1)); // consumes 1 value
-    map.insert("local.tee", InstructionArity::exact(1, "index", 1)); // consumes 1 value, produces 1
+    map.insert("local.set", InstructionArity::index_set("index")); // consumes 1 value
+    map.insert("local.tee", InstructionArity::index_tee("index")); // consumes 1 value, produces 1
 
     // Global variable instructions
     map.insert("global.get", InstructionArity::index("index"));
-    map.insert("global.set", InstructionArity::exact(1, "index", 1)); // consumes 1 value
+    map.insert("global.set", InstructionArity::index_set("index")); // consumes 1 value
 
     // Control flow instructions
     // br and br_if can pass values to blocks with result types (multi-value)
-    map.insert("br", InstructionArity::dynamic(1, 1, "label index"));
-    map.insert("br_if", InstructionArity::dynamic(1, 1, "label index")); // consumes condition + optional values
-    map.insert("call", InstructionArity::dynamic(1, 1, "function index")); // operands depend on function signature
-                                                                           // return can pass values for functions with result types
-    map.insert("return", InstructionArity::dynamic(0, 0, ""));
-    map.insert("unreachable", InstructionArity::nullary());
+    map.insert("br", InstructionArity::dynamic(1, 1, "label index", 0)); // terminates
+    map.insert("br_if", InstructionArity::dynamic(1, 1, "label index", 0)); // consumes condition + optional values
+    map.insert("call", InstructionArity::dynamic(1, 1, "function index", 0)); // produces depend on function signature (set to 0, handled dynamically)
+                                                                              // return can pass values for functions with result types
+    map.insert("return", InstructionArity::dynamic(0, 0, "", 0)); // terminates
+    map.insert("unreachable", InstructionArity::nullary()); // terminates
     map.insert("nop", InstructionArity::nullary());
 
     // Constant instructions (produce values)
@@ -152,8 +185,8 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("f64.const", InstructionArity::constant("literal value"));
 
     // Stack manipulation
-    map.insert("drop", InstructionArity::unary_op()); // consumes 1 value
-    map.insert("select", InstructionArity::exact(0, "", 3)); // consumes 3 values
+    map.insert("drop", InstructionArity::drop_op()); // consumes 1 value, produces 0
+    map.insert("select", InstructionArity::exact(0, "", 3, 1)); // consumes 3 values, produces 1
 
     // i32 arithmetic operations (binary)
     map.insert("i32.add", InstructionArity::binary_op());
@@ -338,7 +371,8 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
             min_params: 0,
             max_params: 1,
             param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(0), // produces i32 (current size)
+            operand_mode: OperandMode::Fixed(0),
+            produces: 1, // produces i32 (current size)
         },
     );
     map.insert(
@@ -347,116 +381,132 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
             min_params: 0,
             max_params: 1,
             param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(1), // consumes delta, produces i32 (previous size or -1)
+            operand_mode: OperandMode::Fixed(1), // consumes delta
+            produces: 1,                         // produces i32 (previous size or -1)
         },
     );
 
     // WasmGC Instructions
     // Structs
-    map.insert("struct.new", InstructionArity::dynamic(1, 1, "type index"));
+    map.insert(
+        "struct.new",
+        InstructionArity::dynamic(1, 1, "type index", 1),
+    ); // produces structref
     map.insert(
         "struct.new_default",
-        InstructionArity::exact(1, "type index", 0),
+        InstructionArity::exact(1, "type index", 0, 1), // produces structref
     );
     map.insert(
         "struct.get",
-        InstructionArity::exact(2, "type and field index", 1),
-    ); // consumes structref
+        InstructionArity::exact(2, "type and field index", 1, 1), // consumes structref, produces value
+    );
     map.insert(
         "struct.get_s",
-        InstructionArity::exact(2, "type and field index", 1),
+        InstructionArity::exact(2, "type and field index", 1, 1),
     );
     map.insert(
         "struct.get_u",
-        InstructionArity::exact(2, "type and field index", 1),
+        InstructionArity::exact(2, "type and field index", 1, 1),
     );
     map.insert(
         "struct.set",
-        InstructionArity::exact(2, "type and field index", 2),
-    ); // consumes structref + value
+        InstructionArity::exact(2, "type and field index", 2, 0), // consumes structref + value, produces nothing
+    );
 
     // Arrays
-    map.insert("array.new", InstructionArity::exact(1, "type index", 2)); // value, len
+    map.insert("array.new", InstructionArity::exact(1, "type index", 2, 1)); // value, len -> arrayref
     map.insert(
         "array.new_default",
-        InstructionArity::exact(1, "type index", 1),
-    ); // len
+        InstructionArity::exact(1, "type index", 1, 1), // len -> arrayref
+    );
     map.insert(
         "array.new_fixed",
-        InstructionArity::dynamic(2, 2, "type index and length"),
+        InstructionArity::dynamic(2, 2, "type index and length", 1), // -> arrayref
     );
     map.insert(
         "array.new_data",
-        InstructionArity::exact(2, "type and data index", 2),
-    ); // offset, len
+        InstructionArity::exact(2, "type and data index", 2, 1), // offset, len -> arrayref
+    );
     map.insert(
         "array.new_elem",
-        InstructionArity::exact(2, "type and elem index", 2),
-    ); // offset, len
-    map.insert("array.get", InstructionArity::exact(1, "type index", 2)); // arrayref, index
-    map.insert("array.get_s", InstructionArity::exact(1, "type index", 2));
-    map.insert("array.get_u", InstructionArity::exact(1, "type index", 2));
-    map.insert("array.set", InstructionArity::exact(1, "type index", 3)); // arrayref, index, value
-    map.insert("array.len", InstructionArity::unary_op()); // arrayref
-    map.insert("array.fill", InstructionArity::exact(1, "type index", 4)); // arrayref, index, value, len
+        InstructionArity::exact(2, "type and elem index", 2, 1), // offset, len -> arrayref
+    );
+    map.insert("array.get", InstructionArity::exact(1, "type index", 2, 1)); // arrayref, index -> value
+    map.insert(
+        "array.get_s",
+        InstructionArity::exact(1, "type index", 2, 1),
+    );
+    map.insert(
+        "array.get_u",
+        InstructionArity::exact(1, "type index", 2, 1),
+    );
+    map.insert("array.set", InstructionArity::exact(1, "type index", 3, 0)); // arrayref, index, value -> nothing
+    map.insert("array.len", InstructionArity::unary_op()); // arrayref -> i32
+    map.insert("array.fill", InstructionArity::exact(1, "type index", 4, 0)); // arrayref, index, value, len -> nothing
     map.insert(
         "array.copy",
-        InstructionArity::exact(2, "dest and src type index", 5),
-    ); // dest, dest_idx, src, src_idx, len
+        InstructionArity::exact(2, "dest and src type index", 5, 0), // dest, dest_idx, src, src_idx, len -> nothing
+    );
 
     // I31
-    map.insert("ref.i31", InstructionArity::unary_op()); // i32
-    map.insert("i31.get_s", InstructionArity::unary_op()); // i31ref
-    map.insert("i31.get_u", InstructionArity::unary_op()); // i31ref
+    map.insert("ref.i31", InstructionArity::unary_op()); // i32 -> i31ref
+    map.insert("i31.get_s", InstructionArity::unary_op()); // i31ref -> i32
+    map.insert("i31.get_u", InstructionArity::unary_op()); // i31ref -> i32
 
     // Casts
-    map.insert("ref.test", InstructionArity::exact(1, "type index", 1));
-    map.insert("ref.cast", InstructionArity::exact(1, "type index", 1));
-    map.insert("ref.cast_null", InstructionArity::exact(1, "type index", 1));
+    map.insert("ref.test", InstructionArity::exact(1, "type index", 1, 1)); // ref -> i32
+    map.insert("ref.cast", InstructionArity::exact(1, "type index", 1, 1)); // ref -> ref
+    map.insert(
+        "ref.cast_null",
+        InstructionArity::exact(1, "type index", 1, 1),
+    ); // ref -> ref
     map.insert(
         "br_on_cast",
-        InstructionArity::exact(2, "label and type index", 1),
+        InstructionArity::exact(2, "label and type index", 1, 0), // ref -> (branches or continues)
     );
     map.insert(
         "br_on_cast_fail",
-        InstructionArity::exact(2, "label and type index", 1),
+        InstructionArity::exact(2, "label and type index", 1, 0), // ref -> (branches or continues)
     );
 
     // Exceptions
-    map.insert("throw", InstructionArity::dynamic(1, 1, "tag index"));
-    map.insert("throw_ref", InstructionArity::unary_op()); // exnref
-    map.insert("rethrow", InstructionArity::exact(1, "label index", 0));
+    map.insert("throw", InstructionArity::dynamic(1, 1, "tag index", 0)); // terminates
+    map.insert("throw_ref", InstructionArity::exact(0, "", 1, 0)); // exnref -> terminates (unary but not returning)
+    map.insert("rethrow", InstructionArity::exact(1, "label index", 0, 0)); // terminates
 
     // Typed function references
-    map.insert("call_ref", InstructionArity::dynamic(1, 1, "type index")); // args + funcref
+    map.insert("call_ref", InstructionArity::dynamic(1, 1, "type index", 0)); // args + funcref -> dynamic results
     map.insert(
         "return_call_ref",
-        InstructionArity::dynamic(1, 1, "type index"),
-    ); // args + funcref
+        InstructionArity::dynamic(1, 1, "type index", 0), // args + funcref -> terminates (tail call)
+    );
 
     // Null-checking branches
-    map.insert("br_on_null", InstructionArity::exact(1, "label index", 1)); // ref
+    map.insert(
+        "br_on_null",
+        InstructionArity::exact(1, "label index", 1, 1),
+    ); // ref -> non-null ref (or branches)
     map.insert(
         "br_on_non_null",
-        InstructionArity::exact(1, "label index", 1),
-    ); // ref
+        InstructionArity::exact(1, "label index", 1, 0), // ref -> (branches with non-null or continues with nothing)
+    );
 
     // Reference equality
-    map.insert("ref.eq", InstructionArity::binary_op()); // eqref, eqref
+    map.insert("ref.eq", InstructionArity::binary_op()); // eqref, eqref -> i32
 
     // Reference conversions
-    map.insert("any.convert_extern", InstructionArity::unary_op()); // externref
-    map.insert("extern.convert_any", InstructionArity::unary_op()); // anyref
+    map.insert("any.convert_extern", InstructionArity::unary_op()); // externref -> anyref
+    map.insert("extern.convert_any", InstructionArity::unary_op()); // anyref -> externref
 
     // Array initialization from segments
     map.insert(
         "array.init_data",
-        InstructionArity::exact(2, "type and data index", 4),
-    ); // array, dst, src, len
+        InstructionArity::exact(2, "type and data index", 4, 0), // array, dst, src, len -> nothing
+    );
     map.insert(
         "array.init_elem",
-        InstructionArity::exact(2, "type and elem index", 4),
-    ); // array, dst, src, len
+        InstructionArity::exact(2, "type and elem index", 4, 0), // array, dst, src, len -> nothing
+    );
 
     // Bulk memory operations - support optional memory indices (multi-memory proposal)
     map.insert(
@@ -466,6 +516,7 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
             max_params: 2,
             param_description: "optional dest and src memory indices",
             operand_mode: OperandMode::Fixed(3), // dest offset, src offset, len
+            produces: 0,
         },
     );
     map.insert(
@@ -475,6 +526,7 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
             max_params: 1,
             param_description: "optional memory index",
             operand_mode: OperandMode::Fixed(3), // dest, val, len
+            produces: 0,
         },
     );
     map.insert(
@@ -484,31 +536,44 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
             max_params: 2,
             param_description: "data index and optional memory index",
             operand_mode: OperandMode::Fixed(3), // dest, offset, len
+            produces: 0,
         },
     );
-    map.insert("data.drop", InstructionArity::exact(1, "data index", 0));
+    map.insert("data.drop", InstructionArity::exact(1, "data index", 0, 0));
 
     // Table operations
-    map.insert("table.get", InstructionArity::exact(1, "table index", 1)); // index
-    map.insert("table.set", InstructionArity::exact(1, "table index", 2)); // index, value
-    map.insert("table.size", InstructionArity::exact(1, "table index", 0));
-    map.insert("table.grow", InstructionArity::exact(1, "table index", 2)); // init, delta
-    map.insert("table.fill", InstructionArity::exact(1, "table index", 3)); // index, value, len
+    map.insert("table.get", InstructionArity::exact(1, "table index", 1, 1)); // index -> ref
+    map.insert("table.set", InstructionArity::exact(1, "table index", 2, 0)); // index, value -> nothing
+    map.insert(
+        "table.size",
+        InstructionArity::exact(1, "table index", 0, 1),
+    ); // -> i32
+    map.insert(
+        "table.grow",
+        InstructionArity::exact(1, "table index", 2, 1),
+    ); // init, delta -> i32
+    map.insert(
+        "table.fill",
+        InstructionArity::exact(1, "table index", 3, 0),
+    ); // index, value, len -> nothing
     map.insert(
         "table.copy",
-        InstructionArity::exact(2, "dest and src table index", 3),
-    ); // dest, src, len
+        InstructionArity::exact(2, "dest and src table index", 3, 0), // dest, src, len -> nothing
+    );
     map.insert(
         "table.init",
-        InstructionArity::exact(2, "table and elem index", 3),
-    ); // dest, offset, len
-    map.insert("elem.drop", InstructionArity::exact(1, "elem index", 0));
+        InstructionArity::exact(2, "table and elem index", 3, 0), // dest, offset, len -> nothing
+    );
+    map.insert("elem.drop", InstructionArity::exact(1, "elem index", 0, 0));
 
     // Reference operations
-    map.insert("ref.null", InstructionArity::exact(1, "type", 0));
-    map.insert("ref.func", InstructionArity::exact(1, "function index", 0));
-    map.insert("ref.is_null", InstructionArity::unary_op()); // ref
-    map.insert("ref.as_non_null", InstructionArity::unary_op()); // nullable ref
+    map.insert("ref.null", InstructionArity::exact(1, "type", 0, 1)); // -> null ref
+    map.insert(
+        "ref.func",
+        InstructionArity::exact(1, "function index", 0, 1),
+    ); // -> funcref
+    map.insert("ref.is_null", InstructionArity::unary_op()); // ref -> i32
+    map.insert("ref.as_non_null", InstructionArity::unary_op()); // nullable ref -> non-null ref
 
     // Saturating truncation operations
     map.insert("i32.trunc_sat_f32_s", InstructionArity::unary_op());
@@ -536,10 +601,11 @@ mod tests {
 
     #[test]
     fn test_instruction_arity_exact() {
-        let arity = InstructionArity::exact(1, "index", 0);
+        let arity = InstructionArity::exact(1, "index", 0, 1);
         assert_eq!(arity.min_params, 1);
         assert_eq!(arity.max_params, 1);
         assert_eq!(arity.operand_mode, OperandMode::Fixed(0));
+        assert_eq!(arity.produces, 1);
         assert!(arity.is_valid(1));
         assert!(!arity.is_valid(0));
         assert!(!arity.is_valid(2));
@@ -547,10 +613,10 @@ mod tests {
 
     #[test]
     fn test_expected_message() {
-        let arity_exact = InstructionArity::exact(1, "index", 0);
+        let arity_exact = InstructionArity::exact(1, "index", 0, 1);
         assert_eq!(arity_exact.expected_message(), "1 (index)");
 
-        let arity_exact_no_desc = InstructionArity::exact(0, "", 2);
+        let arity_exact_no_desc = InstructionArity::exact(0, "", 2, 1);
         assert_eq!(arity_exact_no_desc.expected_message(), "0");
     }
 
@@ -558,6 +624,7 @@ mod tests {
     fn test_binary_op() {
         let arity = InstructionArity::binary_op();
         assert_eq!(arity.operand_mode, OperandMode::Fixed(2));
+        assert_eq!(arity.produces, 1);
         assert!(arity.is_valid_operands(2));
         assert!(!arity.is_valid_operands(1));
         assert!(!arity.is_valid_operands(3));
@@ -567,9 +634,50 @@ mod tests {
     fn test_unary_op() {
         let arity = InstructionArity::unary_op();
         assert_eq!(arity.operand_mode, OperandMode::Fixed(1));
+        assert_eq!(arity.produces, 1);
         assert!(arity.is_valid_operands(1));
         assert!(!arity.is_valid_operands(0));
         assert!(!arity.is_valid_operands(2));
+    }
+
+    #[test]
+    fn test_drop_op() {
+        let arity = InstructionArity::drop_op();
+        assert_eq!(arity.operand_mode, OperandMode::Fixed(1));
+        assert_eq!(arity.produces, 0);
+    }
+
+    #[test]
+    fn test_produces_field() {
+        let map = get_instruction_arity_map();
+
+        // Constants produce 1 value
+        assert_eq!(map.get("i32.const").unwrap().produces, 1);
+        assert_eq!(map.get("f64.const").unwrap().produces, 1);
+
+        // Binary ops consume 2, produce 1
+        assert_eq!(map.get("i32.add").unwrap().produces, 1);
+
+        // drop consumes 1, produces 0
+        assert_eq!(map.get("drop").unwrap().produces, 0);
+
+        // local.get produces 1
+        assert_eq!(map.get("local.get").unwrap().produces, 1);
+
+        // local.set produces 0
+        assert_eq!(map.get("local.set").unwrap().produces, 0);
+
+        // local.tee produces 1
+        assert_eq!(map.get("local.tee").unwrap().produces, 1);
+
+        // Memory load produces 1
+        assert_eq!(map.get("i32.load").unwrap().produces, 1);
+
+        // Memory store produces 0
+        assert_eq!(map.get("i32.store").unwrap().produces, 0);
+
+        // select produces 1
+        assert_eq!(map.get("select").unwrap().produces, 1);
     }
 
     #[test]
