@@ -76,13 +76,10 @@ fn is_in_same_function_by_line(
     target_function_start_byte: usize,
     symbols: &SymbolTable,
 ) -> bool {
-    // Find the function that contains this line
-    for func in &symbols.functions {
-        if line >= func.line && line <= func.end_line {
-            return func.start_byte == target_function_start_byte;
-        }
-    }
-    false
+    // Use optimized O(log n) binary search lookup
+    symbols
+        .find_function_containing_line(line)
+        .is_some_and(|func| func.start_byte == target_function_start_byte)
 }
 
 /// Main entry point for providing find-references

@@ -146,21 +146,11 @@ pub fn provide_completion(
     }
 
     // Type-prefixed instruction completion (e.g., i32., f64.)
-    if line_prefix.ends_with("i32.") {
-        completions.extend(get_type_completions("i32"));
-        return completions;
-    }
-    if line_prefix.ends_with("i64.") {
-        completions.extend(get_type_completions("i64"));
-        return completions;
-    }
-    if line_prefix.ends_with("f32.") {
-        completions.extend(get_type_completions("f32"));
-        return completions;
-    }
-    if line_prefix.ends_with("f64.") {
-        completions.extend(get_type_completions("f64"));
-        return completions;
+    for type_prefix in ["i32", "i64", "f32", "f64"] {
+        if line_prefix.ends_with(&format!("{}.", type_prefix)) {
+            completions.extend(get_type_completions(type_prefix));
+            return completions;
+        }
     }
 
     // Instruction prefix completions

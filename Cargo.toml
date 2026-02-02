@@ -28,6 +28,11 @@ name = "wat-docs"
 path = "src/bin/wat-docs.rs"
 required-features = ["native"]
 
+[[bin]]
+name = "wat-bench"
+path = "src/bin/wat-bench.rs"
+required-features = ["native"]
+
 [features]
 default = ["native"]
 native = [

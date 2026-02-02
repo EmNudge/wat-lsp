@@ -339,6 +339,26 @@ impl SymbolTable {
         Self::default()
     }
 
+    /// Find the function containing a given line number.
+    /// Uses binary search for O(log n) performance instead of linear scan.
+    pub fn find_function_containing_line(&self, line: u32) -> Option<&Function> {
+        // Binary search for a function that might contain this line
+        // Functions are sorted by start line due to parse order
+        let idx = self
+            .functions
+            .binary_search_by(|f| {
+                if line < f.line {
+                    std::cmp::Ordering::Greater
+                } else if line > f.end_line {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .ok()?;
+        self.functions.get(idx)
+    }
+
     impl_symbol_accessors!(
         add_function,
         get_function_by_name,
