@@ -1,0 +1,11 @@
+{
+  "description": "Call to undefined function",
+  "diagnostics": [
+    {
+      "line": 3,
+      "message_contains": "Undefined function",
+      "message_contains_all": ["$nonexistent"],
+      "severity": 1
+    }
+  ]
+}

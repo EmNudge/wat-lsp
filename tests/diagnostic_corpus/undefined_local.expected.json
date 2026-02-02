@@ -1,0 +1,11 @@
+{
+  "description": "Reference to undefined local variable",
+  "diagnostics": [
+    {
+      "line": 3,
+      "message_contains": "Undefined local",
+      "message_contains_all": ["$missing"],
+      "severity": 1
+    }
+  ]
+}

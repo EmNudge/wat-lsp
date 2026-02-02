@@ -571,6 +571,10 @@ async function initMonaco(): Promise<void> {
     'semanticHighlighting.enabled': true,
   });
 
+  // Expose editor and monaco for testing
+  (window as unknown as { monacoEditor: typeof editor; monaco: typeof monaco }).monacoEditor = editor;
+  (window as unknown as { monaco: typeof monaco }).monaco = monaco;
+
   // Override theme's getTokenStyleMetadata for semantic token coloring
   try {
     const theme = (editor as unknown as { _themeService: { _theme: { getTokenStyleMetadata: (type: string, modifiers: string[], lang: string) => { foreground: number } | undefined } } })._themeService._theme;

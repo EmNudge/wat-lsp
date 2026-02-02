@@ -1,0 +1,4 @@
+{
+  "description": "Valid WAT file should produce no diagnostics",
+  "diagnostics": []
+}
