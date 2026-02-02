@@ -34,6 +34,7 @@ jobs:
               - 'build.rs'
               - 'docs/**'
               - 'grammars/tree-sitter-wat/**'
+              - 'tests/diagnostic_corpus/**'
             packages:
               - 'packages/**'
               - 'src/**'
@@ -43,6 +44,7 @@ jobs:
               - 'packages/**'
               - 'grammars/tree-sitter-wat/**'
               - 'src/**'
+              - 'tests/diagnostic_corpus/**'
 
   test:
     name: Test

@@ -1,0 +1,11 @@
+{
+  "description": "Stack underflow on binary operation with empty stack",
+  "diagnostics": [
+    {
+      "line": 3,
+      "message_contains": "Stack underflow",
+      "message_contains_all": ["i32.add", "2", "0"],
+      "severity": 1
+    }
+  ]
+}
