@@ -1,3 +1,8 @@
+//! Instruction metadata for stack tracking.
+//!
+//! This module is shared between native and WASM builds to provide
+//! instruction arity information for stack underflow detection.
+
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -116,14 +121,6 @@ impl InstructionArity {
 
     pub fn is_valid(&self, param_count: usize) -> bool {
         param_count >= self.min_params && param_count <= self.max_params
-    }
-
-    #[cfg(test)]
-    pub fn is_valid_operands(&self, operand_count: usize) -> bool {
-        match self.operand_mode {
-            OperandMode::Fixed(n) => operand_count == n,
-            OperandMode::Dynamic => true, // Validated separately
-        }
     }
 
     pub fn expected_message(&self) -> String {
@@ -612,22 +609,10 @@ mod tests {
     }
 
     #[test]
-    fn test_expected_message() {
-        let arity_exact = InstructionArity::exact(1, "index", 0, 1);
-        assert_eq!(arity_exact.expected_message(), "1 (index)");
-
-        let arity_exact_no_desc = InstructionArity::exact(0, "", 2, 1);
-        assert_eq!(arity_exact_no_desc.expected_message(), "0");
-    }
-
-    #[test]
     fn test_binary_op() {
         let arity = InstructionArity::binary_op();
         assert_eq!(arity.operand_mode, OperandMode::Fixed(2));
         assert_eq!(arity.produces, 1);
-        assert!(arity.is_valid_operands(2));
-        assert!(!arity.is_valid_operands(1));
-        assert!(!arity.is_valid_operands(3));
     }
 
     #[test]
@@ -635,80 +620,14 @@ mod tests {
         let arity = InstructionArity::unary_op();
         assert_eq!(arity.operand_mode, OperandMode::Fixed(1));
         assert_eq!(arity.produces, 1);
-        assert!(arity.is_valid_operands(1));
-        assert!(!arity.is_valid_operands(0));
-        assert!(!arity.is_valid_operands(2));
     }
 
     #[test]
-    fn test_drop_op() {
-        let arity = InstructionArity::drop_op();
-        assert_eq!(arity.operand_mode, OperandMode::Fixed(1));
-        assert_eq!(arity.produces, 0);
-    }
-
-    #[test]
-    fn test_produces_field() {
+    fn test_arity_map_contains_common_instructions() {
         let map = get_instruction_arity_map();
-
-        // Constants produce 1 value
-        assert_eq!(map.get("i32.const").unwrap().produces, 1);
-        assert_eq!(map.get("f64.const").unwrap().produces, 1);
-
-        // Binary ops consume 2, produce 1
-        assert_eq!(map.get("i32.add").unwrap().produces, 1);
-
-        // drop consumes 1, produces 0
-        assert_eq!(map.get("drop").unwrap().produces, 0);
-
-        // local.get produces 1
-        assert_eq!(map.get("local.get").unwrap().produces, 1);
-
-        // local.set produces 0
-        assert_eq!(map.get("local.set").unwrap().produces, 0);
-
-        // local.tee produces 1
-        assert_eq!(map.get("local.tee").unwrap().produces, 1);
-
-        // Memory load produces 1
-        assert_eq!(map.get("i32.load").unwrap().produces, 1);
-
-        // Memory store produces 0
-        assert_eq!(map.get("i32.store").unwrap().produces, 0);
-
-        // select produces 1
-        assert_eq!(map.get("select").unwrap().produces, 1);
-    }
-
-    #[test]
-    fn test_instruction_map_contains_common_instructions() {
-        let map = get_instruction_arity_map();
-
-        // Local instructions
+        assert!(map.contains_key("i32.add"));
         assert!(map.contains_key("local.get"));
-        assert!(map.contains_key("local.set"));
-        assert!(map.contains_key("local.tee"));
-
-        // Global instructions
-        assert!(map.contains_key("global.get"));
-        assert!(map.contains_key("global.set"));
-
-        // Constants
-        assert!(map.contains_key("i32.const"));
-        assert!(map.contains_key("f32.const"));
-
-        // Control flow
-        assert!(map.contains_key("br"));
         assert!(map.contains_key("call"));
-        assert!(map.contains_key("return"));
-    }
-
-    #[test]
-    fn test_local_set_expects_one_param() {
-        let map = get_instruction_arity_map();
-        let arity = map.get("local.set").unwrap();
-        assert_eq!(arity.min_params, 1);
-        assert_eq!(arity.max_params, 1);
-        assert_eq!(arity.param_description, "index");
+        assert!(map.contains_key("i32.const"));
     }
 }

@@ -1,4 +1,3 @@
-mod instruction_metadata;
 mod semantic_diagnostics;
 mod tree_sitter_diagnostics;
 mod wast_validator;
