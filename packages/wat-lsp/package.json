@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "wat-check-wasm": "./bin/wat-check-wasm.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,7 +19,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "scripts": {
     "build:wasm": "cd ../.. && wasm-pack build --target web --no-opt --no-pack -- --features wasm --no-default-features && mkdir -p packages/wat-lsp/dist/wasm && cp pkg/wat_lsp_rust.js pkg/wat_lsp_rust.d.ts pkg/wat_lsp_rust_bg.wasm packages/wat-lsp/dist/wasm/",

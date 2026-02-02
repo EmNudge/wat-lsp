@@ -234,6 +234,14 @@ select:hover {
   color: white;
 }
 
+.tree-item.has-error {
+  color: var(--error);
+}
+
+.tree-item.has-error.selected {
+  color: white;
+}
+
 .folder-icon,
 .file-icon {
   margin-right: 6px;

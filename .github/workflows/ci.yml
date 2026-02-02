@@ -385,6 +385,89 @@ jobs:
       - name: Run security audit
         run: cargo audit
 
+  validate-wasm:
+    name: Validate Examples (WASM)
+    needs: [changes, build-npm-package]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      (needs.changes.outputs.rust == 'true' || needs.changes.outputs.packages == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Clean package directory
+        run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
+
+      # Try to restore from cache first
+      - name: Restore NPM package from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
+
+      # If cache miss and build-npm-package ran, download the artifact
+      - name: Download NPM package artifact
+        if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
+
+      - name: Verify package structure
+        run: |
+          if [ ! -d "packages/wat-lsp/dist/wasm" ]; then
+            echo "ERROR: NPM package not available!"
+            exit 1
+          fi
+          ls -la packages/wat-lsp/dist/wasm/
+
+      - name: Install package dependencies
+        working-directory: packages/wat-lsp
+        run: npm install
+
+      - name: Validate example files with wat-check-wasm
+        shell: bash
+        run: |
+          failed=0
+
+          echo "=== Checking valid examples (should pass) ==="
+          for file in docs/examples/*.wat; do
+            echo "Checking $file..."
+            if ! node packages/wat-lsp/bin/wat-check-wasm.js "$file" 2>/dev/null; then
+              echo "ERROR: $file has diagnostics (expected none)"
+              failed=1
+            fi
+          done
+
+          echo ""
+          echo "=== Checking invalid examples (should fail) ==="
+          for file in docs/examples/invalid/*.wat; do
+            echo "Checking $file..."
+            if node packages/wat-lsp/bin/wat-check-wasm.js "$file" 2>/dev/null; then
+              echo "ERROR: $file passed validation (expected diagnostics)"
+              failed=1
+            else
+              echo "OK: $file correctly rejected"
+            fi
+          done
+
+          if [ $failed -eq 1 ]; then
+            echo ""
+            echo "WASM example validation failed"
+            exit 1
+          fi
+          echo ""
+          echo "All example files validated correctly (WASM)"
+
   playground:
     name: Playground
     needs: [changes, build-npm-package]

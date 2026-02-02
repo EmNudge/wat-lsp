@@ -256,6 +256,11 @@ mod wasm {
             self.0.is_named()
         }
 
+        /// Check if this is a missing node (parser inserted it to recover from errors)
+        pub fn is_missing(&self) -> bool {
+            self.0.is_missing()
+        }
+
         /// Get child count
         pub fn child_count(&self) -> usize {
             self.0.child_count() as usize

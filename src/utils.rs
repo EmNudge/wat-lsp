@@ -225,9 +225,14 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
         // Extract just the first token (instruction name) to avoid matching nested instructions
         let first_token = instr_text.split_whitespace().next().unwrap_or("");
 
+        // Check data/elem segment operations BEFORE general memory/table
+        if first_token == "memory.init" || first_token == "data.drop" {
+            return InstructionContext::Data;
+        } else if first_token == "table.init" || first_token == "elem.drop" {
+            return InstructionContext::Elem;
         // Check GC/struct/array instructions first (they take type indices)
         // Also includes call_ref and return_call_ref which take type indices
-        if first_token.starts_with("struct.")
+        } else if first_token.starts_with("struct.")
             || first_token.starts_with("array.")
             || first_token == "ref.cast"
             || first_token == "ref.test"
