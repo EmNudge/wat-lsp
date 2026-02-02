@@ -14,6 +14,16 @@ const exampleModules = import.meta.glob<string>('../../docs/examples/*.wat', {
   import: 'default',
 });
 
+// Import invalid examples from docs/examples/invalid
+const invalidExampleModules = import.meta.glob<string>(
+  '../../docs/examples/invalid/*.wat',
+  {
+    eager: true,
+    query: '?raw',
+    import: 'default',
+  }
+);
+
 // Extract a human-readable label from the file content
 // Looks for a comment on the first line like: ";; Exception Handling Proposal"
 function extractLabel(code: string, filename: string): string {
@@ -35,13 +45,30 @@ function filenameToId(path: string): string {
 }
 
 // Build the examples array from imported modules
-export const examples: ExampleDefinition[] = Object.entries(exampleModules)
-  .map(([path, code]) => {
-    const id = filenameToId(path);
-    const label = extractLabel(code, id);
+const validExamples = Object.entries(exampleModules).map(([path, code]) => {
+  const id = filenameToId(path);
+  const label = extractLabel(code, id);
+  return { id, label, code };
+});
+
+// Build invalid examples with "Failure - " prefix
+const invalidExamples = Object.entries(invalidExampleModules).map(
+  ([path, code]) => {
+    const id = `invalid_${filenameToId(path)}`;
+    let label = extractLabel(code, id);
+    // Replace "Invalid: " prefix with "Failure - " or add "Failure - " prefix
+    if (label.startsWith('Invalid: ')) {
+      label = 'Failure - ' + label.slice('Invalid: '.length);
+    } else {
+      label = 'Failure - ' + label;
+    }
     return { id, label, code };
-  })
-  .sort((a, b) => a.label.localeCompare(b.label));
+  }
+);
+
+export const examples: ExampleDefinition[] = [...validExamples, ...invalidExamples].sort(
+  (a, b) => a.label.localeCompare(b.label)
+);
 
 // Helper to get example by ID
 export function getExampleById(id: string): ExampleDefinition | undefined {
