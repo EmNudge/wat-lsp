@@ -102,6 +102,41 @@ jobs:
       - name: Run tests (native, release mode)
         run: cargo test --features native --release --verbose
 
+      - name: Validate example files with wat-check
+        shell: bash
+        run: |
+          cargo build --features native --release --bin wat-check
+          failed=0
+
+          echo "=== Checking valid examples (should pass) ==="
+          for file in docs/examples/*.wat; do
+            echo "Checking $file..."
+            if ! ./target/release/wat-check "$file"; then
+              echo "ERROR: $file has diagnostics (expected none)"
+              failed=1
+            fi
+          done
+
+          echo ""
+          echo "=== Checking invalid examples (should fail) ==="
+          for file in docs/examples/invalid/*.wat; do
+            echo "Checking $file..."
+            if ./target/release/wat-check "$file" 2>/dev/null; then
+              echo "ERROR: $file passed validation (expected diagnostics)"
+              failed=1
+            else
+              echo "OK: $file correctly rejected"
+            fi
+          done
+
+          if [ $failed -eq 1 ]; then
+            echo ""
+            echo "Example validation failed"
+            exit 1
+          fi
+          echo ""
+          echo "All example files validated correctly"
+
   clippy:
     name: Clippy
     needs: changes
