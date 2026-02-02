@@ -47,3 +47,5 @@ vscode-extension/package-lock.json
 
 # wasm-pack output folder
 pkg/
+
+packages/playground/test-results

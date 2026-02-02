@@ -131,14 +131,15 @@ impl WatLSP {
     pub fn provide_diagnostics(&self) -> JsValue {
         let js_array = js_sys::Array::new();
 
-        // Add syntax errors from wast parser
-        let syntax_diagnostics = validate_wat(&self.document);
-        for diag in syntax_diagnostics {
-            js_array.push(&diagnostic_to_js(&diag));
-        }
-
-        // Add semantic diagnostics if tree and symbols are available
+        // Add tree-sitter based syntax diagnostics and semantic diagnostics
         if let (Some(tree), Some(symbols)) = (&self.tree, &self.symbols) {
+            // Add syntax errors from tree-sitter ERROR nodes
+            let syntax_diagnostics = provide_tree_sitter_diagnostics(tree, &self.document);
+            for diag in syntax_diagnostics {
+                js_array.push(&diagnostic_to_js(&diag));
+            }
+
+            // Add semantic diagnostics
             let semantic_diagnostics =
                 provide_wasm_semantic_diagnostics(tree, &self.document, symbols);
             for diag in semantic_diagnostics {
@@ -805,7 +806,7 @@ struct WasmDiagnostic {
 use crate::instruction_metadata::{get_instruction_arity_map, InstructionArity, OperandMode};
 use crate::ts_facade::Node;
 use crate::utils::{
-    determine_instruction_context_at_node, find_containing_function, InstructionContext,
+    determine_instruction_context_at_node, find_containing_function, InstructionContext, STRUCT_OPS,
 };
 use std::collections::HashMap;
 
@@ -841,6 +842,23 @@ fn walk_tree_for_diagnostics(
         // Continue recursing for other checks (references, etc.)
     }
 
+    // Special handling for catch clauses - they have tag and/or label references
+    if kind == "catch_clause" {
+        check_catch_clause_references(&node, source, symbols, diagnostics);
+        return;
+    }
+
+    // Special handling for legacy try catch clause
+    if kind == "try_catch_clause" {
+        check_try_catch_clause_references(&node, source, symbols, diagnostics);
+        // Continue recursing to check nested instructions
+    }
+
+    // Check folded expression operand count (expr1_plain nodes)
+    if kind == "expr1_plain" {
+        check_folded_expr_operand_count(&node, source, symbols, diagnostics);
+    }
+
     // Check for undefined references based on instruction context
     let context = determine_instruction_context_at_node(&node, source);
     if context != InstructionContext::General {
@@ -870,7 +888,392 @@ fn check_undefined_references(
     diagnostics: &mut Vec<WasmDiagnostic>,
     context: &InstructionContext,
 ) {
+    let text = &source[node.byte_range()];
+    let first_token = text.split_whitespace().next().unwrap_or("");
+
+    // For struct.get/struct.set, only the first index is a type reference
+    // The second index is a field reference which we don't validate
+    if *context == InstructionContext::Type && STRUCT_OPS.contains(&first_token) {
+        // Only validate the first index child
+        find_first_index_identifier(node, source, symbols, diagnostics, context);
+        return;
+    }
+
     find_undefined_identifiers(node, source, symbols, diagnostics, context);
+}
+
+/// Find and validate only the first index identifier in a node
+/// Used for instructions like struct.get where only the first index is a type
+fn find_first_index_identifier(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+    context: &InstructionContext,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" {
+            // Found the first index, check its identifier
+            find_undefined_identifiers(&child, source, symbols, diagnostics, context);
+            return; // Only check the first one
+        }
+        // Recurse into instr_plain to find the index
+        if child.kind() == "instr_plain" {
+            find_first_index_identifier(&child, source, symbols, diagnostics, context);
+            return;
+        }
+    }
+}
+
+/// Check operand count in folded expressions (expr1_plain nodes)
+fn check_folded_expr_operand_count(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    // Get children
+    let mut cursor = node.walk();
+    let children: Vec<_> = node.children(&mut cursor).collect();
+
+    // First child should be instr_plain
+    let first_child = match children.first() {
+        Some(c) if c.kind() == "instr_plain" => c,
+        _ => return,
+    };
+
+    // Get the instruction name from instr_plain
+    let mut instr_cursor = first_child.walk();
+    let instr_children: Vec<_> = first_child.children(&mut instr_cursor).collect();
+    if instr_children.is_empty() {
+        return;
+    }
+
+    let instr_kind = instr_children[0].kind();
+    let instr_name = match instr_kind.as_str() {
+        "op_const" => {
+            let mut const_cursor = instr_children[0].walk();
+            let const_children: Vec<_> = instr_children[0].children(&mut const_cursor).collect();
+            if const_children.is_empty() {
+                return;
+            }
+            source[const_children[0].byte_range()].trim().to_string()
+        }
+        _ => source[instr_children[0].byte_range()].trim().to_string(),
+    };
+
+    // Count expr children (these are the operands)
+    let operand_count = children
+        .iter()
+        .skip(1)
+        .filter(|c| c.kind() == "expr")
+        .count();
+
+    // Validate operand count using the arity map
+    let arity_map = get_instruction_arity_map();
+    if let Some(arity) = arity_map.get(instr_name.as_str()) {
+        match arity.operand_mode {
+            OperandMode::Fixed(expected) => {
+                if operand_count > expected {
+                    // Error: too many operands
+                    let start_point = node.start_position();
+                    let end_point = node.end_position();
+                    diagnostics.push(WasmDiagnostic {
+                        line: start_point.row as u32,
+                        character: start_point.column as u32,
+                        end_character: end_point.column as u32,
+                        message: format!(
+                            "Instruction '{}' expects at most {} operands, but got {}",
+                            instr_name, expected, operand_count
+                        ),
+                        severity: 1,
+                    });
+                } else if operand_count > 0 && operand_count < expected {
+                    // Check if we're in a nested context where stack values aren't available
+                    if is_nested_in_expr(node) {
+                        let start_point = node.start_position();
+                        let end_point = node.end_position();
+                        diagnostics.push(WasmDiagnostic {
+                            line: start_point.row as u32,
+                            character: start_point.column as u32,
+                            end_character: end_point.column as u32,
+                            message: format!(
+                                "Instruction '{}' expects {} operands, but got {}",
+                                instr_name, expected, operand_count
+                            ),
+                            severity: 1,
+                        });
+                    }
+                }
+            }
+            OperandMode::Dynamic => {
+                // Dynamic operand count - check based on instruction type
+                check_dynamic_operands(
+                    node,
+                    &instr_name,
+                    operand_count,
+                    symbols,
+                    source,
+                    diagnostics,
+                );
+            }
+        }
+    }
+}
+
+/// Check if a node is nested inside another expr (meaning it can't use stack values)
+fn is_nested_in_expr(node: &Node) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "expr" {
+            // Found parent expr, check if its parent is also expr
+            if let Some(grandparent) = parent.parent() {
+                if grandparent.kind() == "expr" || grandparent.kind().starts_with("expr1_") {
+                    return true;
+                }
+            }
+        }
+        current = parent.parent();
+    }
+    false
+}
+
+/// Check dynamic operand count for specific instructions
+fn check_dynamic_operands(
+    node: &Node,
+    instr_name: &str,
+    operand_count: usize,
+    symbols: &SymbolTable,
+    source: &str,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    match instr_name {
+        "call" => {
+            // Get function reference and check param count
+            if let Some(func_name) = extract_instruction_index(node, source) {
+                if let Some(func) = symbols.get_function_by_name(&func_name) {
+                    let expected = func.parameters.len();
+                    validate_operand_count(node, instr_name, operand_count, expected, diagnostics);
+                } else if let Ok(idx) = func_name.parse::<usize>() {
+                    if let Some(func) = symbols.get_function_by_index(idx) {
+                        let expected = func.parameters.len();
+                        validate_operand_count(
+                            node,
+                            instr_name,
+                            operand_count,
+                            expected,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+        }
+        "throw" => {
+            // Get tag reference and check param count
+            if let Some(tag_name) = extract_instruction_index(node, source) {
+                if let Some(tag) = symbols.get_tag_by_name(&tag_name) {
+                    let expected = tag.params.len();
+                    validate_operand_count(node, instr_name, operand_count, expected, diagnostics);
+                } else if let Ok(idx) = tag_name.parse::<usize>() {
+                    if let Some(tag) = symbols.get_tag_by_index(idx) {
+                        let expected = tag.params.len();
+                        validate_operand_count(
+                            node,
+                            instr_name,
+                            operand_count,
+                            expected,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+        }
+        _ => {
+            // Skip other dynamic instructions for now
+        }
+    }
+}
+
+/// Helper to validate operand count and push diagnostic if invalid
+fn validate_operand_count(
+    node: &Node,
+    instr_name: &str,
+    actual: usize,
+    expected: usize,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    if actual > expected {
+        let start_point = node.start_position();
+        let end_point = node.end_position();
+        diagnostics.push(WasmDiagnostic {
+            line: start_point.row as u32,
+            character: start_point.column as u32,
+            end_character: end_point.column as u32,
+            message: format!(
+                "Instruction '{}' expects at most {} operands, but got {}",
+                instr_name, expected, actual
+            ),
+            severity: 1,
+        });
+    } else if actual > 0 && actual < expected && is_nested_in_expr(node) {
+        let start_point = node.start_position();
+        let end_point = node.end_position();
+        diagnostics.push(WasmDiagnostic {
+            line: start_point.row as u32,
+            character: start_point.column as u32,
+            end_character: end_point.column as u32,
+            message: format!(
+                "Instruction '{}' expects {} operands, but got {}",
+                instr_name, expected, actual
+            ),
+            severity: 1,
+        });
+    }
+}
+
+/// Extract the type/function/tag index from an instruction node
+fn extract_instruction_index(node: &Node, source: &str) -> Option<String> {
+    // Navigate to find instr_plain > index/identifier
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "instr_plain" {
+            let mut instr_cursor = child.walk();
+            for instr_child in child.children(&mut instr_cursor) {
+                if instr_child.kind() == "index" || instr_child.kind() == "identifier" {
+                    return Some(source[instr_child.byte_range()].trim().to_string());
+                }
+                // Also check inside op_ nodes
+                if instr_child.kind().starts_with("op_") {
+                    let mut op_cursor = instr_child.walk();
+                    for op_child in instr_child.children(&mut op_cursor) {
+                        if op_child.kind() == "index" || op_child.kind() == "identifier" {
+                            return Some(source[op_child.byte_range()].trim().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check references in a catch_clause node (try_table syntax)
+/// For (catch $tag $label) and (catch_ref $tag $label): first index is tag, second is label
+/// For (catch_all $label) and (catch_all_ref $label): single index is label
+fn check_catch_clause_references(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    let text = &source[node.byte_range()];
+
+    // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
+    let has_tag =
+        text.contains("catch_ref") || (text.contains("catch") && !text.contains("catch_all"));
+
+    // Collect all index children
+    let mut cursor = node.walk();
+    let indices: Vec<_> = node
+        .children(&mut cursor)
+        .filter(|c| c.kind() == "index")
+        .collect();
+
+    for (idx, index_node) in indices.iter().enumerate() {
+        // Find identifier within the index
+        let mut idx_cursor = index_node.walk();
+        for child in index_node.children(&mut idx_cursor) {
+            if child.kind() == "identifier" {
+                let identifier_name = &source[child.byte_range()];
+                if !identifier_name.starts_with('$') {
+                    continue;
+                }
+
+                let start_point = child.start_position();
+                let end_point = child.end_position();
+                let position = crate::core::types::Position::new(
+                    start_point.row as u32,
+                    start_point.column as u32,
+                );
+
+                // First index is tag (if has_tag), remaining are labels
+                let is_tag_reference = has_tag && idx == 0;
+
+                let is_defined = if is_tag_reference {
+                    symbols.get_tag_by_name(identifier_name).is_some()
+                } else {
+                    // Label reference - check block labels in containing function
+                    if let Some(func) = find_containing_function(symbols, position) {
+                        func.blocks.iter().any(|block| {
+                            format!("${}", block.label) == identifier_name
+                                || block.label == identifier_name
+                        })
+                    } else {
+                        false
+                    }
+                };
+
+                if !is_defined {
+                    let message = if is_tag_reference {
+                        format!("Undefined tag '{}'", identifier_name)
+                    } else {
+                        format!("Undefined label '{}'", identifier_name)
+                    };
+
+                    diagnostics.push(WasmDiagnostic {
+                        line: start_point.row as u32,
+                        character: start_point.column as u32,
+                        end_character: end_point.column as u32,
+                        message,
+                        severity: 1,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Check references in a try_catch_clause node (legacy try syntax)
+/// For (catch $tag instr*): the index is a tag reference
+fn check_try_catch_clause_references(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    // Find the index child which contains the tag reference
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" {
+            // Find the identifier within the index
+            let mut idx_cursor = child.walk();
+            for idx_child in child.children(&mut idx_cursor) {
+                if idx_child.kind() == "identifier" {
+                    let identifier_name = &source[idx_child.byte_range()];
+                    if !identifier_name.starts_with('$') {
+                        continue;
+                    }
+
+                    let start_point = idx_child.start_position();
+                    let end_point = idx_child.end_position();
+
+                    // It's a tag reference
+                    if symbols.get_tag_by_name(identifier_name).is_none() {
+                        diagnostics.push(WasmDiagnostic {
+                            line: start_point.row as u32,
+                            character: start_point.column as u32,
+                            end_character: end_point.column as u32,
+                            message: format!("Undefined tag '{}'", identifier_name),
+                            severity: 1,
+                        });
+                    }
+                }
+            }
+            // Only one index in try_catch_clause
+            break;
+        }
+    }
 }
 
 fn find_undefined_identifiers(
@@ -1638,33 +2041,56 @@ fn create_stack_underflow_diagnostic(
     }
 }
 
-/// Validate WAT source and return diagnostics
-fn validate_wat(source: &str) -> Vec<WasmDiagnostic> {
-    if source.trim().is_empty() {
-        return vec![];
-    }
-
-    let buf = match wast::parser::ParseBuffer::new(source) {
-        Ok(buf) => buf,
-        Err(e) => return vec![wast_error_to_diagnostic(&e, source)],
-    };
-
-    match wast::parser::parse::<wast::Wat>(&buf) {
-        Ok(_) => vec![],
-        Err(e) => vec![wast_error_to_diagnostic(&e, source)],
-    }
+/// Provide tree-sitter based syntax diagnostics (WASM version)
+fn provide_tree_sitter_diagnostics(
+    tree: &crate::ts_facade::Tree,
+    source: &str,
+) -> Vec<WasmDiagnostic> {
+    let mut diagnostics = Vec::new();
+    walk_tree_for_syntax_errors(tree.root_node(), source, &mut diagnostics);
+    diagnostics
 }
 
-fn wast_error_to_diagnostic(error: &wast::Error, source: &str) -> WasmDiagnostic {
-    let span = error.span();
-    let (line, col) = span.linecol_in(source);
+/// Recursively walk the tree and collect ERROR nodes as diagnostics
+fn walk_tree_for_syntax_errors(node: Node, source: &str, diagnostics: &mut Vec<WasmDiagnostic>) {
+    if node.kind() == "ERROR" {
+        let start_point = node.start_position();
+        let end_point = node.end_position();
+        let text = &source[node.byte_range()];
 
-    WasmDiagnostic {
-        line: line as u32,
-        character: col as u32,
-        end_character: (col + 1) as u32,
-        message: error.to_string(),
-        severity: 1, // Error
+        let message = if text.trim().is_empty() {
+            "Syntax error: unexpected token".to_string()
+        } else {
+            format!("Syntax error near: {}", text.lines().next().unwrap_or(text))
+        };
+
+        diagnostics.push(WasmDiagnostic {
+            line: start_point.row as u32,
+            character: start_point.column as u32,
+            end_character: end_point.column as u32,
+            message,
+            severity: 1, // Error
+        });
+    }
+
+    // Check for MISSING nodes as well (incomplete syntax)
+    if node.is_missing() {
+        let start_point = node.start_position();
+        let end_point = node.end_position();
+
+        diagnostics.push(WasmDiagnostic {
+            line: start_point.row as u32,
+            character: start_point.column as u32,
+            end_character: end_point.column as u32,
+            message: format!("Missing {}", node.kind()),
+            severity: 1, // Error
+        });
+    }
+
+    // Recursively check children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_tree_for_syntax_errors(child, source, diagnostics);
     }
 }
 

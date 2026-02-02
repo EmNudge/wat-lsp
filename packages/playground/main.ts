@@ -108,6 +108,10 @@ let wasmModule: WebAssembly.Module | null = null;
 let wasmInstance: WebAssembly.Instance | null = null;
 let wasmBytes: Uint8Array | null = null;
 let watGrammar: vsctm.IGrammar | null = null;
+let currentExampleId: string = ''; // Track currently loaded example
+
+// Track error counts per file for sidebar styling
+const fileErrors: Map<string, number> = new Map();
 
 // DOM element references (initialized in init())
 let elements: {
@@ -622,6 +626,7 @@ async function initMonaco(): Promise<void> {
 
   // Create editor with default example
   const defaultExample = getDefaultExample();
+  currentExampleId = defaultExample.id;
   editor = monaco.editor.create(document.getElementById('editor')!, {
     value: defaultExample.code,
     language: 'wat',
@@ -713,6 +718,9 @@ function updateDiagnostics(): void {
   }));
 
   monaco.editor.setModelMarkers(editor.getModel()!, 'wat-lsp', markers);
+
+  // Update current file's error state in sidebar
+  updateCurrentFileErrors();
 
   // Update diagnostics panel
   if (diagnostics.length === 0) {
@@ -852,6 +860,70 @@ function goToLine(line: number, col: number): void {
 }
 (window as unknown as { goToLine: typeof goToLine }).goToLine = goToLine;
 
+// Run diagnostics on all example files and update the fileErrors map
+function updateAllFileErrors(): void {
+  if (!watLSP || !watLSP.ready) return;
+
+  for (const example of examples) {
+    watLSP.parse(example.code);
+    const diagnostics = watLSP.provideDiagnostics();
+    // Count only errors (severity 1)
+    const errorCount = diagnostics.filter(d => d.severity === 1).length;
+    fileErrors.set(example.id, errorCount);
+  }
+
+  // Re-parse current editor content to restore LSP state
+  if (editor) {
+    watLSP.parse(editor.getValue());
+  }
+
+  updateFileTreeErrors();
+}
+
+// Update file tree styling based on fileErrors
+function updateFileTreeErrors(): void {
+  const fileTree = elements.fileTree;
+  if (!fileTree) return;
+
+  const treeItems = fileTree.querySelectorAll<HTMLElement>('.tree-item');
+  treeItems.forEach(item => {
+    const id = item.getAttribute('data-id');
+    if (id) {
+      const errorCount = fileErrors.get(id) || 0;
+      if (errorCount > 0) {
+        item.classList.add('has-error');
+      } else {
+        item.classList.remove('has-error');
+      }
+    }
+  });
+}
+
+// Update error state for the current file
+function updateCurrentFileErrors(): void {
+  if (!watLSP || !watLSP.ready || !currentExampleId) return;
+
+  const diagnostics = watLSP.provideDiagnostics();
+  const errorCount = diagnostics.filter(d => d.severity === 1).length;
+  fileErrors.set(currentExampleId, errorCount);
+  updateFileTreeErrors();
+}
+
+// Select a file in the file tree by ID
+function selectFileInTree(id: string): void {
+  const fileTree = elements.fileTree;
+  if (!fileTree) return;
+
+  // Remove selection from all items
+  fileTree.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+
+  // Select the item with matching data-id
+  const item = fileTree.querySelector<HTMLElement>(`.tree-item[data-id="${id}"]`);
+  if (item) {
+    item.classList.add('selected');
+  }
+}
+
 // Register semantic tokens provider for tree-sitter based syntax highlighting
 function registerSemanticTokensProvider(): void {
   if (!watLSP) {
@@ -920,6 +992,9 @@ async function initLSP(): Promise<boolean> {
       updateDiagnostics();
       updateLSPDebugPanel();
     }
+
+    // Run diagnostics on all files to populate sidebar error indicators
+    updateAllFileErrors();
 
     (window as unknown as { watLSP: WatLSP | null }).watLSP = watLSP;
 
@@ -1245,6 +1320,7 @@ function loadExample(id: string): void {
   const example = getExampleById(id);
   if (!example) return;
 
+  currentExampleId = id;
   editor.setValue(example.code);
   monaco.editor.setModelMarkers(editor.getModel()!, 'wat', []);
 
@@ -1607,6 +1683,9 @@ async function init(): Promise<void> {
 
   // Initialize Monaco, wabt, and LSP in parallel
   await Promise.all([initMonaco(), initWabt(), initLSP()]);
+
+  // Select the default example in the file tree
+  selectFileInTree(currentExampleId);
 
   // Bind event handlers
   elements.compileBtn.addEventListener('click', compile);

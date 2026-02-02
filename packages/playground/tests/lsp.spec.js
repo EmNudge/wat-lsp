@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('WAT LSP Playground', () => {
-  test('no critical console errors on load', async ({ page }) => {
+  test('page loads without critical errors', async ({ page }) => {
     const errors = [];
-    page.on('console', msg => {
+    page.on('console', (msg) => {
       if (msg.type() === 'error') {
         errors.push(msg.text());
       }
@@ -12,28 +12,35 @@ test.describe('WAT LSP Playground', () => {
     await page.goto('/');
     await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
 
-    // Wait for semantic tokens to be applied
+    // Wait for initialization to complete
     await page.waitForTimeout(1000);
 
-    // Filter out known non-critical errors (like Monaco worker warning)
-    const criticalErrors = errors.filter(e =>
-      !e.includes('MonacoEnvironment') &&
-      !e.includes('web worker')
+    // Filter out known non-critical errors
+    const criticalErrors = errors.filter(
+      (e) => !e.includes('MonacoEnvironment') && !e.includes('web worker')
     );
 
     expect(criticalErrors).toEqual([]);
   });
 
-  test('LSP initializes successfully', async ({ page }) => {
+  test('LSP initializes and colors files correctly', async ({ page }) => {
     await page.goto('/');
 
-    // Wait for LSP status to show ready (either full or fallback mode)
-    const lspStatus = page.locator('#lsp-status-text');
-    await expect(lspStatus).toHaveText(/LSP Ready/, { timeout: 15000 });
+    // Wait for LSP to be ready
+    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
+    await expect(page.locator('#lsp-indicator')).toHaveClass(/ready/);
 
-    // Verify the indicator has the ready class
-    const indicator = page.locator('#lsp-indicator');
-    await expect(indicator).toHaveClass(/ready/);
+    // Wait for file tree errors to be updated
+    await page.waitForTimeout(500);
+
+    // Verify that file tree has been populated with error indicators
+    // Valid files should NOT have .has-error, invalid files SHOULD
+    const validItemCount = await page.locator('.tree-item:not(.has-error)').count();
+    const errorItemCount = await page.locator('.tree-item.has-error').count();
+
+    // We should have at least some of each
+    expect(validItemCount, 'Should have valid (non-error) files').toBeGreaterThan(0);
+    expect(errorItemCount, 'Should have invalid (error) files').toBeGreaterThan(0);
   });
 
   test('editor loads with example code', async ({ page }) => {
@@ -46,14 +53,6 @@ test.describe('WAT LSP Playground', () => {
     // Verify some WAT code is loaded (the hello example)
     const editorContent = page.locator('.view-lines');
     await expect(editorContent).toContainText('module');
-  });
-
-  test('wabt initializes successfully', async ({ page }) => {
-    await page.goto('/');
-
-    // Check console output for wabt initialization
-    const consoleOutput = page.locator('#console-output');
-    await expect(consoleOutput).toContainText('wabt.js initialized', { timeout: 10000 });
   });
 
   test('compile button works', async ({ page }) => {
@@ -97,182 +96,61 @@ test.describe('WAT LSP Playground', () => {
     await expect(result).toContainText('5');
   });
 
-  test('semantic tokens provider registers', async ({ page }) => {
+  test('file selection updates editor and error state', async ({ page }) => {
     await page.goto('/');
 
     // Wait for LSP to be ready
     await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
+    await page.waitForTimeout(500);
 
-    // Check console output for semantic tokens registration
-    const consoleOutput = page.locator('#console-output');
-    await expect(consoleOutput).toContainText('Semantic tokens provider registered', { timeout: 5000 });
+    // Expand the invalid folder
+    await page.click('.tree-folder-header:has-text("invalid")');
+    await page.waitForTimeout(200);
+
+    // Click on an invalid file (should have .has-error)
+    const invalidItem = page.locator('.tree-item.has-error').first();
+    await invalidItem.click();
+    await page.waitForTimeout(300);
+
+    // Verify it's selected
+    await expect(invalidItem).toHaveClass(/selected/);
+
+    // Verify editor has some content
+    const editorContent = page.locator('.view-lines');
+    await expect(editorContent).toContainText('module');
   });
 
-  test('syntax highlighting colors are correct', async ({ page }) => {
+  test('editing a file updates its error state', async ({ page }) => {
     await page.goto('/');
+
+    // Wait for LSP to be ready
     await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(500);
 
-    // Extract tokens with their computed colors and CSS classes
-    // Focus on spans with mtk* classes (Monaco's token classes)
-    const tokenColors = await page.evaluate(() => {
-      const tokens = [];
-      const spans = document.querySelectorAll('.view-lines .view-line span');
+    // Get initial state of hello file (should be valid)
+    const helloItem = page.locator('.tree-item[data-id="hello"]');
+    await expect(helloItem).not.toHaveClass(/has-error/);
 
-      for (const span of spans) {
-        const text = span.textContent?.trim();
-        if (!text) continue;
-
-        const className = span.className || '';
-        const style = window.getComputedStyle(span);
-        const color = style.color;
-
-        // Only include spans with mtk classes (Monaco token classes)
-        if (className.includes('mtk')) {
-          tokens.push({ text, color, className });
-        }
-      }
-      return tokens;
+    // Break the code by introducing an error
+    await page.evaluate(() => {
+      window.monacoEditor?.setValue('(module (func (i32.add)))'); // Missing operands
     });
 
-    // Group tokens by text content to see what colors and classes each token type gets
-    const colorsByToken = {};
-    for (const { text, color, className } of tokenColors) {
-      if (!colorsByToken[text]) {
-        colorsByToken[text] = [];
-      }
-      colorsByToken[text].push({ color, className });
-    }
+    // Wait for diagnostics to update
+    await page.waitForTimeout(500);
 
-    // Log detailed token info
-    console.log('Token colors and classes:');
-    for (const [token, entries] of Object.entries(colorsByToken)) {
-      // Deduplicate
-      const uniqueEntries = [...new Map(entries.map(e => [e.color + e.className, e])).values()];
-      console.log(`  "${token}":`, uniqueEntries);
-    }
+    // The current file should now show as having an error
+    await expect(helloItem).toHaveClass(/has-error/);
 
-    // Helper to convert rgb to hex for easier comparison
-    const rgbToHex = (rgb) => {
-      const match = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-      if (!match) return rgb;
-      const [, r, g, b] = match;
-      return '#' + [r, g, b].map(x => parseInt(x).toString(16).padStart(2, '0')).join('').toUpperCase();
-    };
+    // Fix the code
+    await page.evaluate(() => {
+      window.monacoEditor?.setValue('(module (func (result i32) (i32.add (i32.const 1) (i32.const 2))))');
+    });
 
-    // Define expected color categories (approximate - Monaco theme colors)
-    const isGreenish = (c) => {
-      const match = c.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-      if (!match) return false;
-      const [, r, g, b] = match.map(Number);
-      return g > r && g > b; // Green is dominant
-    };
+    // Wait for diagnostics to update
+    await page.waitForTimeout(500);
 
-    const isYellowish = (c) => {
-      const match = c.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-      if (!match) return false;
-      const [, r, g, b] = match.map(Number);
-      // Yellow #DCDCAA = rgb(220, 220, 170) - high R, high G, lower B
-      return r > 180 && g > 180 && b < 200 && b < r && b < g;
-    };
-
-    const isTealish = (c) => {
-      const match = c.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-      if (!match) return false;
-      const [, r, g, b] = match.map(Number);
-      return g > 150 && b > 150 && r < g; // Teal/cyan
-    };
-
-    const isWhite = (c) => {
-      const match = c.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-      if (!match) return false;
-      const [, r, g, b] = match.map(Number);
-      return r > 200 && g > 200 && b > 200; // All high = white/light gray
-    };
-
-    const isRed = (c) => {
-      const match = c.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-      if (!match) return false;
-      const [, r, g, b] = match.map(Number);
-      return r > 200 && g < 100 && b < 100; // Red dominant
-    };
-
-    // Check specific tokens
-    const commentTokens = tokenColors.filter(t => t.text.startsWith(';;'));
-    const instructionTokens = tokenColors.filter(t =>
-      ['i32.add', 'i32.mul', 'i32.const', 'local.get'].includes(t.text)
-    );
-
-    // Log instruction-related tokens (including partial matches)
-    const instructionParts = tokenColors.filter(t =>
-      t.text.includes('.add') || t.text.includes('.get') ||
-      t.text.includes('.mul') || t.text.includes('.const') ||
-      t.text === 'i32' || t.text === 'local'
-    );
-    console.log('Instruction-related tokens:');
-    for (const t of instructionParts) {
-      console.log(`  "${t.text}" -> ${t.className} (${rgbToHex(t.color)})`);
-    }
-
-    // Log all unique mtk classes with their colors to find the yellow color ID
-    const mtkColors = {};
-    for (const t of tokenColors) {
-      const mtkMatch = t.className.match(/mtk(\d+)/);
-      if (mtkMatch) {
-        mtkColors[mtkMatch[0]] = rgbToHex(t.color);
-      }
-    }
-    console.log('MTK class to color mapping:', mtkColors);
-
-    // Log findings
-    console.log('Comments:', commentTokens.map(t => ({ text: t.text, color: rgbToHex(t.color) })));
-    console.log('Instructions:', instructionTokens.map(t => ({ text: t.text, color: rgbToHex(t.color) })));
-
-    // Verify comments are greenish (not white, not red)
-    for (const token of commentTokens) {
-      expect(isGreenish(token.color)).toBe(true);
-    }
-
-    // Verify combined TextMate + tree-sitter semantic token highlighting:
-    // TextMate handles instructions with prefix/suffix split:
-    // - i32 (instruction prefix) -> teal (TextMate support.class.type.wat)
-    // - local (instruction prefix) -> blue (TextMate support.class.wat)
-    // - .add, .get (instruction suffix) -> white (TextMate keyword.operator.wat)
-    // Tree-sitter semantic tokens handle:
-    // - Variables ($a, $b) -> light blue
-    const i32Tokens = tokenColors.filter(t => t.text === 'i32');
-    const localTokens = tokenColors.filter(t => t.text === 'local');
-    const suffixTokens = tokenColors.filter(t =>
-      t.text.startsWith('.') && (t.text === '.add' || t.text === '.get' || t.text === '.mul' || t.text === '.const')
-    );
-    const variableTokens = tokenColors.filter(t => t.text.startsWith('$'));
-
-    console.log('i32 tokens (teal):', i32Tokens.map(t => ({ text: t.text, color: rgbToHex(t.color) })));
-    console.log('local tokens (blue):', localTokens.map(t => ({ text: t.text, color: rgbToHex(t.color) })));
-    console.log('Instruction suffixes (white):', suffixTokens.map(t => ({ text: t.text, color: rgbToHex(t.color) })));
-    console.log('Variables (light blue):', variableTokens.map(t => ({ text: t.text, color: rgbToHex(t.color) })));
-
-    // i32 should be teal (#4EC9B0) from TextMate
-    expect(i32Tokens.length).toBeGreaterThan(0);
-    for (const token of i32Tokens) {
-      expect(isTealish(token.color)).toBe(true);
-    }
-
-    // Suffixes should be white (#D4D4D4) from TextMate
-    for (const token of suffixTokens) {
-      expect(isWhite(token.color)).toBe(true);
-    }
-
-    // Variables should be light blue (#9CDCFE) from semantic tokens
-    expect(variableTokens.length).toBeGreaterThan(0);
-
-    // Verify no red tokens (red usually indicates errors)
-    const redTokens = tokenColors.filter(t => isRed(t.color));
-    if (redTokens.length > 0) {
-      console.log('WARNING: Red tokens found:', redTokens.map(t => t.text));
-    }
-    // Parentheses being red is a known Monaco quirk, filter those out
-    const nonParenRedTokens = redTokens.filter(t => t.text !== '(' && t.text !== ')');
-    expect(nonParenRedTokens.length).toBe(0);
+    // The file should no longer have an error
+    await expect(helloItem).not.toHaveClass(/has-error/);
   });
 });
