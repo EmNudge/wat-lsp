@@ -45,9 +45,21 @@ fn unified_tree_walk(
 ) {
     let kind = node.kind();
 
-    // Special handling for catch_clause: first index is tag, second is label
+    // Special handling for catch_clause (try_table): first index is tag, second is label
     if kind == "catch_clause" {
         check_catch_clause_references(&node, source, symbols, diagnostics);
+        return;
+    }
+
+    // Special handling for try_catch_clause (legacy try): index is a tag reference
+    if kind == "try_catch_clause" {
+        check_try_catch_clause_references(&node, source, symbols, diagnostics);
+        // Continue recursing to check nested instructions
+    }
+
+    // Special handling for try_delegate_clause (legacy try): index is a label reference
+    if kind == "try_delegate_clause" {
+        check_try_delegate_clause_references(&node, source, symbols, diagnostics);
         return;
     }
 
@@ -294,6 +306,98 @@ fn check_catch_clause_references(
                     diagnostics.push(diagnostic);
                 }
             }
+        }
+    }
+}
+
+/// Check references in a try_catch_clause node (legacy try syntax)
+/// For (catch $tag instr*): the index is a tag reference
+fn check_try_catch_clause_references(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Find the index child which contains the tag reference
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" {
+            // Find the identifier within the index
+            let mut idx_cursor = child.walk();
+            for idx_child in child.children(&mut idx_cursor) {
+                if idx_child.kind() == "identifier" {
+                    let identifier_name = &source[idx_child.byte_range()];
+                    if !identifier_name.starts_with('$') {
+                        continue;
+                    }
+
+                    // Check if the tag is defined
+                    if symbols.get_tag_by_name(identifier_name).is_none() {
+                        let diagnostic = create_undefined_reference_diagnostic(
+                            &idx_child,
+                            identifier_name,
+                            &InstructionContext::Tag,
+                        );
+                        diagnostics.push(diagnostic);
+                    }
+                }
+            }
+            // Only one index in try_catch_clause
+            break;
+        }
+    }
+}
+
+/// Check references in a try_delegate_clause node (legacy try syntax)
+/// For (delegate $label): the index is a label reference
+fn check_try_delegate_clause_references(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Find the index child which contains the label reference
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" {
+            // Find the identifier within the index
+            let mut idx_cursor = child.walk();
+            for idx_child in child.children(&mut idx_cursor) {
+                if idx_child.kind() == "identifier" {
+                    let identifier_name = &source[idx_child.byte_range()];
+                    if !identifier_name.starts_with('$') {
+                        continue;
+                    }
+
+                    let start_point = idx_child.start_position();
+                    let position = Position {
+                        line: start_point.row as u32,
+                        character: start_point.column as u32,
+                    };
+
+                    // Check if the label is defined
+                    let is_defined =
+                        if let Some(func) = find_containing_function(symbols, position.into()) {
+                            func.blocks.iter().any(|block| {
+                                format!("${}", block.label) == identifier_name
+                                    || block.label == identifier_name
+                            })
+                        } else {
+                            false
+                        };
+
+                    if !is_defined {
+                        let diagnostic = create_undefined_reference_diagnostic(
+                            &idx_child,
+                            identifier_name,
+                            &InstructionContext::Branch,
+                        );
+                        diagnostics.push(diagnostic);
+                    }
+                }
+            }
+            // Only one index in try_delegate_clause
+            break;
         }
     }
 }
@@ -2137,5 +2241,124 @@ mod tests {
         assert!(!is_memory_load_store("i32.add"));
         assert!(!is_memory_load_store("memory.size"));
         assert!(!is_memory_load_store("local.get"));
+    }
+
+    #[test]
+    fn test_legacy_try_catch_valid() {
+        // Test that legacy try syntax with valid tag reference works
+        let document = r#"(module
+  (tag $my_error (param i32))
+
+  (func (export "test") (result i32)
+    (try (result i32)
+      (do (i32.const 42))
+      (catch $my_error (drop) (i32.const 0))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let tag_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined tag") && d.message.contains("$my_error"))
+            .collect();
+
+        assert_eq!(
+            tag_errors.len(),
+            0,
+            "Valid tag in legacy try catch should not produce errors, got: {:?}",
+            tag_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_legacy_try_catch_undefined_tag() {
+        // Test that undefined tag in legacy try catch clause is reported correctly
+        let document = r#"(module
+  (func (export "test")
+    (try
+      (do (nop))
+      (catch $missing (drop))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let tag_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined tag") && d.message.contains("$missing"))
+            .collect();
+
+        assert_eq!(
+            tag_errors.len(),
+            1,
+            "Undefined tag in legacy try catch should produce one error, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_legacy_try_delegate_valid() {
+        // Test that legacy try delegate with valid label reference works
+        let document = r#"(module
+  (func (export "test")
+    (block $outer
+      (try
+        (do (nop))
+        (delegate $outer))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let label_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined label") && d.message.contains("$outer"))
+            .collect();
+
+        assert_eq!(
+            label_errors.len(),
+            0,
+            "Valid label in legacy try delegate should not produce errors, got: {:?}",
+            label_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_legacy_try_delegate_undefined_label() {
+        // Test that undefined label in legacy try delegate clause is reported correctly
+        let document = r#"(module
+  (func (export "test")
+    (try
+      (do (nop))
+      (delegate $missing)))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let label_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined label") && d.message.contains("$missing"))
+            .collect();
+
+        assert_eq!(
+            label_errors.len(),
+            1,
+            "Undefined label in legacy try delegate should produce one error, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
     }
 }
