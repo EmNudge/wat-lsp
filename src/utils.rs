@@ -245,7 +245,10 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
             return InstructionContext::Global;
         } else if first_token.starts_with("table.") {
             return InstructionContext::Table;
-        } else if first_token.starts_with("memory.") {
+        } else if first_token.starts_with("memory.")
+            || first_token.contains(".load")
+            || first_token.contains(".store")
+        {
             return InstructionContext::Memory;
         } else if first_token == "throw" || first_token == "rethrow" {
             return InstructionContext::Tag;
