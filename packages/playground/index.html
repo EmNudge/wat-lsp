@@ -130,9 +130,23 @@
     </div>
 
     <footer>
-      <span>WAT LSP Playground - Hover, Go to Definition (F12), Find References (Shift+F12), Outline</span>
+      <span>WAT LSP Playground - Open File (Ctrl/Cmd+P), Go to Definition (F12), Find References (Shift+F12)</span>
       <span id="status">Ready</span>
     </footer>
+  </div>
+
+  <!-- Command Palette -->
+  <div id="command-palette" class="command-palette hidden">
+    <div class="command-palette-backdrop"></div>
+    <div class="command-palette-container">
+      <input type="text" id="command-palette-input" class="command-palette-input" placeholder="Type to search files..." autocomplete="off">
+      <div id="command-palette-results" class="command-palette-results"></div>
+      <div class="command-palette-hint">
+        <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+        <span><kbd>Enter</kbd> Open</span>
+        <span><kbd>Esc</kbd> Close</span>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="main.ts"></script>

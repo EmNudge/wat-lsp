@@ -134,6 +134,9 @@ let elements: {
   testCol: HTMLInputElement;
   testHoverBtn: HTMLButtonElement;
   testResult: HTMLElement;
+  commandPalette: HTMLElement;
+  commandPaletteInput: HTMLInputElement;
+  commandPaletteResults: HTMLElement;
 };
 
 // Console output helper
@@ -1282,6 +1285,170 @@ function loadExample(id: string): void {
   setStatus('Ready');
 }
 
+// Command Palette
+let commandPaletteSelectedIndex = 0;
+let commandPaletteFilteredItems: typeof examples = [];
+
+function openCommandPalette(): void {
+  elements.commandPalette.classList.remove('hidden');
+  elements.commandPaletteInput.value = '';
+  elements.commandPaletteInput.focus();
+  commandPaletteSelectedIndex = 0;
+  updateCommandPaletteResults('');
+}
+
+function closeCommandPalette(): void {
+  elements.commandPalette.classList.add('hidden');
+  elements.commandPaletteInput.value = '';
+  editor?.focus();
+}
+
+function updateCommandPaletteResults(query: string): void {
+  const lowerQuery = query.toLowerCase().trim();
+
+  // Filter examples by fuzzy matching on id and label
+  if (lowerQuery === '') {
+    commandPaletteFilteredItems = [...examples];
+  } else {
+    commandPaletteFilteredItems = examples.filter(ex => {
+      const searchText = `${ex.id} ${ex.label}`.toLowerCase();
+      // Simple fuzzy match: all query characters appear in order
+      let searchIndex = 0;
+      for (const char of lowerQuery) {
+        const foundIndex = searchText.indexOf(char, searchIndex);
+        if (foundIndex === -1) return false;
+        searchIndex = foundIndex + 1;
+      }
+      return true;
+    });
+  }
+
+  // Ensure selected index is in bounds
+  if (commandPaletteSelectedIndex >= commandPaletteFilteredItems.length) {
+    commandPaletteSelectedIndex = Math.max(0, commandPaletteFilteredItems.length - 1);
+  }
+
+  renderCommandPaletteResults();
+}
+
+function renderCommandPaletteResults(): void {
+  if (commandPaletteFilteredItems.length === 0) {
+    elements.commandPaletteResults.innerHTML = '<div class="command-palette-empty">No matching files</div>';
+    return;
+  }
+
+  const html = commandPaletteFilteredItems.map((ex, index) => {
+    const isInvalid = ex.id.startsWith('invalid_');
+    const icon = isInvalid ? '⚠️' : '📄';
+    const folder = isInvalid ? 'invalid/' : 'examples/';
+    const selected = index === commandPaletteSelectedIndex ? ' selected' : '';
+
+    return `<div class="command-palette-item${selected}" data-id="${ex.id}" data-index="${index}">
+      <span class="command-palette-item-icon">${icon}</span>
+      <span class="command-palette-item-label">${escapeHtml(ex.label)}</span>
+      <span class="command-palette-item-path">${folder}${ex.id}.wat</span>
+    </div>`;
+  }).join('');
+
+  elements.commandPaletteResults.innerHTML = html;
+
+  // Scroll selected item into view
+  const selectedEl = elements.commandPaletteResults.querySelector('.command-palette-item.selected');
+  if (selectedEl) {
+    selectedEl.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function selectCommandPaletteItem(index: number): void {
+  if (index < 0 || index >= commandPaletteFilteredItems.length) return;
+
+  const item = commandPaletteFilteredItems[index];
+  closeCommandPalette();
+  loadExample(item.id);
+
+  // Update file tree selection
+  elements.fileTree.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+  const treeItem = elements.fileTree.querySelector(`[data-id="${item.id}"]`);
+  if (treeItem) {
+    treeItem.classList.add('selected');
+    // Expand parent folder if collapsed
+    const folder = treeItem.closest('.tree-folder');
+    if (folder) {
+      const children = folder.querySelector('.tree-folder-children') as HTMLElement;
+      if (children && children.style.display === 'none') {
+        children.style.display = 'block';
+        const chevron = folder.querySelector('.tree-chevron');
+        if (chevron) chevron.textContent = '▼';
+      }
+    }
+  }
+}
+
+function handleCommandPaletteKeydown(e: KeyboardEvent): void {
+  switch (e.key) {
+    case 'Escape':
+      e.preventDefault();
+      closeCommandPalette();
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      if (commandPaletteSelectedIndex < commandPaletteFilteredItems.length - 1) {
+        commandPaletteSelectedIndex++;
+        renderCommandPaletteResults();
+      }
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      if (commandPaletteSelectedIndex > 0) {
+        commandPaletteSelectedIndex--;
+        renderCommandPaletteResults();
+      }
+      break;
+    case 'Enter':
+      e.preventDefault();
+      selectCommandPaletteItem(commandPaletteSelectedIndex);
+      break;
+  }
+}
+
+function initCommandPalette(): void {
+  // Input handler for filtering
+  elements.commandPaletteInput.addEventListener('input', () => {
+    commandPaletteSelectedIndex = 0;
+    updateCommandPaletteResults(elements.commandPaletteInput.value);
+  });
+
+  // Keyboard navigation
+  elements.commandPaletteInput.addEventListener('keydown', handleCommandPaletteKeydown);
+
+  // Click on backdrop to close
+  const backdrop = elements.commandPalette.querySelector('.command-palette-backdrop');
+  if (backdrop) {
+    backdrop.addEventListener('click', closeCommandPalette);
+  }
+
+  // Click on result item
+  elements.commandPaletteResults.addEventListener('click', (e) => {
+    const item = (e.target as HTMLElement).closest('.command-palette-item');
+    if (item) {
+      const index = parseInt(item.getAttribute('data-index') || '0', 10);
+      selectCommandPaletteItem(index);
+    }
+  });
+
+  // Hover to select
+  elements.commandPaletteResults.addEventListener('mousemove', (e) => {
+    const item = (e.target as HTMLElement).closest('.command-palette-item');
+    if (item) {
+      const index = parseInt(item.getAttribute('data-index') || '0', 10);
+      if (index !== commandPaletteSelectedIndex) {
+        commandPaletteSelectedIndex = index;
+        renderCommandPaletteResults();
+      }
+    }
+  });
+}
+
 // Tab switching
 function initTabs(): void {
   const tabs = document.querySelectorAll<HTMLButtonElement>('.tab');
@@ -1419,6 +1586,9 @@ function initElements(): void {
       'test-hover-btn'
     ) as HTMLButtonElement,
     testResult: document.getElementById('test-result')!,
+    commandPalette: document.getElementById('command-palette')!,
+    commandPaletteInput: document.getElementById('command-palette-input') as HTMLInputElement,
+    commandPaletteResults: document.getElementById('command-palette-results')!,
   };
 }
 
@@ -1433,6 +1603,7 @@ async function init(): Promise<void> {
   initTabs();
   initResizablePanel();
   initFileTreeResize();
+  initCommandPalette();
 
   // Initialize Monaco, wabt, and LSP in parallel
   await Promise.all([initMonaco(), initWabt(), initLSP()]);
@@ -1467,10 +1638,18 @@ async function init(): Promise<void> {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    // Cmd/Ctrl+P: Open command palette
+    if ((e.ctrlKey || e.metaKey) && e.key === 'p' && !e.shiftKey) {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+    // Cmd/Ctrl+Enter: Compile
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       compile();
     }
+    // Cmd/Ctrl+Shift+Enter: Compile and Run
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
       e.preventDefault();
       compile().then((success) => {
@@ -1481,8 +1660,9 @@ async function init(): Promise<void> {
 
   consoleOutput.log('Playground ready!');
   consoleOutput.info('Keyboard shortcuts:');
-  consoleOutput.info('  Ctrl+Enter: Compile');
-  consoleOutput.info('  Ctrl+Shift+Enter: Compile and Run');
+  consoleOutput.info('  Ctrl/Cmd+P: Open file (Command Palette)');
+  consoleOutput.info('  Ctrl/Cmd+Enter: Compile');
+  consoleOutput.info('  Ctrl/Cmd+Shift+Enter: Compile and Run');
   consoleOutput.info('  F12: Go to Definition');
   consoleOutput.info('  Shift+F12: Find References');
   setStatus('Ready');
