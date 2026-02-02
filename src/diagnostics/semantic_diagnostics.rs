@@ -748,11 +748,8 @@ fn check_folded_instruction_parameter_count(
 
         match arity.operand_mode {
             OperandMode::Fixed(expected) => {
-                // Only report error if there are TOO MANY operands.
-                // Having fewer operands is valid in WAT because remaining operands
-                // can come from the implicit stack (linear or partially folded style).
-                // For example: (br_if $loop) is valid when condition is on the stack.
                 if operand_count > expected {
+                    // Error: too many operands
                     let diagnostic = create_operand_count_diagnostic(
                         node,
                         instr_name,
@@ -760,6 +757,16 @@ fn check_folded_instruction_parameter_count(
                         &format!("at most {}", arity.expected_operands_message()),
                     );
                     diagnostics.push(diagnostic);
+                } else if operand_count > 0 && operand_count < expected {
+                    // Error: missing operands in nested expression
+                    // Only report error when expression is nested inside another folded expression,
+                    // because nested expressions must be self-contained (no stack values available).
+                    // Top-level expressions can validly use stack values from preceding instructions.
+                    if is_at_likely_empty_stack_position(node) {
+                        let diagnostic =
+                            create_missing_operand_error(node, instr_name, operand_count, expected);
+                        diagnostics.push(diagnostic);
+                    }
                 }
             }
             OperandMode::Dynamic => {
@@ -797,10 +804,8 @@ fn validate_dynamic_operands(
                     use crate::symbols::TypeKind;
                     if let TypeKind::Struct { fields } = &type_def.kind {
                         let expected = fields.len();
-                        // Only report error if there are TOO MANY operands.
-                        // Having fewer operands is valid in WAT because remaining operands
-                        // can come from the implicit stack (linear or partially folded style).
                         if operand_count > expected {
+                            // Error: too many operands
                             let msg = format!(
                                 "at most {} operands (fields of struct {})",
                                 expected, type_name
@@ -812,6 +817,17 @@ fn validate_dynamic_operands(
                                 &msg,
                             );
                             diagnostics.push(diagnostic);
+                        } else if operand_count > 0 && operand_count < expected {
+                            // Error: missing operands in nested expression
+                            if is_at_likely_empty_stack_position(node) {
+                                let diagnostic = create_missing_operand_error(
+                                    node,
+                                    instr_name,
+                                    operand_count,
+                                    expected,
+                                );
+                                diagnostics.push(diagnostic);
+                            }
                         }
                     }
                 }
@@ -830,28 +846,35 @@ fn validate_dynamic_operands(
             if let Some(tag_name) = extract_instruction_type_param(node, source) {
                 if let Some(tag) = symbols.get_tag_by_name(&tag_name) {
                     let expected = tag.params.len();
-                    // Only report error if there are TOO MANY operands.
-                    // Having fewer operands is valid in WAT because remaining operands
-                    // can come from the implicit stack (linear or partially folded style).
                     if operand_count > expected {
+                        // Error: too many operands
                         let msg =
                             format!("at most {} operands (params of tag {})", expected, tag_name);
                         let diagnostic =
                             create_operand_count_diagnostic(node, instr_name, operand_count, &msg);
                         diagnostics.push(diagnostic);
+                    } else if operand_count > 0 && operand_count < expected {
+                        // Error: missing operands in nested expression
+                        if is_at_likely_empty_stack_position(node) {
+                            let diagnostic = create_missing_operand_error(
+                                node,
+                                instr_name,
+                                operand_count,
+                                expected,
+                            );
+                            diagnostics.push(diagnostic);
+                        }
                     }
                 }
             }
         }
         "call" => {
             // (call $func (arg)*)
-            // Only report error if there are TOO MANY operands.
-            // Having fewer operands is valid in WAT because remaining operands
-            // can come from the implicit stack (linear or partially folded style).
             if let Some(func_name) = extract_instruction_type_param(node, source) {
                 if let Some(func) = symbols.get_function_by_name(&func_name) {
                     let expected = func.parameters.len();
                     if operand_count > expected {
+                        // Error: too many operands
                         let msg = format!(
                             "at most {} operands (params of function {})",
                             expected, func_name
@@ -859,12 +882,24 @@ fn validate_dynamic_operands(
                         let diagnostic =
                             create_operand_count_diagnostic(node, instr_name, operand_count, &msg);
                         diagnostics.push(diagnostic);
+                    } else if operand_count > 0 && operand_count < expected {
+                        // Error: missing operands in nested expression (only when nested)
+                        if is_at_likely_empty_stack_position(node) {
+                            let diagnostic = create_missing_operand_error(
+                                node,
+                                instr_name,
+                                operand_count,
+                                expected,
+                            );
+                            diagnostics.push(diagnostic);
+                        }
                     }
                 } else if let Ok(idx) = func_name.parse::<usize>() {
                     // Numeric function index
                     if let Some(func) = symbols.get_function_by_index(idx) {
                         let expected = func.parameters.len();
                         if operand_count > expected {
+                            // Error: too many operands
                             let func_display = func.name.as_deref().unwrap_or(&func_name);
                             let msg = format!(
                                 "at most {} operands (params of function {})",
@@ -877,6 +912,17 @@ fn validate_dynamic_operands(
                                 &msg,
                             );
                             diagnostics.push(diagnostic);
+                        } else if operand_count > 0 && operand_count < expected {
+                            // Error: missing operands in nested expression (only when nested)
+                            if is_at_likely_empty_stack_position(node) {
+                                let diagnostic = create_missing_operand_error(
+                                    node,
+                                    instr_name,
+                                    operand_count,
+                                    expected,
+                                );
+                                diagnostics.push(diagnostic);
+                            }
                         }
                     }
                 }
@@ -900,6 +946,7 @@ fn validate_dynamic_operands(
                         // Expected: params + 1 for the funcref
                         let expected = params.len() + 1;
                         if operand_count > expected {
+                            // Error: too many operands
                             let type_display = type_def.name.as_deref().unwrap_or(&type_name);
                             let msg = format!(
                                 "at most {} operands ({} params + funcref for type {})",
@@ -914,6 +961,17 @@ fn validate_dynamic_operands(
                                 &msg,
                             );
                             diagnostics.push(diagnostic);
+                        } else if operand_count > 0 && operand_count < expected {
+                            // Error: missing operands in nested expression (only when nested)
+                            if is_at_likely_empty_stack_position(node) {
+                                let diagnostic = create_missing_operand_error(
+                                    node,
+                                    instr_name,
+                                    operand_count,
+                                    expected,
+                                );
+                                diagnostics.push(diagnostic);
+                            }
                         }
                     }
                 }
@@ -1023,6 +1081,88 @@ fn create_operand_count_diagnostic(
         tags: None,
         data: None,
     }
+}
+
+/// Create an error diagnostic for missing operands in nested folded expressions
+/// Nested expressions cannot access stack values, so missing operands are definite errors
+fn create_missing_operand_error(
+    node: &Node,
+    instr_name: &str,
+    actual_count: usize,
+    expected_count: usize,
+) -> Diagnostic {
+    let range = node_to_lsp_range(node);
+
+    let message = format!(
+        "Instruction '{}' expects {} operands, but got {}",
+        instr_name, expected_count, actual_count
+    );
+
+    Diagnostic {
+        range,
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String("missing-operands".to_string())),
+        code_description: None,
+        source: Some("wat-lsp".to_string()),
+        message,
+        related_information: None,
+        tags: None,
+        data: None,
+    }
+}
+
+/// Check if a folded expression is at a position where the stack is likely empty
+/// This helps detect likely errors without full stack simulation
+fn is_at_likely_empty_stack_position(node: &Node) -> bool {
+    // Check if this expression is nested inside another folded expression
+    // In that case, the parent provides a known context where each child must provide its own operands
+    //
+    // AST structure (from grammar):
+    //   expr = "(" + expr1 + ")"
+    //   expr1 = choice(expr1_plain, expr1_call, expr1_block, ...)
+    //   expr1_plain = instr_plain + repeat(expr)
+    //
+    // So nested expr1_plain chain looks like:
+    //   expr1_plain (outer) -> expr (wrapper) -> expr1 (choice) -> expr1_plain (inner)
+    // Or if tree-sitter inlines the choice:
+    //   expr1_plain (outer) -> expr (wrapper) -> expr1_plain (inner)
+    //
+    // We walk up a few levels to find if there's an enclosing expr1_plain
+    let mut current = node.parent();
+    let mut levels = 0;
+
+    while let Some(parent) = current {
+        let kind = parent.kind();
+
+        // If we find another folded expression, we're nested
+        if kind == "expr1_plain"
+            || kind == "expr1_call"
+            || kind == "expr1_block"
+            || kind == "expr1_loop"
+            || kind == "expr1_if"
+            || kind == "expr1_try"
+            || kind == "expr1_try_table"
+        {
+            return true;
+        }
+
+        // Stop if we've gone up too many levels or hit a non-expression container
+        levels += 1;
+        if levels > 4
+            || kind == "module_field_func"
+            || kind == "module"
+            || kind == "func_locals_body"
+            || kind == "block_block"
+            || kind == "block_loop"
+            || kind == "block_if"
+        {
+            break;
+        }
+
+        current = parent.parent();
+    }
+
+    false
 }
 
 /// Get the memory referenced by an instruction
@@ -2488,6 +2628,231 @@ mod tests {
             memory_errors.len(),
             1,
             "Undefined memory in i64.load should produce one error"
+        );
+    }
+
+    // === Tests for missing operand errors in nested expressions ===
+
+    #[test]
+    fn test_binary_op_missing_operand_nested() {
+        // i32.sub is nested inside i32.add - should error because it must be self-contained
+        // i32.add is at top level - should NOT error (valid partial folding)
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.add
+      (i32.sub (i32.const 5)))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let missing_operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects") && d.message.contains("operands, but got"))
+            .collect();
+
+        // Only i32.sub should error (nested, missing 1 operand)
+        // i32.add is at top level, so valid partial folding
+        assert_eq!(
+            missing_operand_errors.len(),
+            1,
+            "Only nested i32.sub should error, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+
+        // Verify it's an error for i32.sub
+        assert!(missing_operand_errors[0].message.contains("i32.sub"));
+        assert_eq!(
+            missing_operand_errors[0].severity,
+            Some(DiagnosticSeverity::ERROR)
+        );
+    }
+
+    #[test]
+    fn test_binary_op_top_level_no_error() {
+        // Binary op with 1 operand at top level - valid partial folding, no error
+        // (another value could be on the stack from preceding instructions)
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.sub (i32.const 5))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let missing_operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects") && d.message.contains("operands, but got"))
+            .collect();
+
+        assert_eq!(
+            missing_operand_errors.len(),
+            0,
+            "Top-level binary op with 1 operand is valid partial folding, should not error"
+        );
+    }
+
+    #[test]
+    fn test_valid_partial_folding_no_error() {
+        // Partial folding with value on stack - should NOT error
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.const 5)
+    (i32.add (i32.const 3))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let missing_operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects") && d.message.contains("operands, but got"))
+            .collect();
+
+        assert_eq!(
+            missing_operand_errors.len(),
+            0,
+            "Valid partial folding should not produce errors"
+        );
+    }
+
+    #[test]
+    fn test_fully_folded_correct_no_warning() {
+        // Fully folded expression with all operands - should NOT warn
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.add (i32.const 5) (i32.const 3))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("operand"))
+            .collect();
+
+        assert_eq!(
+            operand_errors.len(),
+            0,
+            "Fully folded expression should produce no operand warnings/errors"
+        );
+    }
+
+    #[test]
+    fn test_call_missing_operand_nested() {
+        // Call with missing operand when nested - should error
+        let document = r#"(module
+  (func $double (param i32 i32) (result i32)
+    (i32.add (local.get 0) (local.get 1)))
+  (func $test (result i32)
+    (i32.add
+      (call $double (i32.const 1))
+      (i32.const 0))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let missing_operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects") && d.message.contains("operands, but got"))
+            .collect();
+
+        assert_eq!(
+            missing_operand_errors.len(),
+            1,
+            "Nested call with missing operand should produce error"
+        );
+    }
+
+    #[test]
+    fn test_select_missing_operands() {
+        // Select with only 1 operand - should error (expects 3)
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.add
+      (select (i32.const 1))
+      (i32.const 0))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let missing_operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects") && d.message.contains("operands, but got"))
+            .collect();
+
+        assert_eq!(
+            missing_operand_errors.len(),
+            1,
+            "Select with 1 operand (expects 3) should produce error"
+        );
+    }
+
+    #[test]
+    fn test_unary_op_no_operand_no_error() {
+        // Unary op with no explicit operands - could be intentional stack usage
+        // This should NOT error because operand_count is 0 (not > 0)
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.const 5)
+    (i32.eqz)))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let missing_operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects") && d.message.contains("operands, but got"))
+            .collect();
+
+        assert_eq!(
+            missing_operand_errors.len(),
+            0,
+            "Unary op with no explicit operands should not error (valid stack usage)"
+        );
+    }
+
+    #[test]
+    fn test_error_has_correct_code() {
+        // Verify error has proper diagnostic code for filtering
+        // Use a fully folded outer expression with one incomplete nested expression
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.add
+      (i32.sub (i32.const 5))
+      (i32.const 3))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let missing_operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects") && d.message.contains("operands, but got"))
+            .collect();
+
+        // Only i32.sub should error (missing 1 operand), i32.add has both operands
+        assert_eq!(
+            missing_operand_errors.len(),
+            1,
+            "Only the nested incomplete expression should error, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            missing_operand_errors[0].code,
+            Some(NumberOrString::String("missing-operands".to_string()))
         );
     }
 }
