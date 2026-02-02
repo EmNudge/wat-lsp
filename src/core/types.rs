@@ -163,6 +163,72 @@ pub type DefinitionResult = Option<Range>;
 /// References result - list of ranges where a symbol is referenced
 pub type ReferencesResult = Vec<Range>;
 
+/// Diagnostic severity (matches LSP DiagnosticSeverity values)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum DiagnosticSeverity {
+    Error = 1,
+    Warning = 2,
+    Information = 3,
+    Hint = 4,
+}
+
+/// A diagnostic message (error, warning, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Diagnostic {
+    /// The range where the diagnostic applies
+    pub range: Range,
+    /// The severity of the diagnostic
+    pub severity: DiagnosticSeverity,
+    /// The diagnostic message
+    pub message: String,
+    /// Optional diagnostic code
+    pub code: Option<String>,
+    /// Optional source identifier (e.g., "wat-lsp")
+    pub source: Option<String>,
+}
+
+impl Diagnostic {
+    /// Create a new error diagnostic
+    pub fn error(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            range,
+            severity: DiagnosticSeverity::Error,
+            message: message.into(),
+            code: None,
+            source: Some("wat-lsp".to_string()),
+        }
+    }
+
+    /// Create a new warning diagnostic
+    pub fn warning(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            range,
+            severity: DiagnosticSeverity::Warning,
+            message: message.into(),
+            code: None,
+            source: Some("wat-lsp".to_string()),
+        }
+    }
+
+    /// Create a new hint diagnostic
+    pub fn hint(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            range,
+            severity: DiagnosticSeverity::Hint,
+            message: message.into(),
+            code: None,
+            source: Some("wat-lsp".to_string()),
+        }
+    }
+
+    /// Set the diagnostic code
+    pub fn with_code(mut self, code: impl Into<String>) -> Self {
+        self.code = Some(code.into());
+        self
+    }
+}
+
 // Conversion implementations for native builds (tower-lsp types)
 #[cfg(feature = "native")]
 impl From<lsp::Position> for Position {
@@ -258,6 +324,35 @@ impl From<CompletionItem> for lsp::CompletionItem {
             insert_text_format: item.insert_text_format.map(|f| f.into()),
             documentation: item.documentation.map(lsp::Documentation::String),
             ..Default::default()
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl From<DiagnosticSeverity> for lsp::DiagnosticSeverity {
+    fn from(severity: DiagnosticSeverity) -> Self {
+        match severity {
+            DiagnosticSeverity::Error => lsp::DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Warning => lsp::DiagnosticSeverity::WARNING,
+            DiagnosticSeverity::Information => lsp::DiagnosticSeverity::INFORMATION,
+            DiagnosticSeverity::Hint => lsp::DiagnosticSeverity::HINT,
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl From<Diagnostic> for lsp::Diagnostic {
+    fn from(diag: Diagnostic) -> Self {
+        lsp::Diagnostic {
+            range: diag.range.into(),
+            severity: Some(diag.severity.into()),
+            code: diag.code.map(lsp::NumberOrString::String),
+            code_description: None,
+            source: diag.source,
+            message: diag.message,
+            related_information: None,
+            tags: None,
+            data: None,
         }
     }
 }

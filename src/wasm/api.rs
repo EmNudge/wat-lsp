@@ -126,14 +126,26 @@ impl WatLSP {
         }
     }
 
-    /// Get diagnostics (syntax errors) for the current document
+    /// Get diagnostics (syntax and semantic errors) for the current document
     #[wasm_bindgen(js_name = provideDiagnostics)]
     pub fn provide_diagnostics(&self) -> JsValue {
-        let diagnostics = validate_wat(&self.document);
         let js_array = js_sys::Array::new();
-        for diag in diagnostics {
+
+        // Add syntax errors from wast parser
+        let syntax_diagnostics = validate_wat(&self.document);
+        for diag in syntax_diagnostics {
             js_array.push(&diagnostic_to_js(&diag));
         }
+
+        // Add semantic diagnostics if tree and symbols are available
+        if let (Some(tree), Some(symbols)) = (&self.tree, &self.symbols) {
+            let semantic_diagnostics =
+                provide_wasm_semantic_diagnostics(tree, &self.document, symbols);
+            for diag in semantic_diagnostics {
+                js_array.push(&diagnostic_to_js(&diag));
+            }
+        }
+
         js_array.into()
     }
 
@@ -788,6 +800,159 @@ struct WasmDiagnostic {
     end_character: u32,
     message: String,
     severity: u32, // 1 = error, 2 = warning, 3 = info, 4 = hint
+}
+
+use crate::ts_facade::Node;
+use crate::utils::{
+    determine_instruction_context_at_node, find_containing_function, InstructionContext,
+};
+
+/// Provide semantic diagnostics for undefined references (WASM version)
+fn provide_wasm_semantic_diagnostics(
+    tree: &crate::ts_facade::Tree,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Vec<WasmDiagnostic> {
+    let mut diagnostics = Vec::new();
+    walk_tree_for_diagnostics(tree.root_node(), source, symbols, &mut diagnostics);
+    diagnostics
+}
+
+fn walk_tree_for_diagnostics(
+    node: Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    let _kind = node.kind();
+
+    // Check for undefined references based on instruction context
+    let context = determine_instruction_context_at_node(&node, source);
+    if context != InstructionContext::General {
+        check_undefined_references(&node, source, symbols, diagnostics, &context);
+
+        // Only recurse into nested expr nodes
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "expr" {
+                walk_tree_for_diagnostics(child, source, symbols, diagnostics);
+            }
+        }
+        return;
+    }
+
+    // Recursively check children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_tree_for_diagnostics(child, source, symbols, diagnostics);
+    }
+}
+
+fn check_undefined_references(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+    context: &InstructionContext,
+) {
+    find_undefined_identifiers(node, source, symbols, diagnostics, context);
+}
+
+fn find_undefined_identifiers(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+    context: &InstructionContext,
+) {
+    if node.kind() == "identifier" {
+        let identifier_name = &source[node.byte_range()];
+
+        // Only check identifiers that start with $
+        if !identifier_name.starts_with('$') {
+            return;
+        }
+
+        let start_point = node.start_position();
+        let end_point = node.end_position();
+        let position =
+            crate::core::types::Position::new(start_point.row as u32, start_point.column as u32);
+
+        let is_defined = match context {
+            InstructionContext::Branch | InstructionContext::Block => {
+                if let Some(func) = find_containing_function(symbols, position) {
+                    func.blocks.iter().any(|block| {
+                        format!("${}", block.label) == identifier_name
+                            || block.label == identifier_name
+                    })
+                } else {
+                    false
+                }
+            }
+            InstructionContext::Call => symbols.get_function_by_name(identifier_name).is_some(),
+            InstructionContext::Local => {
+                if let Some(func) = find_containing_function(symbols, position) {
+                    func.parameters
+                        .iter()
+                        .any(|p| p.name.as_ref() == Some(&identifier_name.to_string()))
+                        || func
+                            .locals
+                            .iter()
+                            .any(|l| l.name.as_ref() == Some(&identifier_name.to_string()))
+                } else {
+                    false
+                }
+            }
+            InstructionContext::Global => symbols.get_global_by_name(identifier_name).is_some(),
+            InstructionContext::Table => symbols.get_table_by_name(identifier_name).is_some(),
+            InstructionContext::Memory => symbols.get_memory_by_name(identifier_name).is_some(),
+            InstructionContext::Type => symbols.get_type_by_name(identifier_name).is_some(),
+            InstructionContext::Tag => symbols.get_tag_by_name(identifier_name).is_some(),
+            InstructionContext::Data => symbols.get_data_by_name(identifier_name).is_some(),
+            InstructionContext::Elem => symbols.get_elem_by_name(identifier_name).is_some(),
+            InstructionContext::Function | InstructionContext::General => true,
+        };
+
+        if !is_defined {
+            let message = match context {
+                InstructionContext::Branch | InstructionContext::Block => {
+                    format!("Undefined label '{}'", identifier_name)
+                }
+                InstructionContext::Call => format!("Undefined function '{}'", identifier_name),
+                InstructionContext::Local => {
+                    format!("Undefined local or parameter '{}'", identifier_name)
+                }
+                InstructionContext::Global => format!("Undefined global '{}'", identifier_name),
+                InstructionContext::Table => format!("Undefined table '{}'", identifier_name),
+                InstructionContext::Memory => format!("Undefined memory '{}'", identifier_name),
+                InstructionContext::Type => format!("Undefined type '{}'", identifier_name),
+                InstructionContext::Tag => format!("Undefined tag '{}'", identifier_name),
+                InstructionContext::Data => format!("Undefined data segment '{}'", identifier_name),
+                InstructionContext::Elem => format!("Undefined elem segment '{}'", identifier_name),
+                _ => format!("Undefined reference '{}'", identifier_name),
+            };
+
+            diagnostics.push(WasmDiagnostic {
+                line: start_point.row as u32,
+                character: start_point.column as u32,
+                end_character: end_point.column as u32,
+                message,
+                severity: 1, // Error
+            });
+        }
+        return;
+    }
+
+    // Don't recurse into nested expr nodes
+    if node.kind() == "expr" {
+        return;
+    }
+
+    // Recursively check children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        find_undefined_identifiers(&child, source, symbols, diagnostics, context);
+    }
 }
 
 /// Validate WAT source and return diagnostics

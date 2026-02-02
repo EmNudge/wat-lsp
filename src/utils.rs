@@ -633,6 +633,23 @@ pub fn node_to_lsp_range(node: &Node) -> LspRange {
     }
 }
 
+/// Convert a tree-sitter node to a core Range (works in both native and WASM)
+pub fn node_to_range(node: &Node) -> crate::core::types::Range {
+    let start_point = node.start_position();
+    let end_point = node.end_position();
+
+    crate::core::types::Range {
+        start: crate::core::types::Position {
+            line: start_point.row as u32,
+            character: start_point.column as u32,
+        },
+        end: crate::core::types::Position {
+            line: end_point.row as u32,
+            character: end_point.column as u32,
+        },
+    }
+}
+
 /// Determine instruction context using AST with fallback to line-based detection.
 /// This is the unified context detection function used across hover, definition,
 /// references, and completion modules.
