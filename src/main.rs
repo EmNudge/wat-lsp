@@ -92,15 +92,19 @@ impl Backend {
             .parse_and_publish_immediate_diagnostics(&uri, &text, None)
             .await
         {
+            // Update document text first, then tree, for consistency with did_change
+            // and to minimize race conditions with validation tasks
+            self.document_map.insert(uri.clone(), text.clone());
             self.tree_map.insert(uri.clone(), tree);
+        } else {
+            self.document_map.insert(uri.clone(), text.clone());
         }
-        self.document_map.insert(uri.clone(), text.clone());
 
         // Schedule debounced wast validation
         self.schedule_wast_validation(uri, text).await;
     }
 
-    async fn schedule_wast_validation(&self, uri: String, text: String) {
+    async fn schedule_wast_validation(&self, uri: String, _text: String) {
         // Cancel any existing validation task for this document
         if let Some(entry) = self.validation_cancellation.get(&uri) {
             let _ = entry.send(true); // Signal cancellation
@@ -112,6 +116,7 @@ impl Backend {
 
         // Clone what we need for the async task
         let client = self.client.clone();
+        let document_map = self.document_map.clone();
         let tree_map = self.tree_map.clone();
         let symbol_map = self.symbol_map.clone();
 
@@ -127,6 +132,18 @@ impl Backend {
                     return;
                 }
             }
+
+            // IMPORTANT: Re-fetch the current text from document_map instead of using
+            // captured text. This fixes a race condition (issue #79) where:
+            // 1. This task is spawned with text at time T1
+            // 2. After debounce period, another edit updated tree_map to T2
+            // 3. If we used the captured text (T1) with the new tree (T2), the tree's
+            //    byte ranges wouldn't match the text, causing wrong error positions.
+            // By re-fetching, we ensure tree and text are always from the same state.
+            let text = match document_map.get(&uri) {
+                Some(doc) => doc.clone(),
+                None => return, // Document was closed
+            };
 
             // Get tree-sitter diagnostics (from cached tree)
             let tree_diags = if let Some(tree) = tree_map.get(&uri) {
@@ -285,11 +302,16 @@ impl LanguageServer for Backend {
             .parse_and_publish_immediate_diagnostics(&uri, &text, old_tree.as_ref())
             .await
         {
+            // Update document text first, then tree, to minimize race conditions
+            // with the debounced validation task (see issue #79). The validation
+            // task fetches text then tree, so updating text first makes it more
+            // likely to get a consistent pair.
+            self.document_map.insert(uri.clone(), text.clone());
             self.tree_map.insert(uri.clone(), tree);
+        } else {
+            // Even if parsing failed, update the document text
+            self.document_map.insert(uri.clone(), text.clone());
         }
-
-        // Update document text
-        self.document_map.insert(uri.clone(), text.clone());
 
         // Schedule debounced wast validation
         self.schedule_wast_validation(uri, text).await;
