@@ -3,6 +3,9 @@
 // Core types (protocol-independent) - must be first as other modules depend on it
 pub mod core;
 
+// Instruction metadata (shared between native and WASM for stack tracking)
+pub mod instruction_metadata;
+
 // Documentation access (instruction docs generated at build time)
 pub mod docs;
 

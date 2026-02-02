@@ -1,4 +1,4 @@
-use crate::diagnostics::instruction_metadata::{get_instruction_arity_map, OperandMode};
+use crate::instruction_metadata::{get_instruction_arity_map, OperandMode};
 use crate::symbols::SymbolTable;
 use crate::utils::{
     determine_instruction_context_at_node, find_containing_function, node_to_lsp_range,
@@ -128,7 +128,7 @@ fn process_instr_node(
     symbols: &SymbolTable,
     arity_map: &std::collections::HashMap<
         &'static str,
-        crate::diagnostics::instruction_metadata::InstructionArity,
+        crate::instruction_metadata::InstructionArity,
     >,
     stack: &mut StackState,
     diagnostics: &mut Vec<Diagnostic>,
@@ -215,7 +215,7 @@ fn process_instruction(
     source: &str,
     arity_map: &std::collections::HashMap<
         &'static str,
-        crate::diagnostics::instruction_metadata::InstructionArity,
+        crate::instruction_metadata::InstructionArity,
     >,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -399,7 +399,7 @@ fn count_expr_production(
     symbols: &SymbolTable,
     arity_map: &std::collections::HashMap<
         &'static str,
-        crate::diagnostics::instruction_metadata::InstructionArity,
+        crate::instruction_metadata::InstructionArity,
     >,
 ) -> usize {
     // Find the instruction inside the expression
@@ -422,7 +422,7 @@ fn count_expr1_production(
     symbols: &SymbolTable,
     arity_map: &std::collections::HashMap<
         &'static str,
-        crate::diagnostics::instruction_metadata::InstructionArity,
+        crate::instruction_metadata::InstructionArity,
     >,
 ) -> usize {
     let kind = expr1.kind();
@@ -1172,16 +1172,12 @@ fn create_undefined_reference_diagnostic(
 
 // Lazy static initialization for instruction arity map
 static INSTRUCTION_ARITY: OnceLock<
-    std::collections::HashMap<
-        &'static str,
-        crate::diagnostics::instruction_metadata::InstructionArity,
-    >,
+    std::collections::HashMap<&'static str, crate::instruction_metadata::InstructionArity>,
 > = OnceLock::new();
 
-fn get_arity_map() -> &'static std::collections::HashMap<
-    &'static str,
-    crate::diagnostics::instruction_metadata::InstructionArity,
-> {
+fn get_arity_map(
+) -> &'static std::collections::HashMap<&'static str, crate::instruction_metadata::InstructionArity>
+{
     INSTRUCTION_ARITY.get_or_init(get_instruction_arity_map)
 }
 
@@ -1317,7 +1313,7 @@ fn check_folded_instruction_parameter_count(
     // Validate operand count
     let arity_map = get_arity_map();
     if let Some(arity) = arity_map.get(instr_name) {
-        use crate::diagnostics::instruction_metadata::OperandMode;
+        use crate::instruction_metadata::OperandMode;
 
         match arity.operand_mode {
             OperandMode::Fixed(expected) => {
