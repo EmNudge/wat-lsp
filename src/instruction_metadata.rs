@@ -169,6 +169,10 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     // br and br_if can pass values to blocks with result types (multi-value)
     map.insert("br", InstructionArity::dynamic(1, 1, "label index", 0)); // terminates
     map.insert("br_if", InstructionArity::dynamic(1, 1, "label index", 0)); // consumes condition + optional values
+    map.insert(
+        "br_table",
+        InstructionArity::dynamic(1, usize::MAX, "label indices", 0),
+    ); // terminates - always branches
     map.insert("call", InstructionArity::dynamic(1, 1, "function index", 0)); // produces depend on function signature (set to 0, handled dynamically)
                                                                               // return can pass values for functions with result types
     map.insert("return", InstructionArity::dynamic(0, 0, "", 0)); // terminates
@@ -589,7 +593,29 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("i64.extend16_s", InstructionArity::unary_op());
     map.insert("i64.extend32_s", InstructionArity::unary_op());
 
+    // Atomic operations
+    map.insert("atomic.fence", InstructionArity::nullary()); // no operands, no results
+
     map
+}
+
+/// Check if an instruction terminates control flow (makes subsequent code unreachable).
+/// These instructions mark the stack as "uncertain" because code after them is dead.
+/// This is used by both native and WASM builds for consistent stack tracking.
+pub fn is_terminating_instruction(name: &str) -> bool {
+    matches!(
+        name,
+        "unreachable"
+            | "return"
+            | "br"
+            | "br_table"
+            | "throw"
+            | "throw_ref"
+            | "rethrow"
+            | "return_call"
+            | "return_call_indirect"
+            | "return_call_ref"
+    )
 }
 
 #[cfg(test)]
