@@ -1056,9 +1056,8 @@ fn track_stack_in_instr_list(
                 }
             }
             "expr" => {
-                // Folded expression - determine how many values it produces
-                let produces = count_expr_production(&child, source, symbols, &arity_map);
-                stack.produce(produces);
+                // Folded expression - consume stack operands and produce results
+                process_folded_expr(&child, source, symbols, &arity_map, &mut stack, diagnostics);
             }
             "instr_block" | "instr_loop" => {
                 // Block instructions create a new stack frame
@@ -1076,9 +1075,8 @@ fn track_stack_in_instr_list(
                 stack.produce(results);
             }
             "instr_call" => {
-                // Folded call: (call $fn args...) - handled similarly to expr
-                let produces = count_expr_production(&child, source, symbols, &arity_map);
-                stack.produce(produces);
+                // Folded call: (call $fn args...) - consume stack operands and produce results
+                process_folded_expr(&child, source, symbols, &arity_map, &mut stack, diagnostics);
             }
             _ => {
                 // Other node types (comments, etc.) - ignore
@@ -1114,9 +1112,8 @@ fn process_instr_node(
                 }
             }
             "expr" => {
-                // Folded expression - determine how many values it produces
-                let produces = count_expr_production(&child, source, symbols, arity_map);
-                stack.produce(produces);
+                // Folded expression - consume stack operands and produce results
+                process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
             }
             "instr_block" | "instr_loop" => {
                 let results = count_block_results(&child, source);
@@ -1131,8 +1128,8 @@ fn process_instr_node(
                 stack.produce(results);
             }
             "instr_call" => {
-                let produces = count_expr_production(&child, source, symbols, arity_map);
-                stack.produce(produces);
+                // Folded call - consume stack operands and produce results
+                process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
             }
             _ => {}
         }
@@ -1438,6 +1435,129 @@ fn get_index_from_expr1_call(node: &Node, source: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Get instruction info from a folded expression
+/// Returns (instruction_name, explicit_operand_count)
+fn get_folded_expr_info(expr: &Node, source: &str) -> Option<(String, usize)> {
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        let kind = child.kind();
+        // Handle both expr1 wrapper and direct expr1_* nodes
+        if kind == "expr1" {
+            // expr1 wraps expr1_plain, expr1_call, etc.
+            return get_expr1_wrapper_info(&child, source);
+        } else if kind.starts_with("expr1_") {
+            return get_expr1_info(&child, source);
+        }
+    }
+    None
+}
+
+/// Get instruction info from an expr1 wrapper node (which contains expr1_plain, etc.)
+fn get_expr1_wrapper_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
+    let mut cursor = expr1.walk();
+    for child in expr1.children(&mut cursor) {
+        if child.kind().starts_with("expr1_") {
+            return get_expr1_info(&child, source);
+        }
+    }
+    None
+}
+
+/// Get instruction info from an expr1_* node (expr1_plain, expr1_call, etc.)
+fn get_expr1_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
+    // Count explicit expr children (these are operands provided inline)
+    let mut expr_cursor = expr1.walk();
+    let explicit_operands = expr1
+        .children(&mut expr_cursor)
+        .filter(|c| c.kind() == "expr")
+        .count();
+
+    // Get instruction name from instr_plain child
+    let mut cursor = expr1.walk();
+    for child in expr1.children(&mut cursor) {
+        if child.kind() == "instr_plain" {
+            if let Some(name) = get_instruction_name(&child, source) {
+                return Some((name, explicit_operands));
+            }
+        }
+    }
+    None
+}
+
+/// Get the expected operand count for an instruction (fixed or dynamic)
+fn get_expected_operands_by_name(
+    instr_name: &str,
+    symbols: &SymbolTable,
+    source: &str,
+    arity_map: &HashMap<&'static str, InstructionArity>,
+    expr: &Node,
+) -> usize {
+    if let Some(arity) = arity_map.get(instr_name) {
+        match arity.operand_mode {
+            OperandMode::Fixed(n) => n,
+            OperandMode::Dynamic => {
+                // For dynamic instructions, we need to find the instr_plain to get param info
+                get_dynamic_operand_count_from_expr(expr, instr_name, symbols, source)
+            }
+        }
+    } else {
+        0
+    }
+}
+
+/// Get dynamic operand count by finding the instr_plain inside an expr
+fn get_dynamic_operand_count_from_expr(
+    expr: &Node,
+    instr_name: &str,
+    symbols: &SymbolTable,
+    source: &str,
+) -> usize {
+    // Navigate to find instr_plain inside expr > expr1_* > instr_plain
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        if child.kind().starts_with("expr1_") {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "instr_plain" {
+                    return get_dynamic_operand_count(&inner_child, instr_name, symbols, source);
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Process a folded expression: consume implicit stack operands, check for underflow, produce results
+fn process_folded_expr(
+    expr: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &HashMap<&'static str, InstructionArity>,
+    stack: &mut StackState,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    // Get instruction info from the expression
+    if let Some((instr_name, explicit_operands)) = get_folded_expr_info(expr, source) {
+        // Calculate operands needed from the stack
+        let expected = get_expected_operands_by_name(&instr_name, symbols, source, arity_map, expr);
+        let from_stack = expected.saturating_sub(explicit_operands);
+
+        // Consume operands from stack
+        if from_stack > 0 {
+            if let Err(available) = stack.consume(from_stack) {
+                // Use the expr node for the diagnostic location
+                let diagnostic =
+                    create_stack_underflow_diagnostic(expr, &instr_name, from_stack, available);
+                diagnostics.push(diagnostic);
+            }
+        }
+    }
+
+    // Produce result values
+    let produces = count_expr_production(expr, source, symbols, arity_map);
+    stack.produce(produces);
 }
 
 /// Count the number of result values a block produces
