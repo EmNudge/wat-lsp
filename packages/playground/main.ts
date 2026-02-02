@@ -100,6 +100,12 @@ interface WatLSP {
   }>;
 }
 
+// Tab state
+interface EditorTab {
+  id: string;
+  isPinned: boolean;
+}
+
 // Global state
 let editor: monaco.editor.IStandaloneCodeEditor;
 let wabt: WabtModule;
@@ -109,6 +115,9 @@ let wasmInstance: WebAssembly.Instance | null = null;
 let wasmBytes: Uint8Array | null = null;
 let watGrammar: vsctm.IGrammar | null = null;
 let currentExampleId: string = ''; // Track currently loaded example
+let openTabs: EditorTab[] = [];
+let activeTabId: string = '';
+const tabContents: Map<string, string> = new Map(); // Track modified content per tab
 
 // Track error counts per file for sidebar styling
 const fileErrors: Map<string, number> = new Map();
@@ -120,6 +129,7 @@ let elements: {
   lspStatusText: HTMLElement;
   consoleOutput: HTMLElement;
   fileTree: HTMLElement;
+  editorTabs: HTMLElement;
   compileBtn: HTMLButtonElement;
   runBtn: HTMLButtonElement;
   downloadBtn: HTMLButtonElement;
@@ -227,6 +237,8 @@ function populateFileTree(): void {
     item.innerHTML = `<span class="file-icon">${icon}</span> ${escapeHtml(label)}`;
 
     item.addEventListener('click', () => {
+      // Save current tab content before switching
+      saveCurrentTabContent();
       // Remove selection from all items
       container.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
       // Select this item
@@ -648,12 +660,6 @@ async function initMonaco(): Promise<void> {
   (window as unknown as { monacoEditor: typeof editor; monaco: typeof monaco }).monacoEditor = editor;
   (window as unknown as { monaco: typeof monaco }).monaco = monaco;
 
-  // Set initial editor title
-  const editorTitle = document.getElementById('editor-title');
-  if (editorTitle) {
-    editorTitle.textContent = `${defaultExample.id}.wat`;
-  }
-
   // Override theme's getTokenStyleMetadata for semantic token coloring
   try {
     const theme = (editor as unknown as { _themeService: { _theme: { getTokenStyleMetadata: (type: string, modifiers: string[], lang: string) => { foreground: number } | undefined } } })._themeService._theme;
@@ -682,9 +688,21 @@ async function initMonaco(): Promise<void> {
     console.warn('Could not override theme token metadata:', e);
   }
 
-  // Parse on content change (debounced)
+  // Parse on content change (debounced) and pin tab on edit
   let parseTimeout: ReturnType<typeof setTimeout>;
+  let isLoadingExample = false;
+
+  // Expose isLoadingExample setter for loadExampleIntoEditor
+  (window as unknown as { setIsLoadingExample: (val: boolean) => void }).setIsLoadingExample = (val: boolean) => {
+    isLoadingExample = val;
+  };
+
   editor.onDidChangeModelContent(() => {
+    // Pin the tab if the user made an edit (not programmatic load)
+    if (!isLoadingExample && activeTabId) {
+      pinActiveTab();
+    }
+
     clearTimeout(parseTimeout);
     parseTimeout = setTimeout(() => {
       if (watLSP && watLSP.ready) {
@@ -922,6 +940,191 @@ function selectFileInTree(id: string): void {
   if (item) {
     item.classList.add('selected');
   }
+}
+
+// Tab management functions
+function renderTabs(): void {
+  if (!elements.editorTabs) return;
+
+  const html = openTabs.map(tab => {
+    const example = getExampleById(tab.id);
+    const label = example ? `${tab.id}.wat` : `${tab.id}.wat`;
+    const isActive = tab.id === activeTabId;
+    const previewClass = tab.isPinned ? '' : ' preview';
+    const activeClass = isActive ? ' active' : '';
+
+    return `<div class="editor-tab${previewClass}${activeClass}" data-id="${tab.id}">
+      <span class="tab-label">${escapeHtml(label)}</span>
+      <button class="tab-close" title="Close">×</button>
+    </div>`;
+  }).join('');
+
+  elements.editorTabs.innerHTML = html;
+}
+
+function openTab(id: string, pin: boolean = false): void {
+  const existingTab = openTabs.find(t => t.id === id);
+
+  if (existingTab) {
+    // Tab already exists, just activate it
+    activeTabId = id;
+    if (pin) {
+      existingTab.isPinned = true;
+    }
+  } else {
+    // Find existing preview tab to replace
+    const previewTabIndex = openTabs.findIndex(t => !t.isPinned);
+
+    if (previewTabIndex !== -1 && !pin) {
+      // Replace the preview tab
+      openTabs[previewTabIndex] = { id, isPinned: false };
+    } else {
+      // Add new tab
+      openTabs.push({ id, isPinned: pin });
+    }
+    activeTabId = id;
+  }
+
+  renderTabs();
+}
+
+function closeTab(id: string): void {
+  const tabIndex = openTabs.findIndex(t => t.id === id);
+  if (tabIndex === -1) return;
+
+  openTabs.splice(tabIndex, 1);
+  tabContents.delete(id); // Clear saved content for closed tab
+
+  // If we closed the active tab, activate another one
+  if (activeTabId === id) {
+    if (openTabs.length > 0) {
+      // Activate the tab at the same position or the last one
+      const newIndex = Math.min(tabIndex, openTabs.length - 1);
+      activeTabId = openTabs[newIndex].id;
+      loadExampleIntoEditor(activeTabId);
+    } else {
+      // No more tabs, open the default example
+      const defaultExample = getDefaultExample();
+      openTab(defaultExample.id);
+      loadExampleIntoEditor(defaultExample.id);
+    }
+  }
+
+  renderTabs();
+  selectFileInTree(activeTabId);
+}
+
+function pinTab(id: string): void {
+  const tab = openTabs.find(t => t.id === id);
+  if (tab) {
+    tab.isPinned = true;
+    renderTabs();
+  }
+}
+
+function pinActiveTab(): void {
+  if (activeTabId) {
+    pinTab(activeTabId);
+  }
+}
+
+function saveCurrentTabContent(): void {
+  if (activeTabId && editor) {
+    tabContents.set(activeTabId, editor.getValue());
+  }
+}
+
+function initEditorTabs(): void {
+  if (!elements.editorTabs) return;
+
+  // Click handler for tabs
+  elements.editorTabs.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const tab = target.closest('.editor-tab') as HTMLElement | null;
+    if (!tab) return;
+
+    const id = tab.getAttribute('data-id');
+    if (!id) return;
+
+    // Check if close button was clicked
+    if (target.classList.contains('tab-close')) {
+      e.stopPropagation();
+      closeTab(id);
+      return;
+    }
+
+    // Switch to this tab
+    if (id !== activeTabId) {
+      // Save current tab content before switching
+      saveCurrentTabContent();
+      activeTabId = id;
+      loadExampleIntoEditor(id);
+      renderTabs();
+      selectFileInTree(id);
+    }
+  });
+
+  // Double-click handler to pin tabs
+  elements.editorTabs.addEventListener('dblclick', (e) => {
+    const target = e.target as HTMLElement;
+    const tab = target.closest('.editor-tab') as HTMLElement | null;
+    if (!tab) return;
+
+    const id = tab.getAttribute('data-id');
+    if (id) {
+      pinTab(id);
+    }
+  });
+}
+
+// Load example content into editor without tab management
+function loadExampleIntoEditor(id: string): void {
+  const example = getExampleById(id);
+  if (!example) return;
+
+  currentExampleId = id;
+
+  // Set flag to prevent pinning from programmatic content change
+  const setIsLoadingExample = (window as unknown as { setIsLoadingExample?: (val: boolean) => void }).setIsLoadingExample;
+  if (setIsLoadingExample) setIsLoadingExample(true);
+
+  // Use saved content if available, otherwise use original example
+  const savedContent = tabContents.get(id);
+  editor.setValue(savedContent !== undefined ? savedContent : example.code);
+
+  if (setIsLoadingExample) setIsLoadingExample(false);
+
+  monaco.editor.setModelMarkers(editor.getModel()!, 'wat', []);
+
+  // Reset state
+  wasmModule = null;
+  wasmInstance = null;
+  wasmBytes = null;
+
+  elements.runBtn.disabled = true;
+  elements.downloadBtn.disabled = true;
+  elements.importsList.innerHTML =
+    '<p class="placeholder">Compile to see imports</p>';
+  elements.exportsList.innerHTML =
+    '<p class="placeholder">Compile to see exports</p>';
+  elements.exportFnSelect.innerHTML =
+    '<option value="">Select function...</option>';
+  elements.exportFnSelect.disabled = true;
+  elements.fnArgs.disabled = true;
+  elements.callFnBtn.disabled = true;
+  elements.fnResult.textContent = '';
+  elements.fnResult.className = 'fn-result';
+  elements.hexView.innerHTML = '';
+
+  consoleOutput.clear();
+  consoleOutput.info(`Loaded example: ${example.label}`);
+
+  if (watLSP && watLSP.ready) {
+    watLSP.parse(editor.getValue());
+    updateLSPDebugPanel();
+  }
+
+  setStatus('Ready');
 }
 
 // Register semantic tokens provider for tree-sitter based syntax highlighting
@@ -1315,50 +1518,14 @@ function downloadWasm(): void {
   consoleOutput.info('Downloaded module.wasm');
 }
 
-// Load example
-function loadExample(id: string): void {
+// Load example (opens in tab)
+function loadExample(id: string, pin: boolean = false): void {
   const example = getExampleById(id);
   if (!example) return;
 
-  currentExampleId = id;
-  editor.setValue(example.code);
-  monaco.editor.setModelMarkers(editor.getModel()!, 'wat', []);
-
-  // Update editor title with file name
-  const editorTitle = document.getElementById('editor-title');
-  if (editorTitle) {
-    editorTitle.textContent = `${id}.wat`;
-  }
-
-  // Reset state
-  wasmModule = null;
-  wasmInstance = null;
-  wasmBytes = null;
-
-  elements.runBtn.disabled = true;
-  elements.downloadBtn.disabled = true;
-  elements.importsList.innerHTML =
-    '<p class="placeholder">Compile to see imports</p>';
-  elements.exportsList.innerHTML =
-    '<p class="placeholder">Compile to see exports</p>';
-  elements.exportFnSelect.innerHTML =
-    '<option value="">Select function...</option>';
-  elements.exportFnSelect.disabled = true;
-  elements.fnArgs.disabled = true;
-  elements.callFnBtn.disabled = true;
-  elements.fnResult.textContent = '';
-  elements.fnResult.className = 'fn-result';
-  elements.hexView.innerHTML = '';
-
-  consoleOutput.clear();
-  consoleOutput.info(`Loaded example: ${example.label}`);
-
-  if (watLSP && watLSP.ready) {
-    watLSP.parse(editor.getValue());
-    updateLSPDebugPanel();
-  }
-
-  setStatus('Ready');
+  openTab(id, pin);
+  loadExampleIntoEditor(id);
+  selectFileInTree(id);
 }
 
 // Command Palette
@@ -1440,14 +1607,13 @@ function selectCommandPaletteItem(index: number): void {
 
   const item = commandPaletteFilteredItems[index];
   closeCommandPalette();
+  // Save current tab content before switching
+  saveCurrentTabContent();
   loadExample(item.id);
 
-  // Update file tree selection
-  elements.fileTree.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+  // Expand parent folder if collapsed
   const treeItem = elements.fileTree.querySelector(`[data-id="${item.id}"]`);
   if (treeItem) {
-    treeItem.classList.add('selected');
-    // Expand parent folder if collapsed
     const folder = treeItem.closest('.tree-folder');
     if (folder) {
       const children = folder.querySelector('.tree-folder-children') as HTMLElement;
@@ -1640,6 +1806,7 @@ function initElements(): void {
     lspStatusText: document.getElementById('lsp-status-text')!,
     consoleOutput: document.getElementById('console-output')!,
     fileTree: document.getElementById('file-tree')!,
+    editorTabs: document.getElementById('editor-tabs')!,
     compileBtn: document.getElementById('compile-btn') as HTMLButtonElement,
     runBtn: document.getElementById('run-btn') as HTMLButtonElement,
     downloadBtn: document.getElementById('download-btn') as HTMLButtonElement,
@@ -1680,11 +1847,14 @@ async function init(): Promise<void> {
   initResizablePanel();
   initFileTreeResize();
   initCommandPalette();
+  initEditorTabs();
 
   // Initialize Monaco, wabt, and LSP in parallel
   await Promise.all([initMonaco(), initWabt(), initLSP()]);
 
-  // Select the default example in the file tree
+  // Open default example in a tab
+  const defaultExample = getDefaultExample();
+  openTab(defaultExample.id);
   selectFileInTree(currentExampleId);
 
   // Bind event handlers
