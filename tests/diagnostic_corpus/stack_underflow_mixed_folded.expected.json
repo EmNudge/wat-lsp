@@ -1,0 +1,10 @@
+{
+  "description": "Stack underflow with mixed folded and linear form",
+  "diagnostics": [
+    {
+      "line": 6,
+      "message_contains": "i32.add",
+      "severity": 1
+    }
+  ]
+}
