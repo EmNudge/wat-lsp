@@ -2361,4 +2361,133 @@ mod tests {
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    // Multi-memory load/store validation tests
+
+    #[test]
+    fn test_undefined_memory_in_load_instruction() {
+        // Load instruction referencing undefined memory should produce an error
+        let document = r#"(module
+  (memory $other 1)
+  (func (export "test") (result i32)
+    (i32.load $missing (i32.const 0))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined memory") && d.message.contains("$missing"))
+            .collect();
+        assert_eq!(
+            memory_errors.len(),
+            1,
+            "Undefined memory in i32.load should produce one error, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_undefined_memory_in_store_instruction() {
+        // Store instruction referencing undefined memory should produce an error
+        let document = r#"(module
+  (memory $mem0 1)
+  (func (export "test")
+    (i32.store $nonexistent (i32.const 0) (i32.const 42))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.message.contains("Undefined memory") && d.message.contains("$nonexistent")
+            })
+            .collect();
+        assert_eq!(
+            memory_errors.len(),
+            1,
+            "Undefined memory in i32.store should produce one error"
+        );
+    }
+
+    #[test]
+    fn test_valid_memory_in_load_store_instructions() {
+        // Load/store with valid memory references should not produce errors
+        let document = r#"(module
+  (memory $mem0 1)
+  (memory $mem1 2)
+  (func $test (param $addr i32) (result i32)
+    (i32.store $mem0 (local.get $addr) (i32.const 42))
+    (i32.store $mem1 (local.get $addr) (i32.const 43))
+    (i32.load $mem0 (local.get $addr))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined memory"))
+            .collect();
+        assert_eq!(
+            memory_errors.len(),
+            0,
+            "Valid memory references should not produce errors, got: {:?}",
+            memory_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_undefined_memory_in_load_with_offset() {
+        // Load with offset and align still needs memory validation
+        let document = r#"(module
+  (memory $mem0 1)
+  (func (param $addr i32) (result i32)
+    (i32.load $undefined offset=4 align=4 (local.get $addr))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined memory") && d.message.contains("$undefined"))
+            .collect();
+        assert_eq!(
+            memory_errors.len(),
+            1,
+            "Undefined memory in i32.load with offset should produce one error"
+        );
+    }
+
+    #[test]
+    fn test_undefined_memory_various_load_types() {
+        // Test various load instruction types
+        let document = r#"(module
+  (memory $mem 1)
+  (func (result i64)
+    (i64.load $bad (i32.const 0))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let memory_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined memory") && d.message.contains("$bad"))
+            .collect();
+        assert_eq!(
+            memory_errors.len(),
+            1,
+            "Undefined memory in i64.load should produce one error"
+        );
+    }
 }
