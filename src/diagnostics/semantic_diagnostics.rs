@@ -1,4 +1,4 @@
-use crate::diagnostics::instruction_metadata::get_instruction_arity_map;
+use crate::diagnostics::instruction_metadata::{get_instruction_arity_map, OperandMode};
 use crate::symbols::SymbolTable;
 use crate::utils::{
     determine_instruction_context_at_node, find_containing_function, node_to_lsp_range,
@@ -7,6 +7,566 @@ use crate::utils::{
 use std::sync::OnceLock;
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
+
+/// Tracks stack state during instruction list traversal for stack underflow detection
+#[derive(Debug, Clone)]
+struct StackState {
+    /// Current stack depth (number of values on the stack)
+    depth: usize,
+    /// True after unconditional branches or unreachable - subsequent code is dead
+    /// and we shouldn't report errors for it
+    uncertain: bool,
+}
+
+impl StackState {
+    fn new() -> Self {
+        Self {
+            depth: 0,
+            uncertain: false,
+        }
+    }
+
+    /// Try to consume n values from the stack
+    /// Returns Err with the actual available count if underflow occurs
+    fn consume(&mut self, n: usize) -> Result<(), usize> {
+        if self.uncertain {
+            // After unconditional control flow, we can't know the stack state
+            return Ok(());
+        }
+        if self.depth >= n {
+            self.depth -= n;
+            Ok(())
+        } else {
+            let available = self.depth;
+            self.depth = 0;
+            Err(available)
+        }
+    }
+
+    /// Push n values onto the stack
+    fn produce(&mut self, n: usize) {
+        if !self.uncertain {
+            self.depth += n;
+        }
+    }
+
+    /// Mark stack as uncertain (after unconditional branch/unreachable)
+    fn mark_uncertain(&mut self) {
+        self.uncertain = true;
+    }
+}
+
+/// Track stack state through an instruction list and report underflow errors
+fn track_stack_in_instr_list(
+    instr_list: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut stack = StackState::new();
+    let arity_map = get_arity_map();
+
+    let mut cursor = instr_list.walk();
+    for child in instr_list.children(&mut cursor) {
+        let kind = child.kind();
+
+        match kind {
+            "instr" => {
+                // instr wraps instr_plain, instr_block, etc.
+                process_instr_node(&child, source, symbols, arity_map, &mut stack, diagnostics);
+            }
+            "instr_plain" => {
+                // Direct instr_plain (shouldn't happen but handle anyway)
+                if let Some(instr_name) = get_instruction_name(&child, source) {
+                    process_instruction(
+                        &child,
+                        &instr_name,
+                        &mut stack,
+                        symbols,
+                        source,
+                        arity_map,
+                        diagnostics,
+                    );
+                }
+            }
+            "expr" => {
+                // Folded expression - determine how many values it produces
+                let produces = count_expr_production(&child, source, symbols, arity_map);
+                stack.produce(produces);
+            }
+            "instr_block" | "instr_loop" => {
+                // Block instructions create a new stack frame
+                // After a block completes, it pushes its result values
+                let results = count_block_results(&child, source);
+                stack.produce(results);
+            }
+            "instr_if" => {
+                // if consumes condition (1 value) and produces result values
+                if let Err(available) = stack.consume(1) {
+                    let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
+                    diagnostics.push(diagnostic);
+                }
+                let results = count_block_results(&child, source);
+                stack.produce(results);
+            }
+            "instr_call" => {
+                // Folded call: (call $fn args...) - handled similarly to expr
+                let produces = count_expr_production(&child, source, symbols, arity_map);
+                stack.produce(produces);
+            }
+            _ => {
+                // Other node types (comments, etc.) - ignore
+            }
+        }
+    }
+}
+
+/// Process an 'instr' wrapper node
+fn process_instr_node(
+    instr_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &std::collections::HashMap<
+        &'static str,
+        crate::diagnostics::instruction_metadata::InstructionArity,
+    >,
+    stack: &mut StackState,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = instr_node.walk();
+    for child in instr_node.children(&mut cursor) {
+        let kind = child.kind();
+        match kind {
+            "instr_plain" => {
+                if let Some(instr_name) = get_instruction_name(&child, source) {
+                    process_instruction(
+                        &child,
+                        &instr_name,
+                        stack,
+                        symbols,
+                        source,
+                        arity_map,
+                        diagnostics,
+                    );
+                }
+            }
+            "expr" => {
+                // Folded expression - determine how many values it produces
+                let produces = count_expr_production(&child, source, symbols, arity_map);
+                stack.produce(produces);
+            }
+            "instr_block" | "instr_loop" => {
+                let results = count_block_results(&child, source);
+                stack.produce(results);
+            }
+            "instr_if" => {
+                if let Err(available) = stack.consume(1) {
+                    let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
+                    diagnostics.push(diagnostic);
+                }
+                let results = count_block_results(&child, source);
+                stack.produce(results);
+            }
+            "instr_call" => {
+                let produces = count_expr_production(&child, source, symbols, arity_map);
+                stack.produce(produces);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Get the instruction name from an instr_plain node
+fn get_instruction_name(instr_node: &Node, source: &str) -> Option<String> {
+    let mut cursor = instr_node.walk();
+    for child in instr_node.children(&mut cursor) {
+        let kind = child.kind();
+        // Handle different instruction types
+        if kind.starts_with("op_") {
+            // For op_const, the instruction name is in the first child (pat01)
+            if kind == "op_const" {
+                let mut inner_cursor = child.walk();
+                for inner_child in child.children(&mut inner_cursor) {
+                    let inner_kind = inner_child.kind();
+                    // pat01 contains "i32.const", "i64.const", etc.
+                    if inner_kind == "pat01" || inner_kind.contains("const") {
+                        return Some(source[inner_child.byte_range()].trim().to_string());
+                    }
+                }
+                // Fallback: extract first token from the whole op_const text
+                let text = &source[child.byte_range()];
+                return text.split_whitespace().next().map(|s| s.to_string());
+            }
+            // For other op_ nodes (like op_nullary, op_index), the text is the instruction
+            return Some(source[child.byte_range()].trim().to_string());
+        }
+    }
+    // Fallback: get the text of the first token
+    let text = &source[instr_node.byte_range()];
+    text.split_whitespace().next().map(|s| s.to_string())
+}
+
+/// Process an instruction: consume operands, check for underflow, produce results
+fn process_instruction(
+    node: &Node,
+    instr_name: &str,
+    stack: &mut StackState,
+    symbols: &SymbolTable,
+    source: &str,
+    arity_map: &std::collections::HashMap<
+        &'static str,
+        crate::diagnostics::instruction_metadata::InstructionArity,
+    >,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Handle control flow that makes subsequent code dead
+    match instr_name {
+        "unreachable" | "return" | "br" => {
+            stack.mark_uncertain();
+            return;
+        }
+        _ => {}
+    }
+
+    // Look up instruction arity
+    if let Some(arity) = arity_map.get(instr_name) {
+        // Get the number of operands to consume
+        let consumes = match arity.operand_mode {
+            OperandMode::Fixed(n) => n,
+            OperandMode::Dynamic => {
+                // For dynamic instructions, look up the actual count
+                get_dynamic_operand_count(node, instr_name, symbols, source)
+            }
+        };
+
+        // Try to consume operands
+        if let Err(available) = stack.consume(consumes) {
+            let diagnostic =
+                create_stack_underflow_diagnostic(node, instr_name, consumes, available);
+            diagnostics.push(diagnostic);
+        }
+
+        // Produce results
+        let produces = match instr_name {
+            // Dynamic producers - look up actual result count
+            "call" => get_call_result_count(node, symbols, source),
+            "call_ref" | "return_call_ref" => get_call_ref_result_count(node, symbols, source),
+            _ => arity.produces,
+        };
+        stack.produce(produces);
+    } else {
+        // Unknown instruction - skip (might be a newer instruction we don't know about)
+    }
+}
+
+/// Get the operand count for a dynamic instruction
+fn get_dynamic_operand_count(
+    node: &Node,
+    instr_name: &str,
+    symbols: &SymbolTable,
+    source: &str,
+) -> usize {
+    match instr_name {
+        "call" => {
+            // Get function index/name and look up parameter count
+            if let Some(func_ref) = get_index_from_node(node, source) {
+                if let Some(func) = symbols.get_function_by_name(&func_ref) {
+                    return func.parameters.len();
+                } else if let Ok(idx) = func_ref.parse::<usize>() {
+                    if let Some(func) = symbols.get_function_by_index(idx) {
+                        return func.parameters.len();
+                    }
+                }
+            }
+            0
+        }
+        "call_ref" | "return_call_ref" => {
+            // Get type index and look up parameter count + 1 for funcref
+            if let Some(type_ref) = get_index_from_node(node, source) {
+                if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+                    if let crate::symbols::TypeKind::Func { params, .. } = &type_def.kind {
+                        return params.len() + 1; // params + funcref
+                    }
+                } else if let Ok(idx) = type_ref.parse::<usize>() {
+                    if let Some(type_def) = symbols.get_type_by_index(idx) {
+                        if let crate::symbols::TypeKind::Func { params, .. } = &type_def.kind {
+                            return params.len() + 1;
+                        }
+                    }
+                }
+            }
+            1 // At least the funcref
+        }
+        "struct.new" => {
+            // Get type and look up field count
+            if let Some(type_ref) = get_index_from_node(node, source) {
+                if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+                    if let crate::symbols::TypeKind::Struct { fields } = &type_def.kind {
+                        return fields.len();
+                    }
+                } else if let Ok(idx) = type_ref.parse::<usize>() {
+                    if let Some(type_def) = symbols.get_type_by_index(idx) {
+                        if let crate::symbols::TypeKind::Struct { fields } = &type_def.kind {
+                            return fields.len();
+                        }
+                    }
+                }
+            }
+            0
+        }
+        "throw" => {
+            // Get tag and look up parameter count
+            if let Some(tag_ref) = get_index_from_node(node, source) {
+                if let Some(tag) = symbols.get_tag_by_name(&tag_ref) {
+                    return tag.params.len();
+                } else if let Ok(idx) = tag_ref.parse::<usize>() {
+                    if let Some(tag) = symbols.get_tag_by_index(idx) {
+                        return tag.params.len();
+                    }
+                }
+            }
+            0
+        }
+        "br" | "br_if" => {
+            // br_if consumes condition (1) + potential multi-value args
+            // For simplicity, just handle the condition for br_if
+            if instr_name == "br_if" {
+                1 // condition
+            } else {
+                0 // br itself doesn't consume extra (but terminates)
+            }
+        }
+        _ => 0,
+    }
+}
+
+/// Get result count for a call instruction
+fn get_call_result_count(node: &Node, symbols: &SymbolTable, source: &str) -> usize {
+    if let Some(func_ref) = get_index_from_node(node, source) {
+        if let Some(func) = symbols.get_function_by_name(&func_ref) {
+            return func.results.len();
+        } else if let Ok(idx) = func_ref.parse::<usize>() {
+            if let Some(func) = symbols.get_function_by_index(idx) {
+                return func.results.len();
+            }
+        }
+    }
+    0
+}
+
+/// Get result count for a call_ref instruction
+fn get_call_ref_result_count(node: &Node, symbols: &SymbolTable, source: &str) -> usize {
+    if let Some(type_ref) = get_index_from_node(node, source) {
+        if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+            if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                return results.len();
+            }
+        } else if let Ok(idx) = type_ref.parse::<usize>() {
+            if let Some(type_def) = symbols.get_type_by_index(idx) {
+                if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                    return results.len();
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Get the index/identifier from an instruction node
+fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].trim().to_string());
+        }
+        // Also check inside op_index nodes
+        if child.kind().starts_with("op_") {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "index" || inner_child.kind() == "identifier" {
+                    return Some(source[inner_child.byte_range()].trim().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Count how many values a folded expression produces
+fn count_expr_production(
+    expr: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &std::collections::HashMap<
+        &'static str,
+        crate::diagnostics::instruction_metadata::InstructionArity,
+    >,
+) -> usize {
+    // Find the instruction inside the expression
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        let kind = child.kind();
+        if kind.starts_with("expr1_") {
+            // expr1_plain, expr1_call, expr1_block, etc.
+            return count_expr1_production(&child, source, symbols, arity_map);
+        }
+    }
+    // Default: assume 1 value produced
+    1
+}
+
+/// Count production for expr1_* nodes
+fn count_expr1_production(
+    expr1: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &std::collections::HashMap<
+        &'static str,
+        crate::diagnostics::instruction_metadata::InstructionArity,
+    >,
+) -> usize {
+    let kind = expr1.kind();
+
+    match kind {
+        "expr1_plain" => {
+            // Get instruction name from instr_plain child
+            let mut cursor = expr1.walk();
+            for child in expr1.children(&mut cursor) {
+                if child.kind() == "instr_plain" {
+                    if let Some(instr_name) = get_instruction_name(&child, source) {
+                        // Handle dynamic result producers
+                        match instr_name.as_str() {
+                            "call" => return get_call_result_count(&child, symbols, source),
+                            "call_ref" | "return_call_ref" => {
+                                return get_call_ref_result_count(&child, symbols, source)
+                            }
+                            _ => {
+                                if let Some(arity) = arity_map.get(instr_name.as_str()) {
+                                    return arity.produces;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            1 // Default
+        }
+        "expr1_block" | "expr1_loop" => {
+            // Block produces its result type values
+            count_block_results(expr1, source)
+        }
+        "expr1_if" => {
+            // If produces its result type values
+            count_block_results(expr1, source)
+        }
+        "expr1_call" => {
+            // (call $func args...) - look up function result count
+            if let Some(func_ref) = get_index_from_expr1_call(expr1, source) {
+                if let Some(func) = symbols.get_function_by_name(&func_ref) {
+                    return func.results.len();
+                } else if let Ok(idx) = func_ref.parse::<usize>() {
+                    if let Some(func) = symbols.get_function_by_index(idx) {
+                        return func.results.len();
+                    }
+                }
+            }
+            0
+        }
+        _ => 1, // Default
+    }
+}
+
+/// Get function reference from expr1_call node
+fn get_index_from_expr1_call(node: &Node, source: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "index" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].trim().to_string());
+        }
+    }
+    None
+}
+
+/// Count the number of result values a block produces
+fn count_block_results(block_node: &Node, source: &str) -> usize {
+    // Look for (result ...) in the block type
+    let mut cursor = block_node.walk();
+    for child in block_node.children(&mut cursor) {
+        if child.kind() == "block_type" {
+            return count_result_types(&child, source);
+        }
+    }
+    0
+}
+
+/// Count the number of types in a result section
+fn count_result_types(block_type: &Node, source: &str) -> usize {
+    let mut count = 0;
+    let mut cursor = block_type.walk();
+    for child in block_type.children(&mut cursor) {
+        if child.kind() == "func_type_results" {
+            // Count value types inside
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "value_type" || inner_child.kind() == "ref_type" {
+                    count += 1;
+                }
+            }
+        }
+        // Also handle inline result types
+        if child.kind() == "value_type" || child.kind() == "ref_type" {
+            count += 1;
+        }
+    }
+    // If we found result types, return the count
+    // Also check the text for (result ...)
+    if count == 0 {
+        let text = &source[block_type.byte_range()];
+        if text.contains("result") {
+            // Count value types in the text (rough heuristic)
+            let type_keywords = [
+                "i32",
+                "i64",
+                "f32",
+                "f64",
+                "v128",
+                "funcref",
+                "externref",
+                "anyref",
+            ];
+            for kw in &type_keywords {
+                count += text.matches(kw).count();
+            }
+        }
+    }
+    count
+}
+
+/// Create a diagnostic for stack underflow
+fn create_stack_underflow_diagnostic(
+    node: &Node,
+    instr_name: &str,
+    needed: usize,
+    available: usize,
+) -> Diagnostic {
+    let range = node_to_lsp_range(node);
+    let value_word = if needed == 1 { "value" } else { "values" };
+
+    Diagnostic {
+        range,
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String("stack-underflow".to_string())),
+        code_description: None,
+        source: Some("wat-lsp".to_string()),
+        message: format!(
+            "Stack underflow: '{}' requires {} {} but only {} available on stack",
+            instr_name, needed, value_word, available
+        ),
+        related_information: None,
+        tags: None,
+        data: None,
+    }
+}
 
 /// Configuration for which checks to perform during tree walk
 struct DiagnosticConfig {
@@ -44,6 +604,19 @@ fn unified_tree_walk(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let kind = node.kind();
+
+    // Check for function body instruction lists - perform stack tracking for unfolded code
+    if kind == "module_field_func" {
+        // Find the instr_list child and track stack
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "instr_list" {
+                track_stack_in_instr_list(&child, source, symbols, diagnostics);
+                break;
+            }
+        }
+        // Continue recursing for other checks (references, etc.)
+    }
 
     // Special handling for catch_clause (try_table): first index is tag, second is label
     if kind == "catch_clause" {
@@ -2853,6 +3426,292 @@ mod tests {
         assert_eq!(
             missing_operand_errors[0].code,
             Some(NumberOrString::String("missing-operands".to_string()))
+        );
+    }
+
+    // === Stack underflow tests for unfolded WAT ===
+
+    #[test]
+    fn test_stack_underflow_basic() {
+        // i32.add with completely empty stack
+        let document = r#"(module
+  (func $test
+    i32.add))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            1,
+            "i32.add with empty stack should produce underflow error, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        assert!(underflow_errors[0].message.contains("i32.add"));
+        assert!(underflow_errors[0].message.contains("requires 2"));
+        assert!(underflow_errors[0].message.contains("0 available"));
+    }
+
+    #[test]
+    fn test_stack_underflow_partial() {
+        // i32.add with only 1 value on stack (needs 2)
+        let document = r#"(module
+  (func $test
+    i32.const 1
+    i32.add))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            1,
+            "i32.add with 1 value should produce underflow error"
+        );
+        assert!(underflow_errors[0].message.contains("requires 2"));
+        assert!(underflow_errors[0].message.contains("1 available"));
+    }
+
+    #[test]
+    fn test_stack_no_underflow_correct_sequence() {
+        // Correct sequence: push 2 values, then add
+        let document = r#"(module
+  (func $test (result i32)
+    i32.const 1
+    i32.const 2
+    i32.add))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            0,
+            "Correct stack sequence should not produce underflow"
+        );
+    }
+
+    #[test]
+    fn test_stack_underflow_drop() {
+        // drop with empty stack
+        let document = r#"(module
+  (func $test
+    drop))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            1,
+            "drop with empty stack should produce underflow error"
+        );
+        assert!(underflow_errors[0].message.contains("drop"));
+    }
+
+    #[test]
+    fn test_stack_underflow_local_set() {
+        // local.set without value on stack
+        let document = r#"(module
+  (func $test (local $x i32)
+    local.set $x))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            1,
+            "local.set with empty stack should produce underflow error"
+        );
+        assert!(underflow_errors[0].message.contains("local.set"));
+    }
+
+    #[test]
+    fn test_stack_no_underflow_local_get_then_set() {
+        // local.get produces 1, local.set consumes 1
+        let document = r#"(module
+  (func $test (local $x i32) (local $y i32)
+    local.get $x
+    local.set $y))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            0,
+            "local.get then local.set should balance"
+        );
+    }
+
+    #[test]
+    fn test_stack_underflow_call() {
+        // call a function that takes 2 params with only 1 on stack
+        let document = r#"(module
+  (func $add (param i32 i32) (result i32)
+    local.get 0
+    local.get 1
+    i32.add)
+
+  (func $test (result i32)
+    i32.const 1
+    call $add))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            1,
+            "call with insufficient args should produce underflow error"
+        );
+        assert!(underflow_errors[0].message.contains("call"));
+        assert!(underflow_errors[0].message.contains("requires 2"));
+    }
+
+    #[test]
+    fn test_stack_no_underflow_after_unreachable() {
+        // After unreachable, subsequent code is dead - don't report errors
+        let document = r#"(module
+  (func $test
+    unreachable
+    i32.add))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            0,
+            "Code after unreachable should not report underflow"
+        );
+    }
+
+    #[test]
+    fn test_stack_mixed_folded_unfolded() {
+        // Folded expression pushes result, then unfolded uses it
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.const 5)
+    (i32.const 3)
+    i32.add))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            0,
+            "Mixed folded/unfolded should work correctly"
+        );
+    }
+
+    #[test]
+    fn test_stack_select_underflow() {
+        // select needs 3 values (val1, val2, condition)
+        let document = r#"(module
+  (func $test (result i32)
+    i32.const 1
+    i32.const 2
+    select))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            1,
+            "select with 2 values should produce underflow (needs 3)"
+        );
+        assert!(underflow_errors[0].message.contains("select"));
+        assert!(underflow_errors[0].message.contains("requires 3"));
+    }
+
+    #[test]
+    fn test_stack_chain_of_operations() {
+        // Chain: const 1, const 2, add (produces 1), const 3, mul (produces 1)
+        let document = r#"(module
+  (func $test (result i32)
+    i32.const 1
+    i32.const 2
+    i32.add
+    i32.const 3
+    i32.mul))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert_eq!(
+            underflow_errors.len(),
+            0,
+            "Valid chain of operations should not produce underflow"
         );
     }
 }
