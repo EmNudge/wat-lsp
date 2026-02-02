@@ -654,6 +654,7 @@ async function initMonaco(): Promise<void> {
     folding: true,
     bracketPairColorization: { enabled: false },
     'semanticHighlighting.enabled': true,
+    fixedOverflowWidgets: true,
   });
 
   // Expose editor and monaco for testing
