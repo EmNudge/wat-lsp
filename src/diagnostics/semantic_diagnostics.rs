@@ -693,9 +693,14 @@ fn validate_dynamic_operands(
                     use crate::symbols::TypeKind;
                     if let TypeKind::Struct { fields } = &type_def.kind {
                         let expected = fields.len();
-                        if operand_count != expected {
-                            let msg =
-                                format!("{} operands (fields of struct {})", expected, type_name);
+                        // Only report error if there are TOO MANY operands.
+                        // Having fewer operands is valid in WAT because remaining operands
+                        // can come from the implicit stack (linear or partially folded style).
+                        if operand_count > expected {
+                            let msg = format!(
+                                "at most {} operands (fields of struct {})",
+                                expected, type_name
+                            );
                             let diagnostic = create_operand_count_diagnostic(
                                 node,
                                 instr_name,
@@ -721,8 +726,12 @@ fn validate_dynamic_operands(
             if let Some(tag_name) = extract_instruction_type_param(node, source) {
                 if let Some(tag) = symbols.get_tag_by_name(&tag_name) {
                     let expected = tag.params.len();
-                    if operand_count != expected {
-                        let msg = format!("{} operands (params of tag {})", expected, tag_name);
+                    // Only report error if there are TOO MANY operands.
+                    // Having fewer operands is valid in WAT because remaining operands
+                    // can come from the implicit stack (linear or partially folded style).
+                    if operand_count > expected {
+                        let msg =
+                            format!("at most {} operands (params of tag {})", expected, tag_name);
                         let diagnostic =
                             create_operand_count_diagnostic(node, instr_name, operand_count, &msg);
                         diagnostics.push(diagnostic);
@@ -732,13 +741,17 @@ fn validate_dynamic_operands(
         }
         "call" => {
             // (call $func (arg)*)
-            // The number of operands should match the function's parameter count
+            // Only report error if there are TOO MANY operands.
+            // Having fewer operands is valid in WAT because remaining operands
+            // can come from the implicit stack (linear or partially folded style).
             if let Some(func_name) = extract_instruction_type_param(node, source) {
                 if let Some(func) = symbols.get_function_by_name(&func_name) {
                     let expected = func.parameters.len();
-                    if operand_count != expected {
-                        let msg =
-                            format!("{} operands (params of function {})", expected, func_name);
+                    if operand_count > expected {
+                        let msg = format!(
+                            "at most {} operands (params of function {})",
+                            expected, func_name
+                        );
                         let diagnostic =
                             create_operand_count_diagnostic(node, instr_name, operand_count, &msg);
                         diagnostics.push(diagnostic);
@@ -747,10 +760,10 @@ fn validate_dynamic_operands(
                     // Numeric function index
                     if let Some(func) = symbols.get_function_by_index(idx) {
                         let expected = func.parameters.len();
-                        if operand_count != expected {
+                        if operand_count > expected {
                             let func_display = func.name.as_deref().unwrap_or(&func_name);
                             let msg = format!(
-                                "{} operands (params of function {})",
+                                "at most {} operands (params of function {})",
                                 expected, func_display
                             );
                             let diagnostic = create_operand_count_diagnostic(
@@ -1485,6 +1498,62 @@ mod tests {
                 .count(),
             0,
             "Valid call with 1 parameter should have no diagnostics"
+        );
+    }
+
+    #[test]
+    fn test_call_with_unfolded_args() {
+        // Unfolded style: arguments are pushed to stack before the call
+        // This should NOT produce false errors (issue #78)
+        let document = r#"(module
+  (func $add (param i32 i32) (result i32)
+    i32.add)
+
+  (func $main (result i32)
+    (i32.const 1)
+    (i32.const 2)
+    (call $add)))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("operand"))
+            .collect();
+        assert_eq!(
+            operand_errors.len(),
+            0,
+            "Unfolded call style should not produce false operand errors: {:?}",
+            operand_errors
+        );
+    }
+
+    #[test]
+    fn test_call_with_too_many_operands() {
+        // Should still catch too many operands in folded style
+        let document = r#"(module
+  (func $single (param i32) (result i32)
+    local.get 0)
+
+  (func $main (result i32)
+    (call $single (i32.const 1) (i32.const 2))))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let operand_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("operand"))
+            .collect();
+        assert_eq!(
+            operand_errors.len(),
+            1,
+            "Call with too many operands should produce an error"
         );
     }
 
