@@ -1,5 +1,5 @@
 use crate::instruction_metadata::{
-    get_instruction_arity_map, is_terminating_instruction, OperandMode,
+    get_instruction_arity_map, is_terminating_instruction, sequence_always_terminates, OperandMode,
 };
 use crate::symbols::{SymbolTable, ValueType};
 use crate::utils::{
@@ -105,8 +105,13 @@ fn track_stack_in_instr_list(
             "instr_block" | "instr_loop" => {
                 // Block instructions create a new stack frame
                 // After a block completes, it pushes its result values
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                // But only if the block can actually fall through
+                if !sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_if" => {
                 // if consumes condition (1 value) and produces result values
@@ -114,8 +119,13 @@ fn track_stack_in_instr_list(
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
                 }
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                // Only produce results if the if can fall through
+                if !sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_call" => {
                 // Folded call: (call $fn args...) - consume stack operands and produce results
@@ -169,16 +179,24 @@ fn process_instr_node(
                 process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
             }
             "instr_block" | "instr_loop" => {
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                if !sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_if" => {
                 if let Err(available) = stack.consume(1) {
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
                 }
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                if !sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_call" => {
                 // Folded call - consume stack operands and produce results
@@ -493,6 +511,13 @@ fn process_folded_expr(
                 diagnostics.push(diagnostic);
             }
         }
+    }
+
+    // Check if the expression always terminates (e.g., a block where all paths return)
+    // If so, mark uncertain and don't produce values
+    if sequence_always_terminates(expr, source) {
+        stack.mark_uncertain();
+        return;
     }
 
     // Produce result values with actual types
