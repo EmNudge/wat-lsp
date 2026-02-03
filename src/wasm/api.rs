@@ -12,7 +12,7 @@ use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
 use crate::symbol_lookup::{find_symbol_definition_range, IndexContext};
-use crate::symbols::SymbolTable;
+use crate::symbols::{SymbolTable, ValueType};
 use crate::ts_facade::{self, Language, Parser, Query, Tree};
 use crate::utils::{get_word_at_position, is_word_char};
 
@@ -803,7 +803,9 @@ struct WasmDiagnostic {
     severity: u32, // 1 = error, 2 = warning, 3 = info, 4 = hint
 }
 
-use crate::instruction_metadata::{get_instruction_arity_map, InstructionArity, OperandMode};
+use crate::instruction_metadata::{
+    get_instruction_arity_map, is_terminating_instruction, InstructionArity, OperandMode,
+};
 use crate::ts_facade::Node;
 use crate::utils::{
     determine_instruction_context_at_node, find_containing_function, InstructionContext, STRUCT_OPS,
@@ -831,13 +833,56 @@ fn walk_tree_for_diagnostics(
 
     // Check for function body instruction lists - perform stack tracking for unfolded code
     if kind == "module_field_func" {
+        // Get the function's declared return types
+        let func_line = node.start_position().row as u32;
+        let expected_results: &[ValueType] = symbols
+            .find_function_containing_line(func_line)
+            .map(|f| f.results.as_slice())
+            .unwrap_or(&[]);
+
+        // Check if function uses (type $ref) syntax - if so, the symbol table might not
+        // have resolved the return types from the type definition
+        let mut cursor = node.walk();
+        let has_type_use = node.children(&mut cursor).any(|c| c.kind() == "type_use");
+
+        // For return type validation: use Some(results) when we know them, None otherwise
+        let expected_for_validation = if has_type_use && expected_results.is_empty() {
+            // Function uses type reference but symbol table didn't resolve it - skip validation
+            None
+        } else {
+            Some(expected_results)
+        };
+
         // Find the instr_list child and track stack
         let mut cursor = node.walk();
+        let mut found_instr_list = false;
         for child in node.children(&mut cursor) {
             if child.kind() == "instr_list" {
-                track_stack_in_instr_list(&child, source, symbols, diagnostics);
+                track_stack_in_instr_list(
+                    &child,
+                    source,
+                    symbols,
+                    expected_for_validation,
+                    diagnostics,
+                );
+                found_instr_list = true;
                 break;
             }
+        }
+
+        // If no instr_list but function expects return values, report error
+        // Skip this check if function uses type_use (we don't know the expected results)
+        if !found_instr_list && !expected_results.is_empty() && !has_type_use {
+            diagnostics.push(WasmDiagnostic {
+                line: node.start_position().row as u32,
+                character: node.start_position().column as u32,
+                end_character: node.end_position().column as u32,
+                message: format!(
+                    "Type mismatch: function body leaves 0 values on stack but signature requires {}",
+                    expected_results.len()
+                ),
+                severity: 1,
+            });
         }
         // Continue recursing for other checks (references, etc.)
     }
@@ -1379,9 +1424,10 @@ fn find_undefined_identifiers(
 
 /// Tracks stack state during instruction list traversal for stack underflow detection
 #[derive(Debug, Clone)]
+/// Tracks stack state during instruction list traversal for stack underflow and type checking
 struct StackState {
-    /// Current stack depth (number of values on the stack)
-    depth: usize,
+    /// Stack of value types (bottom to top)
+    types: Vec<ValueType>,
     /// True after unconditional branches or unreachable - subsequent code is dead
     /// and we shouldn't report errors for it
     uncertain: bool,
@@ -1390,7 +1436,7 @@ struct StackState {
 impl StackState {
     fn new() -> Self {
         Self {
-            depth: 0,
+            types: Vec::new(),
             uncertain: false,
         }
     }
@@ -1402,20 +1448,20 @@ impl StackState {
             // After unconditional control flow, we can't know the stack state
             return Ok(());
         }
-        if self.depth >= n {
-            self.depth -= n;
+        if self.types.len() >= n {
+            self.types.truncate(self.types.len() - n);
             Ok(())
         } else {
-            let available = self.depth;
-            self.depth = 0;
+            let available = self.types.len();
+            self.types.clear();
             Err(available)
         }
     }
 
-    /// Push n values onto the stack
-    fn produce(&mut self, n: usize) {
+    /// Push types onto the stack
+    fn produce(&mut self, types: Vec<ValueType>) {
         if !self.uncertain {
-            self.depth += n;
+            self.types.extend(types);
         }
     }
 
@@ -1423,13 +1469,20 @@ impl StackState {
     fn mark_uncertain(&mut self) {
         self.uncertain = true;
     }
+
+    /// Get the current stack types (for final validation)
+    fn get_types(&self) -> &[ValueType] {
+        &self.types
+    }
 }
 
-/// Track stack state through an instruction list and report underflow errors
+/// Track stack state through an instruction list and report underflow/type errors
+/// If expected_results is None, skip return type validation (e.g., when function uses type reference)
 fn track_stack_in_instr_list(
     instr_list: &Node,
     source: &str,
     symbols: &SymbolTable,
+    expected_results: Option<&[ValueType]>,
     diagnostics: &mut Vec<WasmDiagnostic>,
 ) {
     let mut stack = StackState::new();
@@ -1465,7 +1518,7 @@ fn track_stack_in_instr_list(
             "instr_block" | "instr_loop" => {
                 // Block instructions create a new stack frame
                 // After a block completes, it pushes its result values
-                let results = count_block_results(&child, source);
+                let results = get_block_result_types(&child, source);
                 stack.produce(results);
             }
             "instr_if" => {
@@ -1474,7 +1527,7 @@ fn track_stack_in_instr_list(
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
                 }
-                let results = count_block_results(&child, source);
+                let results = get_block_result_types(&child, source);
                 stack.produce(results);
             }
             "instr_call" => {
@@ -1484,6 +1537,13 @@ fn track_stack_in_instr_list(
             _ => {
                 // Other node types (comments, etc.) - ignore
             }
+        }
+    }
+
+    // Check return types at end of function (only if we know the expected results)
+    if !stack.uncertain {
+        if let Some(expected) = expected_results {
+            check_return_types(&stack, expected, instr_list, diagnostics);
         }
     }
 }
@@ -1519,7 +1579,7 @@ fn process_instr_node(
                 process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
             }
             "instr_block" | "instr_loop" => {
-                let results = count_block_results(&child, source);
+                let results = get_block_result_types(&child, source);
                 stack.produce(results);
             }
             "instr_if" => {
@@ -1527,7 +1587,7 @@ fn process_instr_node(
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
                 }
-                let results = count_block_results(&child, source);
+                let results = get_block_result_types(&child, source);
                 stack.produce(results);
             }
             "instr_call" => {
@@ -1560,8 +1620,10 @@ fn get_instruction_name(instr_node: &Node, source: &str) -> Option<String> {
                 let text = &source[child.byte_range()];
                 return text.split_whitespace().next().map(|s| s.to_string());
             }
-            // For other op_ nodes (like op_nullary, op_index), the text is the instruction
-            return Some(source[child.byte_range()].trim().to_string());
+            // For other op_ nodes (like op_nullary, op_index), extract just the instruction name
+            // The text might include arguments like "table.copy $t1 $t2", we only want "table.copy"
+            let text = &source[child.byte_range()];
+            return text.split_whitespace().next().map(|s| s.to_string());
         }
     }
     // Fallback: get the text of the first token
@@ -1580,12 +1642,9 @@ fn process_instruction(
     diagnostics: &mut Vec<WasmDiagnostic>,
 ) {
     // Handle control flow that makes subsequent code dead
-    match instr_name {
-        "unreachable" | "return" | "br" => {
-            stack.mark_uncertain();
-            return;
-        }
-        _ => {}
+    if is_terminating_instruction(instr_name) {
+        stack.mark_uncertain();
+        return;
     }
 
     // Look up instruction arity
@@ -1606,16 +1665,358 @@ fn process_instruction(
             diagnostics.push(diagnostic);
         }
 
-        // Produce results
-        let produces = match instr_name {
-            // Dynamic producers - look up actual result count
-            "call" => get_call_result_count(node, symbols, source),
-            "call_ref" | "return_call_ref" => get_call_ref_result_count(node, symbols, source),
-            _ => arity.produces,
-        };
-        stack.produce(produces);
+        // Produce results with actual types
+        let result_types = infer_instruction_result_types(instr_name, node, symbols, source);
+        stack.produce(result_types);
     }
     // Unknown instruction - skip (might be a newer instruction we don't know about)
+}
+
+/// Infer the result type(s) of an instruction from its name and context
+fn infer_instruction_result_types(
+    instr_name: &str,
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+) -> Vec<ValueType> {
+    // First check the instruction metadata for the production count
+    // This handles many instructions that produce 0 values
+    // BUT skip instructions with dynamic result counts (call, call_ref, etc.)
+    let arity_map = get_instruction_arity_map();
+    let skip_early_return = matches!(
+        instr_name,
+        "call"
+            | "call_ref"
+            | "return_call"
+            | "return_call_ref"
+            | "call_indirect"
+            | "return_call_indirect"
+    );
+    if !skip_early_return {
+        if let Some(arity) = arity_map.get(instr_name) {
+            if arity.produces == 0 {
+                return vec![];
+            }
+        }
+    }
+
+    // Extract type from instruction prefix (i32.*, i64.*, f32.*, f64.*, v128.*)
+    let type_from_prefix = |name: &str| -> Option<ValueType> {
+        if name.starts_with("i32.") {
+            return Some(ValueType::I32);
+        }
+        if name.starts_with("i64.") {
+            return Some(ValueType::I64);
+        }
+        if name.starts_with("f32.") {
+            return Some(ValueType::F32);
+        }
+        if name.starts_with("f64.") {
+            return Some(ValueType::F64);
+        }
+        if name.starts_with("v128.") {
+            return Some(ValueType::V128);
+        }
+        None
+    };
+
+    // Check if instruction is a scalar comparison (returns i32)
+    let is_scalar_comparison = |name: &str| -> bool {
+        // SIMD comparisons contain x2, x4, x8, x16 (e.g., i32x4.eq, f64x2.lt)
+        let is_simd = name.contains("x2.")
+            || name.contains("x4.")
+            || name.contains("x8.")
+            || name.contains("x16.");
+        if is_simd {
+            return false;
+        }
+        name.ends_with(".eq")
+            || name.ends_with(".ne")
+            || name.ends_with(".lt_s")
+            || name.ends_with(".lt_u")
+            || name.ends_with(".gt_s")
+            || name.ends_with(".gt_u")
+            || name.ends_with(".le_s")
+            || name.ends_with(".le_u")
+            || name.ends_with(".ge_s")
+            || name.ends_with(".ge_u")
+            || name.ends_with(".lt")
+            || name.ends_with(".gt")
+            || name.ends_with(".le")
+            || name.ends_with(".ge")
+            || name.ends_with(".eqz")
+    };
+
+    match instr_name {
+        // Constants - type from name
+        "i32.const" => vec![ValueType::I32],
+        "i64.const" => vec![ValueType::I64],
+        "f32.const" => vec![ValueType::F32],
+        "f64.const" => vec![ValueType::F64],
+        "v128.const" => vec![ValueType::V128],
+
+        // Scalar comparisons always produce i32
+        name if is_scalar_comparison(name) => vec![ValueType::I32],
+
+        // Conversions - result type varies
+        "i32.wrap_i64"
+        | "i32.trunc_f32_s"
+        | "i32.trunc_f32_u"
+        | "i32.trunc_f64_s"
+        | "i32.trunc_f64_u"
+        | "i32.reinterpret_f32"
+        | "i32.trunc_sat_f32_s"
+        | "i32.trunc_sat_f32_u"
+        | "i32.trunc_sat_f64_s"
+        | "i32.trunc_sat_f64_u" => vec![ValueType::I32],
+
+        "i64.extend_i32_s"
+        | "i64.extend_i32_u"
+        | "i64.trunc_f32_s"
+        | "i64.trunc_f32_u"
+        | "i64.trunc_f64_s"
+        | "i64.trunc_f64_u"
+        | "i64.reinterpret_f64"
+        | "i64.trunc_sat_f32_s"
+        | "i64.trunc_sat_f32_u"
+        | "i64.trunc_sat_f64_s"
+        | "i64.trunc_sat_f64_u"
+        | "i64.extend8_s"
+        | "i64.extend16_s"
+        | "i64.extend32_s" => vec![ValueType::I64],
+
+        "f32.convert_i32_s"
+        | "f32.convert_i32_u"
+        | "f32.convert_i64_s"
+        | "f32.convert_i64_u"
+        | "f32.demote_f64"
+        | "f32.reinterpret_i32" => vec![ValueType::F32],
+
+        "f64.convert_i32_s"
+        | "f64.convert_i32_u"
+        | "f64.convert_i64_s"
+        | "f64.convert_i64_u"
+        | "f64.promote_f32"
+        | "f64.reinterpret_i64" => vec![ValueType::F64],
+
+        // Call instructions - look up function/type results
+        "call" => get_call_result_types(node, symbols, source),
+        "call_ref" | "return_call_ref" => get_call_ref_result_types(node, symbols, source),
+        "call_indirect" | "return_call_indirect" => {
+            get_call_indirect_result_types(node, symbols, source)
+        }
+
+        // Local/global gets - look up variable type
+        "local.get" => {
+            if let Some(t) = get_local_type_from_node(node, symbols, source) {
+                vec![t]
+            } else {
+                vec![ValueType::Unknown]
+            }
+        }
+        "global.get" => {
+            if let Some(t) = get_global_type_from_node(node, symbols, source) {
+                vec![t]
+            } else {
+                vec![ValueType::Unknown]
+            }
+        }
+
+        // Reference instructions
+        "ref.null" => vec![ValueType::Unknown], // Could be any ref type
+        "ref.func" => vec![ValueType::Funcref],
+        "ref.is_null" => vec![ValueType::I32],
+
+        // Memory load operations - use prefix type
+        name if type_from_prefix(name).is_some() && name.contains(".load") => {
+            type_from_prefix(name).map(|t| vec![t]).unwrap_or_default()
+        }
+
+        // Memory store operations - produce nothing
+        name if name.contains(".store") => vec![],
+
+        // Table operations that produce nothing
+        "table.copy" | "table.fill" | "table.init" | "table.set" | "elem.drop" => vec![],
+        name if name.starts_with("table.")
+            && (name.contains("copy")
+                || name.contains("fill")
+                || name.contains("init")
+                || name.contains("set")) =>
+        {
+            vec![]
+        }
+
+        // Memory operations that produce nothing
+        "memory.copy" | "memory.fill" | "memory.init" | "data.drop" => vec![],
+        name if name.starts_with("memory.")
+            && (name.contains("copy") || name.contains("fill") || name.contains("init")) =>
+        {
+            vec![]
+        }
+
+        // SIMD reduction operations that return i32
+        "v128.any_true" => vec![ValueType::I32],
+        name if name.ends_with(".all_true") || name.ends_with(".bitmask") => vec![ValueType::I32],
+
+        // Select
+        "select" => vec![ValueType::Unknown], // Type depends on operands
+
+        // Arithmetic/bitwise - type from prefix
+        name if type_from_prefix(name).is_some() => {
+            type_from_prefix(name).map(|t| vec![t]).unwrap_or_default()
+        }
+
+        // Unknown instruction - use Unknown type
+        _ => vec![ValueType::Unknown],
+    }
+}
+
+/// Get the type of a local variable from an instruction node
+fn get_local_type_from_node(node: &Node, symbols: &SymbolTable, source: &str) -> Option<ValueType> {
+    let index = get_index_from_node(node, source)?;
+    let func_line = node.start_position().row as u32;
+    let func = symbols.find_function_containing_line(func_line)?;
+
+    // Try as name first (with or without $)
+    let name_to_check = index.strip_prefix('$').unwrap_or(&index);
+
+    // Check parameters
+    for param in &func.parameters {
+        if let Some(param_name) = &param.name {
+            let param_name_stripped = param_name.strip_prefix('$').unwrap_or(param_name);
+            if param_name_stripped == name_to_check || param_name == &index {
+                return Some(param.param_type.clone());
+            }
+        }
+    }
+
+    // Check locals
+    for local in &func.locals {
+        if let Some(local_name) = &local.name {
+            let local_name_stripped = local_name.strip_prefix('$').unwrap_or(local_name);
+            if local_name_stripped == name_to_check || local_name == &index {
+                return Some(local.var_type.clone());
+            }
+        }
+    }
+
+    // Try as numeric index
+    if let Ok(idx) = index.parse::<usize>() {
+        // Parameters come first, then locals
+        if idx < func.parameters.len() {
+            return Some(func.parameters[idx].param_type.clone());
+        }
+        let local_idx = idx - func.parameters.len();
+        if local_idx < func.locals.len() {
+            return Some(func.locals[local_idx].var_type.clone());
+        }
+    }
+
+    None
+}
+
+/// Get the type of a global from an instruction node
+fn get_global_type_from_node(
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+) -> Option<ValueType> {
+    let index = get_index_from_node(node, source)?;
+
+    if let Some(global) = symbols.get_global_by_name(&index) {
+        return Some(global.var_type.clone());
+    }
+    if let Ok(idx) = index.parse::<usize>() {
+        if let Some(global) = symbols.get_global_by_index(idx) {
+            return Some(global.var_type.clone());
+        }
+    }
+    None
+}
+
+/// Get result types for a call instruction
+fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
+    if let Some(func_ref) = get_index_from_node(node, source) {
+        if let Some(func) = symbols.get_function_by_name(&func_ref) {
+            return func.results.clone();
+        } else if let Ok(idx) = func_ref.parse::<usize>() {
+            if let Some(func) = symbols.get_function_by_index(idx) {
+                return func.results.clone();
+            }
+        }
+    }
+    vec![]
+}
+
+/// Get result types for a call_ref instruction
+fn get_call_ref_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
+    if let Some(type_ref) = get_index_from_node(node, source) {
+        if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+            if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                return results.clone();
+            }
+        } else if let Ok(idx) = type_ref.parse::<usize>() {
+            if let Some(type_def) = symbols.get_type_by_index(idx) {
+                if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                    return results.clone();
+                }
+            }
+        }
+    }
+    vec![]
+}
+
+/// Get result types for a call_indirect instruction
+/// call_indirect uses (type $t) syntax where $t is the function type
+fn get_call_indirect_result_types(
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+) -> Vec<ValueType> {
+    // call_indirect has a type_use child: (call_indirect (type 0) ...)
+    // We need to find the type index inside the type_use
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        // Look for type_use node which contains (type $idx)
+        if child.kind() == "type_use" {
+            let mut type_cursor = child.walk();
+            for type_child in child.children(&mut type_cursor) {
+                if type_child.kind() == "index" || type_child.kind() == "identifier" {
+                    let type_ref = &source[type_child.byte_range()];
+                    let type_ref = type_ref.trim();
+                    if let Some(type_def) = symbols.get_type_by_name(type_ref) {
+                        if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                            return results.clone();
+                        }
+                    } else if let Ok(idx) = type_ref.parse::<usize>() {
+                        if let Some(type_def) = symbols.get_type_by_index(idx) {
+                            if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                                return results.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Also check for direct index child (numeric type reference)
+        if child.kind() == "index" {
+            let type_ref = &source[child.byte_range()];
+            let type_ref = type_ref.trim();
+            if let Some(type_def) = symbols.get_type_by_name(type_ref) {
+                if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                    return results.clone();
+                }
+            } else if let Ok(idx) = type_ref.parse::<usize>() {
+                if let Some(type_def) = symbols.get_type_by_index(idx) {
+                    if let crate::symbols::TypeKind::Func { results, .. } = &type_def.kind {
+                        return results.clone();
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: return Unknown type if we can't determine
+    vec![ValueType::Unknown]
 }
 
 /// Get the operand count for a dynamic instruction
@@ -1751,27 +2152,7 @@ fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
     None
 }
 
-/// Count how many values a folded expression produces
-fn count_expr_production(
-    expr: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
-) -> usize {
-    // Find the instruction inside the expression
-    let mut cursor = expr.walk();
-    for child in expr.children(&mut cursor) {
-        let kind = child.kind();
-        if kind.starts_with("expr1_") {
-            // expr1_plain, expr1_call, expr1_block, etc.
-            return count_expr1_production(&child, source, symbols, arity_map);
-        }
-    }
-    // Default: assume 1 value produced
-    1
-}
-
-/// Count production for expr1_* nodes
+/// Count production for expr1_* nodes (used by fallback path in get_expr1_result_types)
 fn count_expr1_production(
     expr1: &Node,
     source: &str,
@@ -1877,12 +2258,28 @@ fn get_expr1_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
         .filter(|c| c.kind() == "expr")
         .count();
 
-    // Get instruction name from instr_plain child
     let mut cursor = expr1.walk();
     for child in expr1.children(&mut cursor) {
-        if child.kind() == "instr_plain" {
+        let kind = child.kind();
+        // Get instruction name from instr_plain child
+        if kind == "instr_plain" {
             if let Some(name) = get_instruction_name(&child, source) {
                 return Some((name, explicit_operands));
+            }
+        }
+        // Handle call_indirect and return_call_indirect directly
+        if kind == "call_indirect" {
+            return Some(("call_indirect".to_string(), explicit_operands));
+        }
+        if kind == "return_call_indirect" {
+            return Some(("return_call_indirect".to_string(), explicit_operands));
+        }
+        // Handle instr_call which might contain call/call_indirect
+        if kind == "instr_call" {
+            let text = &source[child.byte_range()];
+            let first_token = text.split_whitespace().next().unwrap_or("");
+            if !first_token.is_empty() {
+                return Some((first_token.to_string(), explicit_operands));
             }
         }
     }
@@ -1943,6 +2340,12 @@ fn process_folded_expr(
 ) {
     // Get instruction info from the expression
     if let Some((instr_name, explicit_operands)) = get_folded_expr_info(expr, source) {
+        // Handle control flow that makes subsequent code dead
+        if is_terminating_instruction(&instr_name) {
+            stack.mark_uncertain();
+            return;
+        }
+
         // Calculate operands needed from the stack
         let expected = get_expected_operands_by_name(&instr_name, symbols, source, arity_map, expr);
         let from_stack = expected.saturating_sub(explicit_operands);
@@ -1958,9 +2361,133 @@ fn process_folded_expr(
         }
     }
 
-    // Produce result values
-    let produces = count_expr_production(expr, source, symbols, arity_map);
-    stack.produce(produces);
+    // Produce result values with actual types
+    let result_types = get_expr_result_types(expr, source, symbols, arity_map);
+    stack.produce(result_types);
+}
+
+/// Get the result types from a folded expression
+fn get_expr_result_types(
+    expr: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &HashMap<&'static str, InstructionArity>,
+) -> Vec<ValueType> {
+    // Find the instruction inside the expression
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        let kind = child.kind();
+        // Handle both expr1 wrapper and direct expr1_* nodes
+        if kind == "expr1" {
+            // expr1 wraps expr1_plain, expr1_call, etc.
+            return get_expr1_wrapper_result_types(&child, source, symbols, arity_map);
+        } else if kind.starts_with("expr1_") {
+            // Direct expr1_plain, expr1_call, expr1_block, etc.
+            return get_expr1_result_types(&child, source, symbols, arity_map);
+        }
+    }
+    // Default: assume 1 unknown value produced
+    vec![ValueType::Unknown]
+}
+
+/// Get result types from an expr1 wrapper node (which contains expr1_plain, etc.)
+fn get_expr1_wrapper_result_types(
+    expr1: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &HashMap<&'static str, InstructionArity>,
+) -> Vec<ValueType> {
+    let mut cursor = expr1.walk();
+    for child in expr1.children(&mut cursor) {
+        if child.kind().starts_with("expr1_") {
+            return get_expr1_result_types(&child, source, symbols, arity_map);
+        }
+    }
+    vec![ValueType::Unknown]
+}
+
+/// Get result types for expr1_* nodes
+fn get_expr1_result_types(
+    expr1: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &HashMap<&'static str, InstructionArity>,
+) -> Vec<ValueType> {
+    let kind = expr1.kind();
+
+    match kind.as_str() {
+        "expr1_plain" => {
+            // Get instruction name from instr_plain child
+            let mut cursor = expr1.walk();
+            for child in expr1.children(&mut cursor) {
+                if child.kind() == "instr_plain" {
+                    if let Some(instr_name) = get_instruction_name(&child, source) {
+                        return infer_instruction_result_types(
+                            &instr_name,
+                            &child,
+                            symbols,
+                            source,
+                        );
+                    }
+                }
+            }
+            vec![ValueType::Unknown] // Default
+        }
+        "expr1_call" => {
+            // Check if this is call_indirect or regular call
+            let mut cursor = expr1.walk();
+            for child in expr1.children(&mut cursor) {
+                let kind = child.kind();
+                if kind == "call_indirect" || kind == "return_call_indirect" {
+                    // call_indirect - look up type for result types
+                    // Pass expr1 since type_use is a sibling of call_indirect
+                    return get_call_indirect_result_types(expr1, symbols, source);
+                }
+                if kind == "instr_call" {
+                    // Check for call_indirect inside instr_call
+                    let mut inner_cursor = child.walk();
+                    for inner_child in child.children(&mut inner_cursor) {
+                        if inner_child.kind() == "call_indirect"
+                            || inner_child.kind() == "return_call_indirect"
+                        {
+                            return get_call_indirect_result_types(&child, symbols, source);
+                        }
+                        if inner_child.kind() == "index" {
+                            return get_call_result_types(&inner_child, symbols, source);
+                        }
+                    }
+                }
+            }
+            // Regular call - look up function result types
+            if let Some(func_ref) = get_index_from_expr1_call(expr1, source) {
+                if let Some(func) = symbols.get_function_by_name(&func_ref) {
+                    return func.results.clone();
+                } else if let Ok(idx) = func_ref.parse::<usize>() {
+                    if let Some(func) = symbols.get_function_by_index(idx) {
+                        return func.results.clone();
+                    }
+                }
+            }
+            vec![]
+        }
+        "expr1_block" | "expr1_loop" => {
+            // Block produces its result type values
+            get_block_result_types(expr1, source)
+        }
+        "expr1_if" => {
+            // If produces its result type values
+            get_block_result_types(expr1, source)
+        }
+        "expr1_try" | "expr1_try_table" => {
+            // Try blocks produce their result type values
+            get_block_result_types(expr1, source)
+        }
+        _ => {
+            // Check production count and convert to Unknown types
+            let count = count_expr1_production(expr1, source, symbols, arity_map);
+            vec![ValueType::Unknown; count]
+        }
+    }
 }
 
 /// Count the number of result values a block produces
@@ -2016,6 +2543,160 @@ fn count_result_types(block_type: &Node, source: &str) -> usize {
         }
     }
     count
+}
+
+/// Get the result types from a block/loop/if instruction
+fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType> {
+    let mut cursor = block_node.walk();
+    for child in block_node.children(&mut cursor) {
+        let kind = child.kind();
+        // Handle func_type_results directly (folded format: expr1_block, expr1_loop, expr1_if)
+        if kind == "func_type_results" {
+            return parse_func_type_results(&child, source);
+        }
+        // Handle block_type if present
+        if kind == "block_type" {
+            return parse_result_types(&child, source);
+        }
+        // Handle block_block, loop_block (linear format), or if_block (both formats)
+        if kind == "block_block" || kind == "loop_block" || kind == "if_block" {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "func_type_results" {
+                    return parse_func_type_results(&inner_child, source);
+                }
+            }
+        }
+    }
+    vec![]
+}
+
+/// Parse result types from a func_type_results node
+fn parse_func_type_results(node: &Node, source: &str) -> Vec<ValueType> {
+    let mut types = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "value_type" || child.kind() == "ref_type" {
+            let type_text = &source[child.byte_range()];
+            types.push(parse_value_type(type_text));
+        }
+    }
+    types
+}
+
+/// Parse result types from a block_type or func_type_results node
+fn parse_result_types(block_type: &Node, source: &str) -> Vec<ValueType> {
+    let mut types = Vec::new();
+    let mut cursor = block_type.walk();
+    for child in block_type.children(&mut cursor) {
+        if child.kind() == "func_type_results" {
+            // Parse value types inside
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "value_type" || inner_child.kind() == "ref_type" {
+                    let type_text = &source[inner_child.byte_range()];
+                    types.push(parse_value_type(type_text));
+                }
+            }
+        }
+        // Also handle inline result types
+        if child.kind() == "value_type" || child.kind() == "ref_type" {
+            let type_text = &source[child.byte_range()];
+            types.push(parse_value_type(type_text));
+        }
+    }
+    // If we found types through tree, return them
+    if !types.is_empty() {
+        return types;
+    }
+    // Fallback: check the text for (result ...)
+    let text = &source[block_type.byte_range()];
+    if text.contains("result") {
+        // Parse value types from the text (rough heuristic)
+        for part in text.split_whitespace() {
+            let parsed = parse_value_type(part);
+            if parsed != ValueType::Unknown {
+                types.push(parsed);
+            }
+        }
+    }
+    types
+}
+
+/// Parse a value type string into a ValueType enum
+fn parse_value_type(type_str: &str) -> ValueType {
+    match type_str.trim() {
+        "i32" => ValueType::I32,
+        "i64" => ValueType::I64,
+        "f32" => ValueType::F32,
+        "f64" => ValueType::F64,
+        "v128" => ValueType::V128,
+        "funcref" => ValueType::Funcref,
+        "externref" => ValueType::Externref,
+        "anyref" => ValueType::Anyref,
+        "eqref" => ValueType::Eqref,
+        "i31ref" => ValueType::I31ref,
+        "structref" => ValueType::Structref,
+        "arrayref" => ValueType::Arrayref,
+        "nullref" => ValueType::Nullref,
+        "nullfuncref" => ValueType::NullFuncref,
+        "nullexternref" => ValueType::NullExternref,
+        _ => ValueType::Unknown,
+    }
+}
+
+/// Check if final stack matches expected return types
+fn check_return_types(
+    stack: &StackState,
+    expected: &[ValueType],
+    node: &Node,
+    diagnostics: &mut Vec<WasmDiagnostic>,
+) {
+    let actual = stack.get_types();
+
+    // Check count first
+    if actual.len() != expected.len() {
+        let actual_word = if actual.len() == 1 { "value" } else { "values" };
+        diagnostics.push(WasmDiagnostic {
+            line: node.start_position().row as u32,
+            character: node.start_position().column as u32,
+            end_character: node.end_position().column as u32,
+            message: format!(
+                "Type mismatch: function body leaves {} {} on stack but signature requires {}",
+                actual.len(),
+                actual_word,
+                expected.len()
+            ),
+            severity: 1,
+        });
+        return;
+    }
+
+    // Check types match
+    for (i, (actual_type, expected_type)) in actual.iter().zip(expected.iter()).enumerate() {
+        // Skip Unknown types (we couldn't infer)
+        if *actual_type == ValueType::Unknown {
+            continue;
+        }
+
+        if actual_type != expected_type {
+            let position_msg = if expected.len() == 1 {
+                String::new()
+            } else {
+                format!(" at position {}", i + 1)
+            };
+            diagnostics.push(WasmDiagnostic {
+                line: node.start_position().row as u32,
+                character: node.start_position().column as u32,
+                end_character: node.end_position().column as u32,
+                message: format!(
+                    "Type mismatch{}: function returns {} but declared as {}",
+                    position_msg, actual_type, expected_type
+                ),
+                severity: 1,
+            });
+        }
+    }
 }
 
 /// Create a diagnostic for stack underflow

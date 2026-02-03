@@ -67,6 +67,6 @@ pub mod diagnostics;
 #[cfg(feature = "native")]
 pub mod native;
 
-// WASM entry point
-#[cfg(feature = "wasm")]
+// WASM entry point (only when native is not enabled, as they have incompatible tree-sitter APIs)
+#[cfg(all(feature = "wasm", not(feature = "native")))]
 pub mod wasm;

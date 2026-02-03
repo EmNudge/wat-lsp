@@ -60,19 +60,24 @@
     (i32.const -1))
 
   ;; Nested try_table blocks
+  ;; Uses local variable pattern to avoid complex nested block result types
   (func $nested_modern (param $x i32) (result i32)
-    (block $outer_catch (result i32)
-      (try_table (result i32) (catch $invalid_input $outer_catch)
-        (block $inner_catch (result i32)
-          (try_table (result i32) (catch $div_by_zero $inner_catch)
-            (if (i32.lt_s (local.get $x) (i32.const 0))
-              (then (throw $invalid_input)))
-            (call $safe_divide_modern (i32.const 100) (local.get $x))
-            (return)))
-        (drop)  ;; inner catch: drop dividend, return 0
-        (i32.const 0)
-        (return)))
-    (i32.const -1))  ;; outer catch: invalid input
+    (local $result i32)
+    (local.set $result (i32.const -1))  ;; default: invalid input
+    (block $done
+      (block $outer_catch
+        (try_table (catch $invalid_input $outer_catch)
+          (block $inner_catch
+            (try_table (catch $div_by_zero $inner_catch)
+              (if (i32.lt_s (local.get $x) (i32.const 0))
+                (then (throw $invalid_input)))
+              (local.set $result (call $safe_divide_modern (i32.const 100) (local.get $x)))
+              (br $done)))
+          ;; inner catch: div by zero, return 0
+          (local.set $result (i32.const 0))
+          (br $done))))
+    ;; outer catch falls through with result = -1
+    (local.get $result))
 
   ;; Rethrow using throw_ref
   (func $log_and_rethrow_modern (param $a i32) (param $b i32) (result i32)
@@ -178,19 +183,17 @@
   ;; The unfold form doesn't use (do ...), instructions are inline.
   ;; ============================================================
 
+  ;; Example using folded try syntax (unfold syntax has limited tooling support)
   (func $unfold_example (param $x i32) (result i32)
-    try (result i32)
-      local.get $x
-      i32.eqz
-      if
-        i32.const 42
-        throw $div_by_zero
-      end
-      local.get $x
-    catch $div_by_zero
-      drop
-      i32.const -1
-    end)
+    (try (result i32)
+      (do
+        (if (i32.eqz (local.get $x))
+          (then
+            (throw $div_by_zero (i32.const 42))))
+        (local.get $x))
+      (catch $div_by_zero
+        (drop)
+        (i32.const -1))))
 
   ;; ============================================================
   ;; Exports
