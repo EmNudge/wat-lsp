@@ -13,7 +13,7 @@ use crate::tree_sitter_bindings::create_parser;
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::{Node, Tree};
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests;
 
 /// Parse a WAT document and extract symbols (PUBLIC API - unchanged)

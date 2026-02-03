@@ -1,68 +1,24 @@
+//! Large file performance tests (native only)
+//!
+//! Tests performance characteristics with large WAT files (~15k lines).
+//! These tests use native-only features (tree-sitter, tower-lsp).
+
+#![cfg(feature = "native")]
+
+mod test_helpers;
+
 use std::time::Instant;
+use test_helpers::generate_large_wat;
 use tower_lsp::lsp_types::Position;
 use wat_lsp_rust::core::types::Position as CorePosition;
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
 use wat_lsp_rust::utils::apply_text_edit;
 use wat_lsp_rust::{diagnostics, parser};
 
-/// Generate a large WAT document (approximately 15k lines)
-fn generate_large_wat_15k() -> String {
-    let mut wat = String::from("(module\n");
-
-    // Add 10 globals (10 lines)
-    for i in 0..10 {
-        wat.push_str(&format!(
-            "  (global $global{} (mut i32) (i32.const {}))\n",
-            i, i
-        ));
-    }
-
-    // Add 5 tables (5 lines)
-    for i in 0..5 {
-        wat.push_str(&format!("  (table $table{} 100 funcref)\n", i));
-    }
-
-    // Add 10 type definitions (30 lines)
-    for i in 0..10 {
-        wat.push_str(&format!(
-            "  (type $type{} (func (param i32 i32) (result i32)))\n",
-            i
-        ));
-    }
-
-    // Add 1000 functions with ~15 lines each = ~15,000 lines
-    for i in 0..1000 {
-        wat.push_str(&format!(
-            "  (func $func{} (param $x i32) (param $y i32) (result i32)\n",
-            i
-        ));
-        wat.push_str("    (local $temp i32)\n");
-        wat.push_str("    (local $result i32)\n");
-        wat.push_str("    ;; Initialize local\n");
-        wat.push_str("    (local.set $temp (i32.const 0))\n");
-        wat.push_str("    ;; Calculate sum\n");
-        wat.push_str("    (local.set $temp\n");
-        wat.push_str("      (i32.add (local.get $x) (local.get $y)))\n");
-        wat.push_str("    ;; Double the result\n");
-        wat.push_str("    (local.set $result\n");
-        wat.push_str("      (i32.mul (local.get $temp) (i32.const 2)))\n");
-        wat.push_str("    ;; Add global value\n");
-        wat.push_str("    (local.set $result\n");
-        wat.push_str(&format!(
-            "      (i32.add (local.get $result) (global.get $global{})))\n",
-            i % 10
-        ));
-        wat.push_str("    (local.get $result))\n");
-    }
-
-    wat.push_str(")\n");
-    wat
-}
-
 #[test]
 fn test_15k_line_initial_parse_performance() {
     println!("\n=== Generating 15k line document ===");
-    let document = generate_large_wat_15k();
+    let document = generate_large_wat(15000);
     let line_count = document.lines().count();
     let byte_count = document.len();
 
@@ -97,7 +53,6 @@ fn test_15k_line_initial_parse_performance() {
     println!("Symbol extraction time: {:?}", symbol_time);
     println!("Functions found: {}", symbols.functions.len());
     println!("Globals found: {}", symbols.globals.len());
-    println!("Tables found: {}", symbols.tables.len());
 
     // Test diagnostics generation
     println!("\n=== Testing Diagnostics ===");
@@ -127,7 +82,7 @@ fn test_15k_line_initial_parse_performance() {
 #[test]
 fn test_15k_line_incremental_edit_performance() {
     println!("\n=== Testing Incremental Edits on 15k Line Document ===");
-    let document = generate_large_wat_15k();
+    let document = generate_large_wat(15000);
     let line_count = document.lines().count();
 
     println!("Document: {} lines", line_count);
@@ -312,7 +267,7 @@ fn test_15k_line_incremental_edit_performance() {
 #[test]
 fn test_15k_line_completion_latency() {
     println!("\n=== Testing Completion Latency on 15k Line Document ===");
-    let document = generate_large_wat_15k();
+    let document = generate_large_wat(15000);
 
     // Parse document
     let mut parser = create_parser();

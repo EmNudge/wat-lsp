@@ -1,31 +1,22 @@
+//! Incremental parsing tests (native only)
+//!
+//! Tests tree-sitter incremental parsing functionality.
+
+#![cfg(feature = "native")]
+
+mod test_helpers;
+
 use std::time::Instant;
+use test_helpers::generate_large_wat;
 use tower_lsp::lsp_types::Position;
 use wat_lsp_rust::diagnostics::provide_tree_sitter_diagnostics;
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
 use wat_lsp_rust::utils::apply_text_edit;
 
-/// Generate a large WAT document for performance testing
-fn generate_large_wat(num_functions: usize) -> String {
-    let mut wat = String::from("(module\n");
-
-    for i in 0..num_functions {
-        wat.push_str(&format!(
-            "  (func $func{} (param $x i32) (param $y i32) (result i32)\n",
-            i
-        ));
-        wat.push_str("    (local $temp i32)\n");
-        wat.push_str("    (local.set $temp\n");
-        wat.push_str("      (i32.add (local.get $x) (local.get $y)))\n");
-        wat.push_str("    (i32.mul (local.get $temp) (i32.const 2)))\n");
-    }
-
-    wat.push_str(")\n");
-    wat
-}
-
 #[test]
 fn test_incremental_vs_full_parsing() {
-    let document = generate_large_wat(100);
+    // Generate ~1500 lines (100 functions * ~15 lines each)
+    let document = generate_large_wat(1500);
     let mut parser = create_parser();
 
     // Initial parse
@@ -85,7 +76,11 @@ fn test_incremental_vs_full_parsing() {
     let incremental_time = start.elapsed();
 
     println!("\n=== Performance Comparison ===");
-    println!("Document size: {} functions, {} bytes", 100, document.len());
+    println!(
+        "Document size: {} lines, {} bytes",
+        document.lines().count(),
+        document.len()
+    );
     println!("Full reparse time: {:?}", full_time);
     println!("Incremental reparse time: {:?}", incremental_time);
     println!(

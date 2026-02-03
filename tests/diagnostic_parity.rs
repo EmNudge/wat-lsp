@@ -1,4 +1,4 @@
-//! Diagnostic Parity Tests
+//! Diagnostic Parity Tests (native only)
 //!
 //! This module tests the native diagnostic implementation against the diagnostic
 //! corpus to ensure parity with the WASM implementation. The same corpus is used
@@ -6,6 +6,8 @@
 //! results.
 //!
 //! Run with: `cargo test diagnostic_parity`
+
+#![cfg(feature = "native")]
 
 use serde::Deserialize;
 use std::fs;

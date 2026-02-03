@@ -1,3 +1,7 @@
+//! Rename functionality tests (native only)
+
+#![cfg(feature = "native")]
+
 use tower_lsp::lsp_types::*;
 use wat_lsp_rust::{
     parser,
