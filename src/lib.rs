@@ -16,6 +16,10 @@ pub mod wast_parser;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod ts_facade;
 
+// Shared diagnostics core (unified diagnostic logic for native and WASM)
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod diagnostics_core;
+
 // Tree-sitter bindings (native only - used by ts_facade)
 #[cfg(feature = "native")]
 pub mod tree_sitter_bindings;
