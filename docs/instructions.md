@@ -2852,6 +2852,151 @@ Example:
 ```
 ---
 
+## anyref
+Reference type that can hold any reference (GC proposal). Equivalent to `(ref null any)`.
+
+Example:
+```wat
+(global $obj anyref (ref.null any))
+(func $store (param $val anyref) ...)
+```
+---
+
+## eqref
+Reference type for values that support equality comparison (GC proposal). Equivalent to `(ref null eq)`. Subtypes include i31ref, structref, and arrayref.
+
+Example:
+```wat
+(func $compare (param $a eqref) (param $b eqref) (result i32)
+  (ref.eq (local.get $a) (local.get $b)))
+```
+---
+
+## i31ref
+Reference type for 31-bit integers packed into a reference (GC proposal). Equivalent to `(ref null i31)`. Used for efficient small integer representation without heap allocation.
+
+Example:
+```wat
+(func $box (param $val i32) (result i31ref)
+  (ref.i31 (local.get $val)))
+(func $unbox (param $ref i31ref) (result i32)
+  (i31.get_s (local.get $ref)))
+```
+---
+
+## structref
+Reference type that can hold any struct reference (GC proposal). Equivalent to `(ref null struct)`.
+
+Example:
+```wat
+(func $get_struct (result structref) ...)
+(func $process (param $s structref) ...)
+```
+---
+
+## arrayref
+Reference type that can hold any array reference (GC proposal). Equivalent to `(ref null array)`.
+
+Example:
+```wat
+(func $get_array (result arrayref) ...)
+(func $process (param $arr arrayref) ...)
+```
+---
+
+## nullref
+Bottom reference type that represents only the null reference (GC proposal). Equivalent to `(ref null none)`.
+
+Example:
+```wat
+(global $empty nullref (ref.null none))
+```
+---
+
+## nullfuncref
+Null reference type for functions (GC proposal). Equivalent to `(ref null nofunc)`.
+
+Example:
+```wat
+(global $no_func nullfuncref (ref.null nofunc))
+```
+---
+
+## nullexternref
+Null reference type for external values (GC proposal). Equivalent to `(ref null noextern)`.
+
+Example:
+```wat
+(global $no_extern nullexternref (ref.null noextern))
+```
+---
+
+## mut
+Declares a mutable global variable or struct/array field. Without `mut`, the value is immutable.
+
+Example:
+```wat
+;; Mutable global
+(global $counter (mut i32) (i32.const 0))
+
+;; Mutable field in struct
+(type $cell (struct (field $value (mut i32))))
+
+;; Mutable array elements
+(type $buffer (array (mut i32)))
+```
+---
+
+## shared
+Declares shared memory that can be accessed by multiple threads (threads proposal). Required for atomic operations.
+
+Example:
+```wat
+;; Shared memory with initial 1 page, max 4 pages
+(memory $mem 1 4 shared)
+
+;; Used with atomic operations
+(i32.atomic.load (i32.const 0))
+```
+---
+
+## i8
+8-bit integer storage type for packed struct fields and arrays (GC proposal). Not a value type - values are widened to i32 when accessed.
+
+Example:
+```wat
+;; Packed array of bytes
+(type $bytes (array (mut i8)))
+
+;; Packed struct field
+(type $pixel (struct
+  (field $r i8)
+  (field $g i8)
+  (field $b i8)))
+
+;; Access widens to i32
+(array.get_u $bytes (local.get $arr) (i32.const 0))  ;; returns i32
+```
+---
+
+## i16
+16-bit integer storage type for packed struct fields and arrays (GC proposal). Not a value type - values are widened to i32 when accessed.
+
+Example:
+```wat
+;; Packed array of shorts
+(type $shorts (array (mut i16)))
+
+;; Packed struct field
+(type $coord (struct
+  (field $x i16)
+  (field $y i16)))
+
+;; Access widens to i32
+(array.get_s $shorts (local.get $arr) (i32.const 0))  ;; returns i32 (sign-extended)
+```
+---
+
 ## null
 Heap type representing the null reference. Used in type annotations to indicate a nullable reference type, or as the heap type for `ref.null` instructions.
 
@@ -3647,6 +3792,50 @@ Example:
 ```
 ---
 
+## v128.and
+Compute bitwise AND of two v128 vectors.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(v128.and (local.get $a) (local.get $b))
+```
+---
+
+## v128.or
+Compute bitwise OR of two v128 vectors.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(v128.or (local.get $a) (local.get $b))
+```
+---
+
+## v128.xor
+Compute bitwise XOR of two v128 vectors.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(v128.xor (local.get $a) (local.get $b))
+```
+---
+
+## v128.not
+Compute bitwise NOT of a v128 vector.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(v128.not (local.get $a))
+```
+---
+
 ## i8x16.add
 Add two i8x16 vectors lane-wise.
 
@@ -3919,6 +4108,17 @@ Signature: `(param v128 v128) (result v128)`
 Example:
 ```wat
 (f32x4.ge (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.splat
+Create an i32x4 vector with all lanes set to the same i32 value.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+```wat
+(i32x4.splat (i32.const 42))
 ```
 ---
 
@@ -4197,6 +4397,28 @@ Example:
 ```
 ---
 
+## f32x4.convert_i32x4_s
+Convert an i32x4 vector to f32x4, interpreting each lane as a signed integer.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.convert_i32x4_s (local.get $ints))
+```
+---
+
+## f32x4.convert_i32x4_u
+Convert an i32x4 vector to f32x4, interpreting each lane as an unsigned integer.
+
+Signature: `(param v128) (result v128)`
+
+Example:
+```wat
+(f32x4.convert_i32x4_u (local.get $ints))
+```
+---
+
 ## i32x4.eq
 Compare two i32x4 vectors for equality lane-wise.
 
@@ -4238,6 +4460,39 @@ Signature: `(param v128 v128) (result v128)`
 Example:
 ```wat
 (i32x4.le_s (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.lt_s
+Signed less-than comparison for i32x4 vectors lane-wise. Returns all 1s for true, all 0s for false in each lane.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+```wat
+(i32x4.lt_s (local.get $a) (local.get $b))
+```
+---
+
+## i32x4.shl
+Shift each lane in an i32x4 vector left by a scalar amount. The shift count is taken modulo 32.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+```wat
+(i32x4.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+```
+---
+
+## i32x4.shr_s
+Shift each lane in an i32x4 vector right by a scalar amount (signed/arithmetic). The shift count is taken modulo 32. Sign bit is preserved.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+```wat
+(i32x4.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
 ```
 ---
 
