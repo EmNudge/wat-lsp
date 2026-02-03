@@ -1518,8 +1518,13 @@ fn track_stack_in_instr_list(
             "instr_block" | "instr_loop" => {
                 // Block instructions create a new stack frame
                 // After a block completes, it pushes its result values
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                // But only if the block can actually fall through
+                if !wasm_sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_if" => {
                 // if consumes condition (1 value) and produces result values
@@ -1527,8 +1532,13 @@ fn track_stack_in_instr_list(
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
                 }
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                // Only produce results if the if can fall through
+                if !wasm_sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_call" => {
                 // Folded call: (call $fn args...) - consume stack operands and produce results
@@ -1579,16 +1589,24 @@ fn process_instr_node(
                 process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
             }
             "instr_block" | "instr_loop" => {
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                if !wasm_sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_if" => {
                 if let Err(available) = stack.consume(1) {
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
                 }
-                let results = get_block_result_types(&child, source);
-                stack.produce(results);
+                if !wasm_sequence_always_terminates(&child, source) {
+                    let results = get_block_result_types(&child, source);
+                    stack.produce(results);
+                } else {
+                    stack.mark_uncertain();
+                }
             }
             "instr_call" => {
                 // Folded call - consume stack operands and produce results
@@ -2361,6 +2379,13 @@ fn process_folded_expr(
         }
     }
 
+    // Check if the expression always terminates (e.g., a block where all paths return)
+    // If so, mark uncertain and don't produce values
+    if wasm_sequence_always_terminates(expr, source) {
+        stack.mark_uncertain();
+        return;
+    }
+
     // Produce result values with actual types
     let result_types = get_expr_result_types(expr, source, symbols, arity_map);
     stack.produce(result_types);
@@ -2543,6 +2568,210 @@ fn count_result_types(block_type: &Node, source: &str) -> usize {
         }
     }
     count
+}
+
+/// Check if a sequence of instructions always terminates (WASM version).
+/// This is a WASM-specific version that works with the WASM Node type.
+fn wasm_sequence_always_terminates(node: &Node, source: &str) -> bool {
+    let kind = node.kind();
+
+    match kind.as_str() {
+        // An instruction list terminates if ANY child instruction terminates
+        "instr_list" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if wasm_sequence_always_terminates(&child, source) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        // Check if this is a terminating instruction
+        "instr" => {
+            // instr can contain expr (folded), instr_plain, instr_block, etc.
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if wasm_sequence_always_terminates(&child, source) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        "instr_plain" => {
+            if let Some(name) = wasm_get_instruction_name_from_node(node, source) {
+                is_terminating_instruction(&name)
+            } else {
+                false
+            }
+        }
+
+        // expr1, expr1_plain contain the actual instruction content
+        "expr1" | "expr1_plain" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if wasm_sequence_always_terminates(&child, source) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        // Block: check if the block's instruction list terminates
+        "instr_block" | "block_block" => wasm_block_body_always_terminates(node, source),
+
+        // Loop: check if the body terminates
+        "instr_loop" | "loop_block" => wasm_block_body_always_terminates(node, source),
+
+        // If: terminates only if BOTH then AND else branches exist AND both terminate
+        "instr_if" | "if_block" => wasm_if_always_terminates(node, source),
+
+        // Expr (folded expression): check inner content
+        "expr" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if wasm_sequence_always_terminates(&child, source) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        // For expr1_block, expr1_loop (folded block/loop syntax)
+        "expr1_block" | "expr1_loop" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                let child_kind = child.kind();
+                if (child_kind == "expr" || child_kind == "instr" || child_kind == "instr_list")
+                    && wasm_sequence_always_terminates(&child, source)
+                {
+                    return true;
+                }
+            }
+            false
+        }
+
+        // For expr1_if (folded if syntax)
+        "expr1_if" => wasm_if_always_terminates(node, source),
+
+        _ => false,
+    }
+}
+
+/// Extract the instruction name from a node (WASM version)
+fn wasm_get_instruction_name_from_node(node: &Node, source: &str) -> Option<String> {
+    let kind = node.kind();
+
+    if kind == "instr" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(name) = wasm_get_instruction_name_from_node(&child, source) {
+                return Some(name);
+            }
+        }
+        return None;
+    }
+
+    if kind == "instr_plain" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let child_kind = child.kind();
+            if child_kind.starts_with("op_") {
+                let text = &source[child.byte_range()];
+                return text.split_whitespace().next().map(|s| s.to_string());
+            }
+        }
+        let text = &source[node.byte_range()];
+        return text.split_whitespace().next().map(|s| s.to_string());
+    }
+
+    None
+}
+
+/// Check if a block/loop body always terminates (WASM version)
+fn wasm_block_body_always_terminates(node: &Node, source: &str) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let child_kind = child.kind();
+        if child_kind == "instr_list" {
+            return wasm_sequence_always_terminates(&child, source);
+        }
+        // For linear format blocks like block_block, loop_block
+        if (child_kind == "block_block" || child_kind == "loop_block" || child_kind == "if_block")
+            && wasm_block_body_always_terminates(&child, source)
+        {
+            return true;
+        }
+        // For folded expressions, check each expr/instr child
+        if (child_kind == "expr" || child_kind == "instr" || child_kind == "instr_plain")
+            && wasm_sequence_always_terminates(&child, source)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if an if/if_block always terminates (WASM version)
+fn wasm_if_always_terminates(node: &Node, source: &str) -> bool {
+    let kind = node.kind();
+
+    // For folded if (expr1_if)
+    if kind == "expr1_if" {
+        let mut then_terminates = false;
+        let mut else_terminates = false;
+        let mut has_else = false;
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let child_kind = child.kind();
+            if child_kind == "expr1_then" {
+                then_terminates = wasm_sequence_always_terminates(&child, source);
+            } else if child_kind == "expr1_else" {
+                has_else = true;
+                else_terminates = wasm_sequence_always_terminates(&child, source);
+            }
+        }
+
+        return has_else && then_terminates && else_terminates;
+    }
+
+    // For linear format if (instr_if or if_block)
+    let mut then_terminates = false;
+    let mut else_terminates = false;
+    let mut has_else = false;
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let child_kind = child.kind();
+
+        if child_kind == "if_block" {
+            return wasm_if_always_terminates(&child, source);
+        }
+
+        if child_kind == "instr_list" {
+            if !then_terminates {
+                then_terminates = wasm_sequence_always_terminates(&child, source);
+            } else {
+                has_else = true;
+                else_terminates = wasm_sequence_always_terminates(&child, source);
+            }
+        }
+
+        if child_kind == "else" || child_kind == "instr_else" {
+            has_else = true;
+            let mut else_cursor = child.walk();
+            for else_child in child.children(&mut else_cursor) {
+                if else_child.kind() == "instr_list" {
+                    else_terminates = wasm_sequence_always_terminates(&else_child, source);
+                    break;
+                }
+            }
+        }
+    }
+
+    has_else && then_terminates && else_terminates
 }
 
 /// Get the result types from a block/loop/if instruction

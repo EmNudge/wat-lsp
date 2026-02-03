@@ -138,30 +138,20 @@
     (local.get $sum))
 
   ;; br_table (switch statement)
-  ;; Uses local variable pattern to avoid complex nested block result types
   (func $switch (param $selector i32) (result i32)
-    (local $result i32)
-    (block $default
-      (block $case3
-        (block $case2
-          (block $case1
-            (block $case0
+    (block $default (result i32)
+      (block $case3 (result i32)
+        (block $case2 (result i32)
+          (block $case1 (result i32)
+            (block $case0 (result i32)
               (br_table $case0 $case1 $case2 $case3 $default
-                (local.get $selector)))
-            ;; case 0
-            (local.set $result (i32.const 100))
-            (br $default))
-          ;; case 1
-          (local.set $result (i32.const 200))
-          (br $default))
-        ;; case 2
-        (local.set $result (i32.const 300))
-        (br $default))
-      ;; case 3
-      (local.set $result (i32.const 400))
-      (br $default))
-    ;; default case (selector >= 4)
-    (local.get $result))
+                (local.get $selector))
+              (i32.const -1))  ;; never reached
+            (return (i32.const 100)))
+          (return (i32.const 200)))
+        (return (i32.const 300)))
+      (return (i32.const 400)))
+    (i32.const 0))  ;; default case
 
   ;; Complex br_table with fallthrough simulation
   (func $complex_switch (param $x i32) (result i32)

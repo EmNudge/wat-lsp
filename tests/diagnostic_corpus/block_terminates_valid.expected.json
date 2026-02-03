@@ -1,0 +1,4 @@
+{
+  "description": "Valid blocks where all paths terminate should produce no errors",
+  "diagnostics": []
+}
