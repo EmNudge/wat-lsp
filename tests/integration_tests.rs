@@ -1,3 +1,7 @@
+//! Integration tests for WAT LSP features (native only)
+
+#![cfg(feature = "native")]
+
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
 use wat_lsp_rust::{

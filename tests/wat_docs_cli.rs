@@ -1,6 +1,8 @@
-//! Integration tests for the wat-docs CLI binary
+//! Integration tests for the wat-docs CLI binary (native only)
 //!
 //! These tests verify the CLI behavior including output formatting and colorization.
+
+#![cfg(feature = "native")]
 
 use std::process::Command;
 

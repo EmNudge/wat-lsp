@@ -6,7 +6,7 @@ use crate::utils::{
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests;
 
 /// Provide completion items at the given position in the document.

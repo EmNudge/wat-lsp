@@ -1,3 +1,10 @@
+//! WasmGC and type system parsing tests (native only)
+//!
+//! Tests for parsing WasmGC types (structs, arrays), recursive types,
+//! and subtyping features.
+
+#![cfg(feature = "native")]
+
 use wat_lsp_rust::parser::parse_document;
 use wat_lsp_rust::symbols::TypeKind;
 
