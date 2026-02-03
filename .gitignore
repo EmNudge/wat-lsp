@@ -38,12 +38,12 @@ packages/wat-lsp/dist/
 packages/wat-lsp/package-lock.json
 
 # VS Code Extension
-vscode-extension/node_modules/
-vscode-extension/out/
-vscode-extension/grammars/queries/
-vscode-extension/server/
-vscode-extension/*.vsix
-vscode-extension/package-lock.json
+packages/vscode-extension/node_modules/
+packages/vscode-extension/out/
+packages/vscode-extension/grammars/queries/
+packages/vscode-extension/server/
+packages/vscode-extension/*.vsix
+packages/vscode-extension/package-lock.json
 
 # wasm-pack output folder
 pkg/

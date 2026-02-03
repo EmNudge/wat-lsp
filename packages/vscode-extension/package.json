@@ -80,6 +80,11 @@
           "description": "Custom path to the WAT LSP server binary. Leave empty to use the bundled binary."
         }
       }
+    },
+    "configurationDefaults": {
+      "[wat]": {
+        "editor.minimap.showMarkSectionHeaders": false
+      }
     }
   },
   "scripts": {
