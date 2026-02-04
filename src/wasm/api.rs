@@ -800,6 +800,7 @@ fn find_symbol_references(
 struct WasmDiagnostic {
     line: u32,
     character: u32,
+    end_line: u32,
     end_character: u32,
     message: String,
     severity: u32, // 1 = error, 2 = warning, 3 = info, 4 = hint
@@ -810,6 +811,7 @@ impl From<CoreDiagnostic> for WasmDiagnostic {
         WasmDiagnostic {
             line: diag.range.start.line,
             character: diag.range.start.character,
+            end_line: diag.range.end.line,
             end_character: diag.range.end.character,
             message: diag.message,
             severity: match diag.severity {
@@ -895,6 +897,7 @@ fn walk_tree_for_diagnostics(
             diagnostics.push(WasmDiagnostic {
                 line: node.start_position().row as u32,
                 character: node.start_position().column as u32,
+                end_line: node.end_position().row as u32,
                 end_character: node.end_position().column as u32,
                 message: format!(
                     "Type mismatch: function body leaves 0 values on stack but signature requires {}",
@@ -1046,6 +1049,7 @@ fn check_folded_expr_operand_count(
                     diagnostics.push(WasmDiagnostic {
                         line: start_point.row as u32,
                         character: start_point.column as u32,
+                        end_line: end_point.row as u32,
                         end_character: end_point.column as u32,
                         message: format!(
                             "Instruction '{}' expects at most {} operands, but got {}",
@@ -1061,6 +1065,7 @@ fn check_folded_expr_operand_count(
                         diagnostics.push(WasmDiagnostic {
                             line: start_point.row as u32,
                             character: start_point.column as u32,
+                            end_line: end_point.row as u32,
                             end_character: end_point.column as u32,
                             message: format!(
                                 "Instruction '{}' expects {} operands, but got {}",
@@ -1173,6 +1178,7 @@ fn validate_operand_count(
         diagnostics.push(WasmDiagnostic {
             line: start_point.row as u32,
             character: start_point.column as u32,
+            end_line: end_point.row as u32,
             end_character: end_point.column as u32,
             message: format!(
                 "Instruction '{}' expects at most {} operands, but got {}",
@@ -1186,6 +1192,7 @@ fn validate_operand_count(
         diagnostics.push(WasmDiagnostic {
             line: start_point.row as u32,
             character: start_point.column as u32,
+            end_line: end_point.row as u32,
             end_character: end_point.column as u32,
             message: format!(
                 "Instruction '{}' expects {} operands, but got {}",
@@ -1288,6 +1295,7 @@ fn check_catch_clause_references(
                     diagnostics.push(WasmDiagnostic {
                         line: start_point.row as u32,
                         character: start_point.column as u32,
+                        end_line: end_point.row as u32,
                         end_character: end_point.column as u32,
                         message,
                         severity: 1,
@@ -1327,6 +1335,7 @@ fn check_try_catch_clause_references(
                         diagnostics.push(WasmDiagnostic {
                             line: start_point.row as u32,
                             character: start_point.column as u32,
+                            end_line: end_point.row as u32,
                             end_character: end_point.column as u32,
                             message: format!("Undefined tag '{}'", identifier_name),
                             severity: 1,
@@ -1417,6 +1426,7 @@ fn find_undefined_identifiers(
             diagnostics.push(WasmDiagnostic {
                 line: start_point.row as u32,
                 character: start_point.column as u32,
+                end_line: end_point.row as u32,
                 end_character: end_point.column as u32,
                 message,
                 severity: 1, // Error
@@ -1465,6 +1475,7 @@ fn walk_tree_for_syntax_errors(node: Node, source: &str, diagnostics: &mut Vec<W
         diagnostics.push(WasmDiagnostic {
             line: start_point.row as u32,
             character: start_point.column as u32,
+            end_line: end_point.row as u32,
             end_character: end_point.column as u32,
             message,
             severity: 1, // Error
@@ -1479,6 +1490,7 @@ fn walk_tree_for_syntax_errors(node: Node, source: &str, diagnostics: &mut Vec<W
         diagnostics.push(WasmDiagnostic {
             line: start_point.row as u32,
             character: start_point.column as u32,
+            end_line: end_point.row as u32,
             end_character: end_point.column as u32,
             message: format!("Missing {}", node.kind()),
             severity: 1, // Error
@@ -1500,7 +1512,7 @@ fn diagnostic_to_js(diag: &WasmDiagnostic) -> JsValue {
     js_sys::Reflect::set(&start, &"line".into(), &diag.line.into()).ok();
     js_sys::Reflect::set(&start, &"character".into(), &diag.character.into()).ok();
     let end = js_sys::Object::new();
-    js_sys::Reflect::set(&end, &"line".into(), &diag.line.into()).ok();
+    js_sys::Reflect::set(&end, &"line".into(), &diag.end_line.into()).ok();
     js_sys::Reflect::set(&end, &"character".into(), &diag.end_character.into()).ok();
     js_sys::Reflect::set(&range, &"start".into(), &start).ok();
     js_sys::Reflect::set(&range, &"end".into(), &end).ok();
