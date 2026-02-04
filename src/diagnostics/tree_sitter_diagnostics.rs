@@ -1,3 +1,4 @@
+use crate::utils::node_to_range;
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
 
@@ -30,7 +31,7 @@ fn walk_tree_for_errors(node: Node, source: &str, diagnostics: &mut Vec<Diagnost
 
 /// Create a diagnostic for an ERROR node
 fn create_error_diagnostic(node: Node, source: &str) -> Diagnostic {
-    let range = node_to_range(node);
+    let range: Range = node_to_range(&node).into();
     let text = &source[node.byte_range()];
 
     let message = if text.trim().is_empty() {
@@ -54,7 +55,7 @@ fn create_error_diagnostic(node: Node, source: &str) -> Diagnostic {
 
 /// Create a diagnostic for a MISSING node
 fn create_missing_diagnostic(node: Node, _source: &str) -> Diagnostic {
-    let range = node_to_range(node);
+    let range: Range = node_to_range(&node).into();
 
     Diagnostic {
         range,
@@ -66,23 +67,6 @@ fn create_missing_diagnostic(node: Node, _source: &str) -> Diagnostic {
         related_information: None,
         tags: None,
         data: None,
-    }
-}
-
-/// Convert a tree-sitter node to an LSP range
-fn node_to_range(node: Node) -> Range {
-    let start_point = node.start_position();
-    let end_point = node.end_position();
-
-    Range {
-        start: Position {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-        },
-        end: Position {
-            line: end_point.row as u32,
-            character: end_point.column as u32,
-        },
     }
 }
 

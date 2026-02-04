@@ -1,19 +1,7 @@
 use super::*;
+use crate::features::test_utils::{create_test_tree, create_uri};
 use crate::parser::parse_document;
-use crate::tree_sitter_bindings::create_parser;
 use tower_lsp::lsp_types::{Position, Url};
-use tree_sitter::Tree;
-
-fn create_test_tree(document: &str) -> Tree {
-    let mut parser = create_parser();
-    parser
-        .parse(document, None)
-        .expect("Failed to parse test document")
-}
-
-fn create_uri() -> String {
-    "file:///test.wat".to_string()
-}
 
 #[test]
 fn test_goto_function_definition_by_name() {

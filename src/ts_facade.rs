@@ -34,7 +34,10 @@ mod native {
 // WASM Implementation (using web-tree-sitter-sg crate)
 // ============================================================================
 
+// WASM module is only used when wasm feature is enabled without native feature.
+// When both features are enabled (--all-features), native takes precedence.
 #[cfg(feature = "wasm")]
+#[allow(dead_code)]
 mod wasm {
     use std::ops::Range;
     use wasm_bindgen::prelude::*;

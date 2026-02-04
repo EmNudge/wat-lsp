@@ -5,7 +5,7 @@
 
 use crate::core::types::{Diagnostic, Position};
 use crate::symbols::SymbolTable;
-use crate::utils::{find_containing_function, InstructionContext, STRUCT_OPS};
+use crate::utils::{find_containing_function, node_to_range, InstructionContext, STRUCT_OPS};
 
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
@@ -13,8 +13,6 @@ use tree_sitter::Node;
 
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::Node;
-
-use super::node_to_range;
 
 /// Check references in a catch_clause node (try_table syntax)
 /// For (catch $tag $label) and (catch_ref $tag $label): first index is tag, second is label

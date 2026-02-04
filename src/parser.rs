@@ -1,6 +1,6 @@
-use crate::core::types::{Position, Range};
+use crate::core::types::Range;
 use crate::symbols::*;
-use crate::utils::{block_type_from_kind, BLOCK_KINDS_EXPR, BLOCK_KINDS_STATEMENT};
+use crate::utils::{block_type_from_kind, node_to_range, BLOCK_KINDS_EXPR, BLOCK_KINDS_STATEMENT};
 
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
@@ -454,22 +454,6 @@ fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<
         line: desc_node.range().start_point.row as u32,
         range: name_range,
     })
-}
-
-/// Convert a tree-sitter node to an LSP Range
-fn node_to_range(node: &Node) -> Range {
-    let start_point = node.range().start_point;
-    let end_point = node.range().end_point;
-    Range {
-        start: Position {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-        },
-        end: Position {
-            line: end_point.row as u32,
-            character: end_point.column as u32,
-        },
-    }
 }
 
 /// Find identifier child node (returns the node itself, not just text)

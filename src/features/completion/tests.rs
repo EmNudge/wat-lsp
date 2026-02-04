@@ -1,58 +1,6 @@
 use super::*;
+use crate::features::test_utils::create_test_symbols;
 use crate::parser;
-
-fn create_test_symbols() -> SymbolTable {
-    let mut table = SymbolTable::new();
-
-    let func = Function {
-        name: Some("$add".to_string()),
-        index: 0,
-        parameters: vec![
-            Parameter {
-                name: Some("$a".to_string()),
-                param_type: ValueType::I32,
-                index: 0,
-                range: None,
-            },
-            Parameter {
-                name: Some("$b".to_string()),
-                param_type: ValueType::I32,
-                index: 1,
-                range: None,
-            },
-        ],
-        results: vec![ValueType::I32],
-        locals: vec![Variable {
-            name: Some("$temp".to_string()),
-            var_type: ValueType::I32,
-            is_mutable: true,
-            initial_value: None,
-            index: 0,
-            range: None,
-        }],
-        blocks: vec![],
-        line: 0,
-        end_line: 10,
-        start_byte: 0,
-        end_byte: 250,
-        range: None,
-        doc_comment: None,
-    };
-    table.add_function(func);
-
-    let global = Global {
-        name: Some("$counter".to_string()),
-        index: 0,
-        var_type: ValueType::I32,
-        is_mutable: true,
-        initial_value: Some("0".to_string()),
-        line: 0,
-        range: None,
-    };
-    table.add_global(global);
-
-    table
-}
 
 #[test]
 fn test_number_constant_completion() {

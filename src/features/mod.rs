@@ -1,6 +1,10 @@
 // LSP feature modules
 // Each module implements a specific Language Server Protocol capability
 
+// Shared test utilities
+#[cfg(all(test, feature = "native"))]
+pub mod test_utils;
+
 // Completion - provides code completion suggestions
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod completion;
