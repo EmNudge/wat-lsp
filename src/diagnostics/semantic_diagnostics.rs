@@ -3366,4 +3366,124 @@ mod tests {
             "Functions should have correct return values on stack"
         );
     }
+
+    #[test]
+    fn test_try_table_catch_branch_to_outer_block() {
+        // Regression test for issue #108:
+        // Control flow analysis should handle try_table catch clauses that branch to outer blocks.
+        // Even though the try_table body always terminates (return), the catch clause can
+        // branch to $outer_catch, so the enclosing block doesn't "always terminate".
+        //
+        // Pattern: catch branches to outer block, block result IS the function result
+        let document = r#"(module
+  (tag $error (param i32))
+
+  (func $safe_op (param $x i32) (result i32)
+    (block $catch_block (result i32)
+      (try_table (result i32) (catch $error $catch_block)
+        (if (i32.lt_s (local.get $x) (i32.const 0))
+          (then (throw $error (i32.const -1))))
+        (return (local.get $x)))))
+)"#;
+        // Normal path: body returns $x
+        // Exception path: catch branches to $catch_block with error payload (i32), block produces i32
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let return_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == Some(NumberOrString::String("return-arity-mismatch".to_string()))
+                    || d.code == Some(NumberOrString::String("return-type-mismatch".to_string()))
+            })
+            .collect();
+
+        assert_eq!(
+            return_errors.len(),
+            0,
+            "try_table with catch branch to outer block should not cause false positive errors, got: {:?}",
+            return_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_try_table_body_terminates_with_catch() {
+        // Another test for issue #108:
+        // When try_table body terminates but has catch clauses, the outer block
+        // doesn't "always terminate" because catch can branch out.
+        //
+        // Pattern: body always terminates (unreachable), but catch provides exit path
+        let document = r#"(module
+  (tag $error (param i32))
+
+  (func $test (result i32)
+    (block $catch_handler (result i32)
+      (try_table (result i32) (catch $error $catch_handler)
+        (unreachable))))
+)"#;
+        // Only path: exception caught, branches to $catch_handler with i32 payload
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let type_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == Some(NumberOrString::String("return-arity-mismatch".to_string()))
+                    || d.code == Some(NumberOrString::String("return-type-mismatch".to_string()))
+            })
+            .collect();
+
+        assert_eq!(
+            type_errors.len(),
+            0,
+            "try_table with unreachable body but catch clause should not cause false positives, got: {:?}",
+            type_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_try_table_with_code_after_block() {
+        // Test pattern from issue #108 where code after block is only reached via catch
+        // The catch branches to an outer block with no result type
+        let document = r#"(module
+  (tag $error)
+
+  (func $test (result i32)
+    (block $on_error
+      (try_table (catch $error $on_error)
+        (return (i32.const 42))))
+    (i32.const -1))
+)"#;
+        // Normal path: body returns 42
+        // Exception path: catch branches to $on_error (no result), continues to i32.const -1
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+
+        let type_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == Some(NumberOrString::String("return-arity-mismatch".to_string()))
+                    || d.code == Some(NumberOrString::String("return-type-mismatch".to_string()))
+            })
+            .collect();
+
+        assert_eq!(
+            type_errors.len(),
+            0,
+            "try_table with code after block (reached via catch) should not cause false positives, got: {:?}",
+            type_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }
