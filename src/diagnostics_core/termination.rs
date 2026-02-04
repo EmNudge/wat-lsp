@@ -111,6 +111,14 @@ pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
         // For expr1_if (folded if syntax)
         "expr1_if" => if_always_terminates(node, source),
 
+        // For try_table (folded and linear formats)
+        // A try_table with catch clauses can exit via catch branches to outer labels,
+        // so it doesn't "always terminate" in the control flow sense.
+        // Even if the body terminates (return/unreachable), catch clauses provide
+        // alternative paths that branch to outer labels.
+        // See: https://github.com/EmNudge/wat-lsp/issues/108
+        "expr1_try_table" | "block_try_table" => try_table_always_terminates(node, source),
+
         _ => false,
     }
 }
@@ -180,6 +188,41 @@ fn block_body_always_terminates(node: &Node, source: &str) -> bool {
         }
     }
     false
+}
+
+/// Check if a try_table always terminates.
+///
+/// A try_table with catch clauses NEVER "always terminates" in the control flow sense,
+/// because catch clauses can branch to outer labels, providing alternative exit paths.
+/// Even if the try_table body always terminates (return/unreachable), the catch clause
+/// can still branch to an outer block, allowing code after that block to be reached.
+///
+/// For example:
+/// ```wat
+/// (block $outer (result i32)
+///   (try_table (result i32) (catch $tag $outer)
+///     (return)))  ;; body terminates, but catch branches to $outer
+/// (i32.const -1)  ;; reachable via catch branch to $outer
+/// ```
+fn try_table_always_terminates(node: &Node, source: &str) -> bool {
+    // Check if this try_table has any catch clauses
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let child_kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let child_kind = child.kind();
+
+        // If we find any catch clause, the try_table doesn't "always terminate"
+        // because the catch can branch to an outer label
+        if child_kind == "catch_clause" {
+            return false;
+        }
+    }
+
+    // No catch clauses found - check if the body terminates
+    // (This is an edge case; try_table without catch clauses is unusual)
+    block_body_always_terminates(node, source)
 }
 
 /// Check if an if/if_block always terminates (both branches must exist and terminate)
