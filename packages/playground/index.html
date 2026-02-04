@@ -54,7 +54,6 @@
           <button class="tab" data-tab="outline">Outline</button>
           <button class="tab" data-tab="console">Console</button>
           <button class="tab" data-tab="hex">Hex View</button>
-          <button class="tab" data-tab="lsp-debug">LSP Debug</button>
         </div>
 
         <div class="tab-content">
@@ -97,36 +96,6 @@
           <div id="hex" class="tab-pane">
             <pre id="hex-view"></pre>
           </div>
-
-          <div id="lsp-debug" class="tab-pane">
-            <div class="info-section">
-              <h3>Diagnostics</h3>
-              <div id="diagnostics-view" class="diagnostics-list">
-                <p class="placeholder">No errors</p>
-              </div>
-            </div>
-            <div class="info-section">
-              <h3>Symbol Table</h3>
-              <div id="symbol-table-view" class="info-list">
-                <p class="placeholder">Parse document to see symbols</p>
-              </div>
-            </div>
-            <div class="info-section">
-              <h3>Last Hover</h3>
-              <div id="hover-debug" class="lsp-debug-output">
-                <p class="placeholder">Hover over code to see debug info</p>
-              </div>
-            </div>
-            <div class="info-section">
-              <h3>Manual Test</h3>
-              <div class="lsp-test-controls">
-                <input type="number" id="test-line" placeholder="Line (0-based)" min="0" value="0">
-                <input type="number" id="test-col" placeholder="Column" min="0" value="0">
-                <button id="test-hover-btn" class="btn btn-small">Test Hover</button>
-              </div>
-              <pre id="test-result" class="lsp-debug-output"></pre>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -135,20 +104,6 @@
       <span>WAT LSP Playground - Open File (Ctrl/Cmd+P), Go to Definition (F12), Find References (Shift+F12)</span>
       <span id="status">Ready</span>
     </footer>
-  </div>
-
-  <!-- Command Palette -->
-  <div id="command-palette" class="command-palette hidden">
-    <div class="command-palette-backdrop"></div>
-    <div class="command-palette-container">
-      <input type="text" id="command-palette-input" class="command-palette-input" placeholder="Type to search files..." autocomplete="off">
-      <div id="command-palette-results" class="command-palette-results"></div>
-      <div class="command-palette-hint">
-        <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
-        <span><kbd>Enter</kbd> Open</span>
-        <span><kbd>Esc</kbd> Close</span>
-      </div>
-    </div>
   </div>
 
   <script type="module" src="main.ts"></script>
