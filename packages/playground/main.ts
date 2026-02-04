@@ -140,17 +140,7 @@ let elements: {
   callFnBtn: HTMLButtonElement;
   fnResult: HTMLElement;
   hexView: HTMLElement;
-  diagnosticsView: HTMLElement;
-  symbolTableView: HTMLElement;
-  hoverDebug: HTMLElement;
   outlineView: HTMLElement;
-  testLine: HTMLInputElement;
-  testCol: HTMLInputElement;
-  testHoverBtn: HTMLButtonElement;
-  testResult: HTMLElement;
-  commandPalette: HTMLElement;
-  commandPaletteInput: HTMLInputElement;
-  commandPaletteResults: HTMLElement;
 };
 
 // Console output helper
@@ -472,9 +462,6 @@ async function initMonaco(): Promise<void> {
         position.column - 1
       );
 
-      // Update debug panel
-      updateHoverDebug(position.lineNumber, position.column, hover);
-
       if (!hover) return null;
 
       return {
@@ -709,9 +696,41 @@ async function initMonaco(): Promise<void> {
       if (watLSP && watLSP.ready) {
         watLSP.parse(editor.getValue());
         updateDiagnostics();
-        updateLSPDebugPanel();
+        updateOutlineView();
       }
     }, 300);
+  });
+
+  // Register Go to File action (Cmd/Ctrl+P)
+  editor.addAction({
+    id: 'playground.goToFile',
+    label: 'Go to File...',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP],
+    run: () => {
+      openFilePicker();
+    },
+  });
+
+  // Register Compile action (Cmd/Ctrl+Enter)
+  editor.addAction({
+    id: 'playground.compile',
+    label: 'Compile',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+    run: () => {
+      compile();
+    },
+  });
+
+  // Register Compile and Run action (Cmd/Ctrl+Shift+Enter)
+  editor.addAction({
+    id: 'playground.compileAndRun',
+    label: 'Compile and Run',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+    run: () => {
+      compile().then((success) => {
+        if (success) run();
+      });
+    },
   });
 }
 
@@ -740,38 +759,6 @@ function updateDiagnostics(): void {
 
   // Update current file's error state in sidebar
   updateCurrentFileErrors();
-
-  // Update diagnostics panel
-  if (diagnostics.length === 0) {
-    elements.diagnosticsView.innerHTML = '<p class="placeholder">No errors</p>';
-  } else {
-    elements.diagnosticsView.innerHTML = diagnostics
-      .map((diag) => {
-        const line = diag.range.start.line + 1;
-        const col = diag.range.start.character + 1;
-        const severityClass =
-          diag.severity === 1
-            ? 'error'
-            : diag.severity === 2
-              ? 'warning'
-              : 'info';
-        const severityIcon =
-          diag.severity === 1 ? '⛔' : diag.severity === 2 ? '⚠️' : 'ℹ️';
-        return `<div class="diagnostic-item ${severityClass}" onclick="goToLine(${line}, ${col})">
-          <span class="diagnostic-icon">${severityIcon}</span>
-          <span class="diagnostic-location">[Ln ${line}, Col ${col}]</span>
-          <span class="diagnostic-message">${escapeHtml(diag.message)}</span>
-        </div>`;
-      })
-      .join('');
-  }
-}
-
-// Update LSP debug panel
-function updateLSPDebugPanel(): void {
-  if (!watLSP) return;
-  elements.symbolTableView.innerHTML = watLSP.getSymbolTableHTML();
-  updateOutlineView();
 }
 
 // Symbol kind to icon/class mapping
@@ -835,31 +822,6 @@ function updateOutlineView(): void {
   }
 
   elements.outlineView.innerHTML = symbols.map((sym) => renderSymbol(sym)).join('');
-}
-
-// Update hover debug info
-function updateHoverDebug(
-  line: number,
-  col: number,
-  hover: ReturnType<WatLSP['provideHover']>
-): void {
-  if (!hover) {
-    elements.hoverDebug.innerHTML = `<p class="placeholder">No hover at Ln ${line}, Col ${col}</p>`;
-    return;
-  }
-
-  const content = hover.contents?.value || '(no content)';
-  const rangeInfo = hover.range
-    ? `Ln ${hover.range.start.line + 1}:${hover.range.start.character + 1} - Ln ${hover.range.end.line + 1}:${hover.range.end.character + 1}`
-    : 'No range';
-
-  elements.hoverDebug.innerHTML = `
-    <div class="hover-debug-info">
-      <div class="hover-position"><strong>Position:</strong> Ln ${line}, Col ${col}</div>
-      <div class="hover-range"><strong>Range:</strong> ${rangeInfo}</div>
-      <div class="hover-content"><strong>Content:</strong><pre>${escapeHtml(content)}</pre></div>
-    </div>
-  `;
 }
 
 // Helper to escape HTML
@@ -1122,7 +1084,7 @@ function loadExampleIntoEditor(id: string): void {
 
   if (watLSP && watLSP.ready) {
     watLSP.parse(editor.getValue());
-    updateLSPDebugPanel();
+    updateOutlineView();
   }
 
   setStatus('Ready');
@@ -1194,7 +1156,7 @@ async function initLSP(): Promise<boolean> {
     if (editor && watLSP) {
       watLSP.parse(editor.getValue());
       updateDiagnostics();
-      updateLSPDebugPanel();
+      updateOutlineView();
     }
 
     // Run diagnostics on all files to populate sidebar error indicators
@@ -1529,166 +1491,85 @@ function loadExample(id: string, pin: boolean = false): void {
   selectFileInTree(id);
 }
 
-// Command Palette
-let commandPaletteSelectedIndex = 0;
-let commandPaletteFilteredItems: typeof examples = [];
-
-function openCommandPalette(): void {
-  elements.commandPalette.classList.remove('hidden');
-  elements.commandPaletteInput.value = '';
-  elements.commandPaletteInput.focus();
-  commandPaletteSelectedIndex = 0;
-  updateCommandPaletteResults('');
+// QuickPick interface for Monaco's internal service
+interface QuickPickItem {
+  label: string;
+  description?: string;
+  id: string;
 }
 
-function closeCommandPalette(): void {
-  elements.commandPalette.classList.add('hidden');
-  elements.commandPaletteInput.value = '';
-  editor?.focus();
+interface IQuickPick {
+  placeholder: string;
+  matchOnDescription: boolean;
+  items: QuickPickItem[];
+  selectedItems: QuickPickItem[];
+  onDidAccept: (callback: () => void) => void;
+  onDidHide: (callback: () => void) => void;
+  show: () => void;
+  hide: () => void;
+  dispose: () => void;
 }
 
-function updateCommandPaletteResults(query: string): void {
-  const lowerQuery = query.toLowerCase().trim();
+interface IQuickInputService {
+  createQuickPick: () => IQuickPick;
+}
 
-  // Filter examples by fuzzy matching on id and label
-  if (lowerQuery === '') {
-    commandPaletteFilteredItems = [...examples];
-  } else {
-    commandPaletteFilteredItems = examples.filter(ex => {
-      const searchText = `${ex.id} ${ex.label}`.toLowerCase();
-      // Simple fuzzy match: all query characters appear in order
-      let searchIndex = 0;
-      for (const char of lowerQuery) {
-        const foundIndex = searchText.indexOf(char, searchIndex);
-        if (foundIndex === -1) return false;
-        searchIndex = foundIndex + 1;
-      }
-      return true;
+// File Picker using Monaco's QuickInput
+function openFilePicker(): void {
+  // Use dynamic import to access Monaco's standalone services
+  import('monaco-editor/esm/vs/editor/standalone/browser/standaloneServices').then((module) => {
+    const StandaloneServices = module.StandaloneServices;
+    import('monaco-editor/esm/vs/platform/quickinput/common/quickInput').then((quickInputModule) => {
+      const IQuickInputService = quickInputModule.IQuickInputService;
+      const quickInputService = StandaloneServices.get(IQuickInputService) as IQuickInputService;
+      const quickPick = quickInputService.createQuickPick();
+
+      quickPick.placeholder = 'Type to search files...';
+      quickPick.matchOnDescription = true;
+
+      // Create items from examples
+      const items: QuickPickItem[] = examples.map(ex => {
+        const isInvalid = ex.id.startsWith('invalid_');
+        const folder = isInvalid ? 'invalid/' : 'examples/';
+        return {
+          label: `$(file) ${ex.label}`,
+          description: `${folder}${ex.id}.wat`,
+          id: ex.id,
+        };
+      });
+
+      quickPick.items = items;
+
+      quickPick.onDidAccept(() => {
+        const selected = quickPick.selectedItems[0];
+        if (selected) {
+          saveCurrentTabContent();
+          loadExample(selected.id);
+
+          // Expand parent folder if collapsed
+          const treeItem = elements.fileTree.querySelector(`[data-id="${selected.id}"]`);
+          if (treeItem) {
+            const folder = treeItem.closest('.tree-folder');
+            if (folder) {
+              const children = folder.querySelector('.tree-folder-children') as HTMLElement;
+              if (children && children.style.display === 'none') {
+                children.style.display = 'block';
+                const chevron = folder.querySelector('.tree-chevron');
+                if (chevron) chevron.textContent = '▼';
+              }
+            }
+          }
+        }
+        quickPick.hide();
+      });
+
+      quickPick.onDidHide(() => {
+        quickPick.dispose();
+        editor?.focus();
+      });
+
+      quickPick.show();
     });
-  }
-
-  // Ensure selected index is in bounds
-  if (commandPaletteSelectedIndex >= commandPaletteFilteredItems.length) {
-    commandPaletteSelectedIndex = Math.max(0, commandPaletteFilteredItems.length - 1);
-  }
-
-  renderCommandPaletteResults();
-}
-
-function renderCommandPaletteResults(): void {
-  if (commandPaletteFilteredItems.length === 0) {
-    elements.commandPaletteResults.innerHTML = '<div class="command-palette-empty">No matching files</div>';
-    return;
-  }
-
-  const html = commandPaletteFilteredItems.map((ex, index) => {
-    const isInvalid = ex.id.startsWith('invalid_');
-    const icon = isInvalid ? '⚠️' : '📄';
-    const folder = isInvalid ? 'invalid/' : 'examples/';
-    const selected = index === commandPaletteSelectedIndex ? ' selected' : '';
-
-    return `<div class="command-palette-item${selected}" data-id="${ex.id}" data-index="${index}">
-      <span class="command-palette-item-icon">${icon}</span>
-      <span class="command-palette-item-label">${escapeHtml(ex.label)}</span>
-      <span class="command-palette-item-path">${folder}${ex.id}.wat</span>
-    </div>`;
-  }).join('');
-
-  elements.commandPaletteResults.innerHTML = html;
-
-  // Scroll selected item into view
-  const selectedEl = elements.commandPaletteResults.querySelector('.command-palette-item.selected');
-  if (selectedEl) {
-    selectedEl.scrollIntoView({ block: 'nearest' });
-  }
-}
-
-function selectCommandPaletteItem(index: number): void {
-  if (index < 0 || index >= commandPaletteFilteredItems.length) return;
-
-  const item = commandPaletteFilteredItems[index];
-  closeCommandPalette();
-  // Save current tab content before switching
-  saveCurrentTabContent();
-  loadExample(item.id);
-
-  // Expand parent folder if collapsed
-  const treeItem = elements.fileTree.querySelector(`[data-id="${item.id}"]`);
-  if (treeItem) {
-    const folder = treeItem.closest('.tree-folder');
-    if (folder) {
-      const children = folder.querySelector('.tree-folder-children') as HTMLElement;
-      if (children && children.style.display === 'none') {
-        children.style.display = 'block';
-        const chevron = folder.querySelector('.tree-chevron');
-        if (chevron) chevron.textContent = '▼';
-      }
-    }
-  }
-}
-
-function handleCommandPaletteKeydown(e: KeyboardEvent): void {
-  switch (e.key) {
-    case 'Escape':
-      e.preventDefault();
-      closeCommandPalette();
-      break;
-    case 'ArrowDown':
-      e.preventDefault();
-      if (commandPaletteSelectedIndex < commandPaletteFilteredItems.length - 1) {
-        commandPaletteSelectedIndex++;
-        renderCommandPaletteResults();
-      }
-      break;
-    case 'ArrowUp':
-      e.preventDefault();
-      if (commandPaletteSelectedIndex > 0) {
-        commandPaletteSelectedIndex--;
-        renderCommandPaletteResults();
-      }
-      break;
-    case 'Enter':
-      e.preventDefault();
-      selectCommandPaletteItem(commandPaletteSelectedIndex);
-      break;
-  }
-}
-
-function initCommandPalette(): void {
-  // Input handler for filtering
-  elements.commandPaletteInput.addEventListener('input', () => {
-    commandPaletteSelectedIndex = 0;
-    updateCommandPaletteResults(elements.commandPaletteInput.value);
-  });
-
-  // Keyboard navigation
-  elements.commandPaletteInput.addEventListener('keydown', handleCommandPaletteKeydown);
-
-  // Click on backdrop to close
-  const backdrop = elements.commandPalette.querySelector('.command-palette-backdrop');
-  if (backdrop) {
-    backdrop.addEventListener('click', closeCommandPalette);
-  }
-
-  // Click on result item
-  elements.commandPaletteResults.addEventListener('click', (e) => {
-    const item = (e.target as HTMLElement).closest('.command-palette-item');
-    if (item) {
-      const index = parseInt(item.getAttribute('data-index') || '0', 10);
-      selectCommandPaletteItem(index);
-    }
-  });
-
-  // Hover to select
-  elements.commandPaletteResults.addEventListener('mousemove', (e) => {
-    const item = (e.target as HTMLElement).closest('.command-palette-item');
-    if (item) {
-      const index = parseInt(item.getAttribute('data-index') || '0', 10);
-      if (index !== commandPaletteSelectedIndex) {
-        commandPaletteSelectedIndex = index;
-        renderCommandPaletteResults();
-      }
-    }
   });
 }
 
@@ -1820,19 +1701,7 @@ function initElements(): void {
     callFnBtn: document.getElementById('call-fn-btn') as HTMLButtonElement,
     fnResult: document.getElementById('fn-result')!,
     hexView: document.getElementById('hex-view')!,
-    diagnosticsView: document.getElementById('diagnostics-view')!,
-    symbolTableView: document.getElementById('symbol-table-view')!,
-    hoverDebug: document.getElementById('hover-debug')!,
     outlineView: document.getElementById('outline-view')!,
-    testLine: document.getElementById('test-line') as HTMLInputElement,
-    testCol: document.getElementById('test-col') as HTMLInputElement,
-    testHoverBtn: document.getElementById(
-      'test-hover-btn'
-    ) as HTMLButtonElement,
-    testResult: document.getElementById('test-result')!,
-    commandPalette: document.getElementById('command-palette')!,
-    commandPaletteInput: document.getElementById('command-palette-input') as HTMLInputElement,
-    commandPaletteResults: document.getElementById('command-palette-results')!,
   };
 }
 
@@ -1847,7 +1716,6 @@ async function init(): Promise<void> {
   initTabs();
   initResizablePanel();
   initFileTreeResize();
-  initCommandPalette();
   initEditorTabs();
 
   // Initialize Monaco, wabt, and LSP in parallel
@@ -1864,36 +1732,8 @@ async function init(): Promise<void> {
   elements.downloadBtn.addEventListener('click', downloadWasm);
   elements.callFnBtn.addEventListener('click', callExportedFunction);
 
-  // LSP Debug test hover button
-  elements.testHoverBtn.addEventListener('click', () => {
-    const line = parseInt(elements.testLine.value, 10) || 0;
-    const col = parseInt(elements.testCol.value, 10) || 0;
-
-    if (!watLSP || !watLSP.ready) {
-      elements.testResult.textContent = 'LSP not ready';
-      return;
-    }
-
-    watLSP.parse(editor.getValue());
-
-    const hover = watLSP.provideHover(line, col);
-    updateHoverDebug(line + 1, col + 1, hover);
-
-    if (hover) {
-      elements.testResult.textContent = `Found: ${hover.contents.value.substring(0, 200)}...`;
-    } else {
-      elements.testResult.textContent = `No hover at line ${line}, col ${col}`;
-    }
-  });
-
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
-    // Cmd/Ctrl+P: Open command palette
-    if ((e.ctrlKey || e.metaKey) && e.key === 'p' && !e.shiftKey) {
-      e.preventDefault();
-      openCommandPalette();
-      return;
-    }
     // Cmd/Ctrl+Enter: Compile
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1910,7 +1750,8 @@ async function init(): Promise<void> {
 
   consoleOutput.log('Playground ready!');
   consoleOutput.info('Keyboard shortcuts:');
-  consoleOutput.info('  Ctrl/Cmd+P: Open file (Command Palette)');
+  consoleOutput.info('  Ctrl/Cmd+P: Go to File');
+  consoleOutput.info('  F1 or Ctrl/Cmd+Shift+P: Command Palette');
   consoleOutput.info('  Ctrl/Cmd+Enter: Compile');
   consoleOutput.info('  Ctrl/Cmd+Shift+Enter: Compile and Run');
   consoleOutput.info('  F12: Go to Definition');
