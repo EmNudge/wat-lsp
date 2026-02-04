@@ -1,6 +1,6 @@
 use super::*;
+use crate::features::test_utils::create_test_tree;
 use crate::parser::parse_document;
-use crate::tree_sitter_bindings;
 
 #[test]
 fn test_function_references_named() {
@@ -23,8 +23,7 @@ fn test_function_references_named() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "call $add" at line 9
     let position = Position {
@@ -61,8 +60,7 @@ fn test_function_references_indexed() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "call 0" at line 9
     let position = Position {
@@ -99,8 +97,7 @@ fn test_function_references_mixed() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "call $add" at line 9
     let position = Position {
@@ -132,8 +129,7 @@ fn test_global_references_named() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "global.get $counter" at line 4
     let position = Position {
@@ -164,8 +160,7 @@ fn test_local_references_scoped() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "local.set $x" in first function (line 3)
     let position = Position {
@@ -191,8 +186,7 @@ fn test_parameter_references() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "local.get $a" at line 2
     let position = Position {
@@ -218,8 +212,7 @@ fn test_parameter_references_from_definition() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "$a" in the parameter definition (line 1, in "param $a")
     let position = Position {
@@ -247,8 +240,7 @@ fn test_local_references_from_definition() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "$result" in the local definition (line 1, in "local $result")
     let position = Position {
@@ -276,8 +268,7 @@ fn test_block_label_references_from_definition() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "$break" in the block definition (line 2, in "block $break")
     let position = Position {
@@ -304,8 +295,7 @@ fn test_loop_label_references_from_definition() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "$continue" in the loop definition (line 2)
     let position = Position {
@@ -331,8 +321,7 @@ fn test_parameter_references_by_index() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "local.get 0" at line 2
     let position = Position {
@@ -361,8 +350,7 @@ fn test_block_label_references_named() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "br_if $exit" at line 5
     let position = Position {
@@ -388,8 +376,7 @@ fn test_block_label_depth_0() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "br 0" at line 4 - should reference $inner (innermost block)
     let position = Position {
@@ -415,8 +402,7 @@ fn test_block_label_depth_1() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on first "br 1" at line 4 - should reference $outer
     let position = Position {
@@ -446,8 +432,7 @@ fn test_include_declaration_true() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "call $add" at line 7
     let position = Position {
@@ -479,8 +464,7 @@ fn test_include_declaration_false() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "call $add" at line 7
     let position = Position {
@@ -509,8 +493,7 @@ fn test_cursor_on_definition() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on the function definition "$add" at line 1
     let position = Position {
@@ -537,8 +520,7 @@ fn test_no_references() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "$unused" at line 1
     let position = Position {
@@ -568,8 +550,7 @@ fn test_multiple_references_same_line() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on first "call $add" at line 7
     let position = Position {
@@ -595,8 +576,7 @@ fn test_type_references() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "(type $add_type)" at line 3
     let position = Position {
@@ -624,8 +604,7 @@ fn test_nested_blocks_depth() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "br 2" - should reference $level0 (outermost)
     let position = Position {
@@ -653,8 +632,7 @@ fn test_local_vs_parameter_indexing() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "local.get 2" - this is the local, not a parameter
     let position = Position {
@@ -691,8 +669,7 @@ fn test_memory_go_to_definition() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // First check memory was extracted
     assert_eq!(symbols.memories.len(), 1, "Memory should be extracted");
@@ -727,8 +704,7 @@ fn test_export_references() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "$log" in the function definition (line 1)
     let position = Position {
@@ -763,8 +739,7 @@ fn test_export_references_indexed() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "0" in call 0 (line 5)
     let position = Position {
@@ -797,8 +772,7 @@ fn test_constants_not_function_references() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "$log" in the function definition (line 1)
     let position = Position {
@@ -837,8 +811,7 @@ fn test_constants_not_indexed_function_references() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Position on "1" in call 1 (line 5) - should reference $second (index 1)
     let position = Position {
@@ -876,8 +849,7 @@ fn test_export_only_function_reference() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // First verify the function is in the symbol table
     assert!(
@@ -962,8 +934,7 @@ fn test_011_host_edit_memory() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Check all functions are in symbol table
     assert!(
@@ -1029,8 +1000,7 @@ fn test_tag_references_in_catch_clause() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Verify tag is in symbol table
     assert!(
@@ -1091,8 +1061,7 @@ fn test_tag_references_from_throw() {
 )"#;
 
     let symbols = parse_document(source).unwrap();
-    let mut parser = tree_sitter_bindings::create_parser();
-    let tree = parser.parse(source, None).unwrap();
+    let tree = create_test_tree(source);
 
     // Find position of $div_error in throw (line 8)
     let line8 = source.lines().nth(8).unwrap();

@@ -9,11 +9,12 @@
 // but is a no-op for native (&str -> &str)
 #![allow(clippy::useless_asref)]
 
-use crate::core::types::{Diagnostic, Range};
+use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
     get_instruction_arity_map, is_terminating_instruction, InstructionArity, OperandMode,
 };
 use crate::symbols::{SymbolTable, TypeKind, ValueType};
+use crate::utils::node_to_range;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -1275,16 +1276,4 @@ pub fn create_stack_underflow_diagnostic(
         ),
     )
     .with_code("stack-underflow")
-}
-
-/// Convert a tree-sitter Node to a core Range
-pub fn node_to_range(node: &Node) -> Range {
-    let start = node.start_position();
-    let end = node.end_position();
-    Range::from_coords(
-        start.row as u32,
-        start.column as u32,
-        end.row as u32,
-        end.column as u32,
-    )
 }
