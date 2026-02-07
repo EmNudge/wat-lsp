@@ -96,6 +96,15 @@ pub fn track_stack_in_instr_list(
                 // Block instructions create a new stack frame
                 // After a block completes, it pushes its result values
                 // But only if the block can actually fall through
+                // Check if this is a block_if (linear if format: if ... end)
+                // which needs to consume a condition value from the stack
+                if contains_block_if(&child) {
+                    if let Err(available) = stack.consume(1) {
+                        let diagnostic =
+                            create_stack_underflow_diagnostic(&child, "if", 1, available);
+                        diagnostics.push(diagnostic);
+                    }
+                }
                 if !sequence_always_terminates(&child, source) {
                     let results = get_block_result_types(&child, source);
                     stack.produce(results);
@@ -179,6 +188,14 @@ fn process_instr_node(
                 process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
             }
             "instr_block" | "instr_loop" => {
+                // Check if this is a block_if (linear if format: if ... end)
+                if contains_block_if(&child) {
+                    if let Err(available) = stack.consume(1) {
+                        let diagnostic =
+                            create_stack_underflow_diagnostic(&child, "if", 1, available);
+                        diagnostics.push(diagnostic);
+                    }
+                }
                 if !sequence_always_terminates(&child, source) {
                     let results = get_block_result_types(&child, source);
                     stack.produce(results);
@@ -205,6 +222,22 @@ fn process_instr_node(
             _ => {}
         }
     }
+}
+
+/// Check if an instr_block node contains a block_if child (linear if format)
+fn contains_block_if(node: &Node) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "block_if" {
+            return true;
+        }
+    }
+    false
 }
 
 /// Get the instruction name from an instr_plain node
@@ -1109,8 +1142,9 @@ pub fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType>
         if kind == "block_type" {
             return parse_result_types(&child, source);
         }
-        // Handle block_block, loop_block (linear format), or if_block (both formats)
-        if kind == "block_block" || kind == "loop_block" || kind == "if_block" {
+        // Handle block_block, loop_block (linear format), if_block/block_if (both formats)
+        if kind == "block_block" || kind == "loop_block" || kind == "if_block" || kind == "block_if"
+        {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
                 #[cfg(feature = "native")]
