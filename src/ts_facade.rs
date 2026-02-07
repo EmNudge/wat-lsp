@@ -39,12 +39,30 @@ mod native {
 #[cfg(feature = "wasm")]
 #[allow(dead_code)]
 mod wasm {
+    use std::cell::RefCell;
     use std::ops::Range;
     use wasm_bindgen::prelude::*;
     use web_tree_sitter_sg::{
         Language as WtsLanguage, Parser as WtsParser, Query as WtsQuery, SyntaxNode,
         Tree as WtsTree, TreeSitter,
     };
+
+    thread_local! {
+        static UTF16_TO_UTF8_MAP: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn utf16_to_utf8(index: usize) -> usize {
+        UTF16_TO_UTF8_MAP.with(|cell| {
+            let map = cell.borrow();
+            if map.is_empty() {
+                index // fallback: no map yet
+            } else {
+                map.get(index)
+                    .copied()
+                    .unwrap_or_else(|| map.last().copied().unwrap_or(index))
+            }
+        })
+    }
 
     // Include the tree-sitter-wat.wasm file at compile time
     const WAT_GRAMMAR_WASM: &[u8] =
@@ -165,6 +183,10 @@ mod wasm {
         }
 
         pub fn parse(&mut self, source: &str, _old_tree: Option<&Tree>) -> Option<Tree> {
+            // Build UTF-16→UTF-8 offset map so Node byte methods return correct offsets.
+            // web-tree-sitter returns UTF-16 code unit indices, not UTF-8 byte offsets.
+            UTF16_TO_UTF8_MAP
+                .with(|cell| *cell.borrow_mut() = super::build_utf16_to_utf8_map(source));
             let js_string = js_sys::JsString::from(source);
             // Note: web-tree-sitter-sg doesn't support incremental parsing the same way
             self.0
@@ -213,17 +235,17 @@ mod wasm {
 
         /// Get the byte range of this node
         pub fn byte_range(&self) -> Range<usize> {
-            self.0.start_index() as usize..self.0.end_index() as usize
+            utf16_to_utf8(self.0.start_index() as usize)..utf16_to_utf8(self.0.end_index() as usize)
         }
 
         /// Get the start byte offset
         pub fn start_byte(&self) -> usize {
-            self.0.start_index() as usize
+            utf16_to_utf8(self.0.start_index() as usize)
         }
 
         /// Get the end byte offset
         pub fn end_byte(&self) -> usize {
-            self.0.end_index() as usize
+            utf16_to_utf8(self.0.end_index() as usize)
         }
 
         /// Get the start position (line, column)
@@ -343,6 +365,32 @@ mod wasm {
 }
 
 // ============================================================================
+// UTF-16 → UTF-8 offset mapping (shared helper, testable under native)
+// ============================================================================
+
+/// Build a lookup table from UTF-16 code unit index → UTF-8 byte offset.
+///
+/// web-tree-sitter returns UTF-16 code unit indices (JavaScript string positions)
+/// rather than UTF-8 byte offsets. This map allows transparent conversion so that
+/// `Node::byte_range()` / `start_byte()` / `end_byte()` return correct UTF-8 offsets
+/// for slicing Rust `&str`.
+///
+/// Used by the WASM build at runtime; also tested under native.
+#[allow(dead_code)] // used by wasm module + tests; not called in native production code
+fn build_utf16_to_utf8_map(source: &str) -> Vec<usize> {
+    let mut map = Vec::with_capacity(source.len() + 1);
+    for (byte_offset, ch) in source.char_indices() {
+        map.push(byte_offset);
+        if ch.len_utf16() > 1 {
+            // Surrogate pair: 2nd UTF-16 code unit maps to the same byte offset
+            map.push(byte_offset);
+        }
+    }
+    map.push(source.len()); // sentinel for end positions
+    map
+}
+
+// ============================================================================
 // Re-exports based on feature
 // ============================================================================
 
@@ -374,5 +422,63 @@ mod tests {
 
         assert!(!tree.root_node().has_error(), "Parse tree has errors");
         assert_eq!(tree.root_node().kind(), "ROOT");
+    }
+
+    #[test]
+    fn test_utf16_map_empty_string() {
+        let map = super::build_utf16_to_utf8_map("");
+        // Only the sentinel entry
+        assert_eq!(map, vec![0]);
+    }
+
+    #[test]
+    fn test_utf16_map_ascii_identity() {
+        let map = super::build_utf16_to_utf8_map("abc");
+        // UTF-16 indices 0,1,2 → byte offsets 0,1,2, plus sentinel 3
+        assert_eq!(map, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_utf16_map_multibyte_utf8() {
+        // Em-dash U+2014: 3 UTF-8 bytes (E2 80 94), 1 UTF-16 code unit
+        let source = "a\u{2014}b";
+        assert_eq!(source.len(), 5); // 1 + 3 + 1
+        let map = super::build_utf16_to_utf8_map(source);
+        // UTF-16 idx 0 → byte 0 ('a')
+        // UTF-16 idx 1 → byte 1 ('—', 1 code unit)
+        // UTF-16 idx 2 → byte 4 ('b')
+        // sentinel    → byte 5
+        assert_eq!(map, vec![0, 1, 4, 5]);
+    }
+
+    #[test]
+    fn test_utf16_map_surrogate_pair() {
+        // U+1F600 (😀): 4 UTF-8 bytes, 2 UTF-16 code units (surrogate pair)
+        let source = "a\u{1F600}b";
+        assert_eq!(source.len(), 6); // 1 + 4 + 1
+        let map = super::build_utf16_to_utf8_map(source);
+        // UTF-16 idx 0 → byte 0 ('a')
+        // UTF-16 idx 1 → byte 1 (high surrogate of 😀)
+        // UTF-16 idx 2 → byte 1 (low surrogate of 😀, same byte offset)
+        // UTF-16 idx 3 → byte 5 ('b')
+        // sentinel    → byte 6
+        assert_eq!(map, vec![0, 1, 1, 5, 6]);
+    }
+
+    #[test]
+    fn test_utf16_map_mixed_content() {
+        // WAT-like content with non-ASCII: ;; comment — note
+        let source = ";; \u{2014} x";
+        // bytes: ';' ';' ' ' E2 80 94 ' ' 'x' = 8 bytes
+        assert_eq!(source.len(), 8);
+        let map = super::build_utf16_to_utf8_map(source);
+        // UTF-16 idx 0 → byte 0 (';')
+        // UTF-16 idx 1 → byte 1 (';')
+        // UTF-16 idx 2 → byte 2 (' ')
+        // UTF-16 idx 3 → byte 3 ('—', 1 code unit)
+        // UTF-16 idx 4 → byte 6 (' ')
+        // UTF-16 idx 5 → byte 7 ('x')
+        // sentinel    → byte 8
+        assert_eq!(map, vec![0, 1, 2, 3, 6, 7, 8]);
     }
 }
