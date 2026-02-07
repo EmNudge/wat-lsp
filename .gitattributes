@@ -2,7 +2,7 @@
 * text=auto
 
 # Ensure Unix line endings for documentation files that are parsed by build.rs
-docs/instructions.md text eol=lf
+packages/docs/instructions.md text eol=lf
 
 # Ensure Unix line endings for source files
 *.rs text eol=lf

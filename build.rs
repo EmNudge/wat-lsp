@@ -5,7 +5,7 @@ use std::path::Path;
 
 fn main() {
     // Instruction documentation generation
-    println!("cargo:rerun-if-changed=docs/instructions.md");
+    println!("cargo:rerun-if-changed=packages/docs/instructions.md");
     // Annotation documentation generation
     println!("cargo:rerun-if-changed=docs/annotations.md");
 
@@ -13,8 +13,8 @@ fn main() {
 
     // Generate instruction docs
     let dest_path = Path::new(&out_dir).join("instruction_docs.rs");
-    let docs_content =
-        fs::read_to_string("docs/instructions.md").expect("Failed to read docs/instructions.md");
+    let docs_content = fs::read_to_string("packages/docs/instructions.md")
+        .expect("Failed to read packages/docs/instructions.md");
     let docs = parse_docs(&docs_content);
     let generated_code = generate_rust_code(&docs, "INSTRUCTION_DOCS");
     fs::write(&dest_path, generated_code).expect("Failed to write generated code");

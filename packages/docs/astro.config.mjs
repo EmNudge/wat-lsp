@@ -33,7 +33,7 @@ export default defineConfig({
       plugins: [starlightThemeFlexoki()],
       title: 'WAT Docs',
       customCss: ['./src/styles/custom.css'],
-      social: [{ icon: 'github', label: 'Watlings', href: 'https://github.com/EmNudge/watlings' }],
+      social: [{ icon: 'github', label: 'WAT-lsp', href: 'https://github.com/EmNudge/wat-lsp' }],
       components: {
         MarkdownContent: './src/components/CustomMarkdownContent.astro',
         SiteTitle: './src/components/SiteTitle.astro',
@@ -159,6 +159,10 @@ export default defineConfig({
             { label: 'SIMD (v128)', slug: 'instructions/simd' },
             { label: 'Atomics', slug: 'instructions/atomic' },
           ],
+        },
+        {
+          label: 'Playground',
+          link: '/playground',
         },
       ],
     }),
