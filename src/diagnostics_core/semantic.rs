@@ -158,8 +158,10 @@ pub fn track_stack_in_instr_list(
                 }
             }
             "instr_call" => {
-                // Folded call: (call $fn args...) - consume stack operands and produce results
-                process_folded_expr(
+                // call_indirect/return_call_indirect with trailing instr child.
+                // Handles grammar ambiguity where tree-sitter swallows the next
+                // instruction into this node (issue #132).
+                process_instr_call_node(
                     &child,
                     source,
                     symbols,
@@ -282,8 +284,8 @@ fn process_instr_node(
                 }
             }
             "instr_call" => {
-                // Folded call - consume stack operands and produce results
-                process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
+                // call_indirect/return_call_indirect with trailing instr child (issue #132)
+                process_instr_call_node(&child, source, symbols, arity_map, stack, diagnostics);
             }
             "instr_list_call" => {
                 // Linear call_indirect/return_call_indirect
@@ -381,6 +383,36 @@ fn process_call_indirect_node(
     // Produce result types
     let result_types = get_call_indirect_result_types(node, symbols, source);
     stack.produce(result_types);
+}
+
+/// Process an instr_call node (call_indirect/return_call_indirect with trailing instr).
+/// When tree-sitter parses a linear call_indirect followed by another instruction,
+/// it may produce a single instr_call node that swallows the trailing instruction
+/// (grammar ambiguity, see issue #132). We handle this by processing the call_indirect
+/// effects first, then recursively processing the trailing instr child.
+fn process_instr_call_node(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    arity_map: &HashMap<&'static str, InstructionArity>,
+    stack: &mut StackState,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Process the call_indirect/return_call_indirect stack effects
+    process_call_indirect_node(node, source, symbols, stack, diagnostics);
+
+    // Find and process the trailing instr child (the swallowed instruction)
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "instr" {
+            process_instr_node(&child, source, symbols, arity_map, stack, diagnostics);
+        }
+    }
 }
 
 /// Process an instruction: consume operands, check for underflow, produce results

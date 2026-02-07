@@ -3859,4 +3859,38 @@ mod tests {
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    #[test]
+    fn test_call_indirect_chained_linear() {
+        // Issue #132: linear call_indirect followed by another instruction should not
+        // produce false type-mismatch diagnostics. The grammar may parse the pair as
+        // a single instr_call node (swallowing the trailing instruction).
+        let document = r#"(module
+  (type $unary (func (param i32) (result i32)))
+  (table 2 funcref)
+  (elem (i32.const 0) func $double $double)
+
+  (func $double (param $x i32) (result i32)
+    (i32.mul (local.get $x) (i32.const 2)))
+
+  (func (export "chain") (param $x i32) (result i32)
+    local.get $x
+    i32.const 0
+    call_indirect (type $unary)
+    i32.const 1
+    call_indirect (type $unary))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Chained linear call_indirect should have no errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }
