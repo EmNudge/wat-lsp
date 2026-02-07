@@ -168,6 +168,10 @@ pub fn track_stack_in_instr_list(
                     &mut diagnostics,
                 );
             }
+            "instr_list_call" => {
+                // Linear call_indirect/return_call_indirect - consume args + table index, produce results
+                process_call_indirect_node(&child, source, symbols, &mut stack, &mut diagnostics);
+            }
             _ => {
                 // Other node types (comments, etc.) - ignore
             }
@@ -281,6 +285,10 @@ fn process_instr_node(
                 // Folded call - consume stack operands and produce results
                 process_folded_expr(&child, source, symbols, arity_map, stack, diagnostics);
             }
+            "instr_list_call" => {
+                // Linear call_indirect/return_call_indirect
+                process_call_indirect_node(&child, source, symbols, stack, diagnostics);
+            }
             _ => {}
         }
     }
@@ -340,6 +348,39 @@ pub fn get_instruction_name(instr_node: &Node, source: &str) -> Option<String> {
     // Fallback: get the text of the first token
     let text = &source[instr_node.byte_range()];
     text.split_whitespace().next().map(|s| s.to_string())
+}
+
+/// Process a linear call_indirect/return_call_indirect node (instr_list_call)
+/// Consumes N params + 1 table index from the stack and produces result types
+fn process_call_indirect_node(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    stack: &mut StackState,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Determine instruction name from the first token
+    let text = &source[node.byte_range()];
+    let instr_name = text.split_whitespace().next().unwrap_or("call_indirect");
+
+    if is_terminating_instruction(instr_name) {
+        stack.mark_uncertain();
+        return;
+    }
+
+    // Get operand count: N params + 1 table index
+    let operand_count = get_dynamic_operand_count(node, instr_name, symbols, source);
+    if operand_count > 0 {
+        if let Err(available) = stack.consume(operand_count) {
+            let diagnostic =
+                create_stack_underflow_diagnostic(node, instr_name, operand_count, available);
+            diagnostics.push(diagnostic);
+        }
+    }
+
+    // Produce result types
+    let result_types = get_call_indirect_result_types(node, symbols, source);
+    stack.produce(result_types);
 }
 
 /// Process an instruction: consume operands, check for underflow, produce results
@@ -425,6 +466,23 @@ pub fn get_dynamic_operand_count(
                 }
             }
             1 // At least the funcref
+        }
+        "call_indirect" | "return_call_indirect" => {
+            // Get type index and look up parameter count + 1 for table index
+            if let Some(type_ref) = get_index_from_node(node, source) {
+                if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+                    if let TypeKind::Func { params, .. } = &type_def.kind {
+                        return params.len() + 1; // params + table index
+                    }
+                } else if let Ok(idx) = type_ref.parse::<usize>() {
+                    if let Some(type_def) = symbols.get_type_by_index(idx) {
+                        if let TypeKind::Func { params, .. } = &type_def.kind {
+                            return params.len() + 1;
+                        }
+                    }
+                }
+            }
+            1 // At least the table index
         }
         "struct.new" => {
             // Get type and look up field count
