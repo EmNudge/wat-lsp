@@ -13,6 +13,7 @@
     "test:headed": "playwright test --headed",
     "test:wat": "vitest run",
     "lint": "oxlint --deny-warnings",
+    "lint:instructions": "node scripts/lint-instructions.mjs",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --check .",
     "format:fix": "oxfmt .",
