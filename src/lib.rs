@@ -74,3 +74,6 @@ pub mod native;
 // WASM entry point (only when native is not enabled, as they have incompatible tree-sitter APIs)
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 pub mod wasm;
+
+// Shared test utilities (available for benchmarks and integration tests)
+pub mod test_utils;

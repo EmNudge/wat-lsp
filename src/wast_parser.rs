@@ -178,30 +178,21 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                 memory_index += 1;
             }
             wast::core::ModuleField::Type(type_def) => {
-                let (kind, supertype, is_final) = extract_type_def_info(&type_def.def);
                 symbols.add_type(TypeDef {
                     name: type_def.id.map(|id| format!("${}", id.name())),
                     index: type_index,
-                    kind,
-                    supertype,
-                    is_final,
-                    rec_group_id: None,
+                    kind: extract_type_def_info(&type_def.def),
                     line: span_to_line(type_def.span, source),
                     range: type_def.id.map(|id| id_to_range(id, source)),
                 });
                 type_index += 1;
             }
             wast::core::ModuleField::Rec(rec_group) => {
-                let rec_id = Some(type_index);
                 for rec_type in rec_group.types.iter() {
-                    let (kind, supertype, is_final) = extract_type_def_info(&rec_type.def);
                     symbols.add_type(TypeDef {
                         name: rec_type.id.map(|id| format!("${}", id.name())),
                         index: type_index,
-                        kind,
-                        supertype,
-                        is_final,
-                        rec_group_id: rec_id,
+                        kind: extract_type_def_info(&rec_type.def),
                         line: span_to_line(rec_type.span, source),
                         range: rec_type.id.map(|id| id_to_range(id, source)),
                     });
@@ -323,7 +314,6 @@ fn extract_func_locals(func: &wast::core::Func, source: &str) -> Vec<Variable> {
                 name,
                 var_type: extract_value_type(&local.ty),
                 is_mutable: true,
-                initial_value: None,
                 index,
                 range,
             });
@@ -341,19 +331,9 @@ fn extract_value_type(val_type: &wast::core::ValType) -> ValueType {
 }
 
 /// Extract type definition info from wast TypeDef
-/// Returns (TypeKind, supertype, is_final)
-fn extract_type_def_info(def: &wast::core::TypeDef) -> (TypeKind, Option<u32>, bool) {
-    // Extract supertype index if present
-    let supertype = def.parent.as_ref().and_then(|idx| match idx {
-        wast::token::Index::Num(n, _) => Some(*n),
-        wast::token::Index::Id(_) => None, // Can't resolve named index here
-    });
-
-    // is_final defaults to true if not specified
-    let is_final = def.final_type.unwrap_or(true);
-
-    // Extract type kind from inner kind
-    let kind = match &def.kind {
+/// Extract the TypeKind from a wast type definition.
+fn extract_type_def_info(def: &wast::core::TypeDef) -> TypeKind {
+    match &def.kind {
         wast::core::InnerTypeKind::Func(func_type) => {
             let params: Vec<ValueType> = func_type
                 .params
@@ -392,9 +372,7 @@ fn extract_type_def_info(def: &wast::core::TypeDef) -> (TypeKind, Option<u32>, b
                 results: Vec::new(),
             }
         }
-    };
-
-    (kind, supertype, is_final)
+    }
 }
 
 /// Extract ValueType from wast StorageType

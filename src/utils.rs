@@ -425,12 +425,9 @@ pub fn determine_context_from_line(line: &str) -> InstructionContext {
 }
 
 /// Find the function that contains the given position.
-/// Checks that the position is within the function's line range (start to end).
+/// Delegates to SymbolTable's binary search for O(log n) performance.
 pub fn find_containing_function(symbols: &SymbolTable, position: Position) -> Option<&Function> {
-    symbols
-        .functions
-        .iter()
-        .find(|func| position.line >= func.line && position.line <= func.end_line)
+    symbols.find_function_containing_line(position.line)
 }
 
 /// Get the line at the specified position in a document.
@@ -710,24 +707,25 @@ pub fn determine_context_at_node_with_fallback(
 
 /// Format a function signature for display (used by hover and signature help)
 pub fn format_function_signature(func: &Function) -> String {
+    use std::fmt::Write;
     let mut sig = String::from("(func");
 
     if let Some(ref name) = func.name {
-        sig.push_str(&format!(" {}", name));
+        write!(sig, " {}", name).unwrap();
     }
 
     for param in &func.parameters {
         sig.push_str(" (param");
         if let Some(ref name) = param.name {
-            sig.push_str(&format!(" {}", name));
+            write!(sig, " {}", name).unwrap();
         }
-        sig.push_str(&format!(" {})", param.param_type));
+        write!(sig, " {})", param.param_type).unwrap();
     }
 
     if !func.results.is_empty() {
         sig.push_str(" (result");
         for result in &func.results {
-            sig.push_str(&format!(" {}", result));
+            write!(sig, " {}", result).unwrap();
         }
         sig.push(')');
     }

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::Position;
 use wat_lsp_rust::core::types::Position as CorePosition;
+use wat_lsp_rust::test_utils::generate_large_wat;
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
 use wat_lsp_rust::{completion, definition, diagnostics, hover, parser, references};
 
@@ -43,15 +44,13 @@ struct Args {
 
 /// Timing results for a single benchmark run
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TimingResult {
     name: String,
     file: String,
     lines: usize,
-    #[allow(dead_code)] // Used in verbose JSON output
     bytes: usize,
-    #[allow(dead_code)] // Used for statistics
     iterations: usize,
-    #[allow(dead_code)] // Used for total timing
     total_time: Duration,
     min_time: Duration,
     max_time: Duration,
@@ -64,14 +63,6 @@ impl TimingResult {
             return 0.0;
         }
         self.lines as f64 / (self.avg_time.as_micros() as f64 / 1000.0)
-    }
-
-    #[allow(dead_code)] // Available for future detailed output
-    fn throughput_bytes_per_ms(&self) -> f64 {
-        if self.avg_time.as_micros() == 0 {
-            return 0.0;
-        }
-        self.bytes as f64 / (self.avg_time.as_micros() as f64 / 1000.0)
     }
 }
 
@@ -738,60 +729,4 @@ fn run_large_file_benchmarks(
             add_to_summary(summaries, "references (large)", result);
         }
     }
-}
-
-/// Generate a synthetic WAT file with the specified approximate line count
-fn generate_large_wat(target_lines: usize) -> String {
-    let mut wat = String::from("(module\n");
-
-    // Calculate how many functions we need (each function is ~15 lines)
-    let num_functions = target_lines / 15;
-    let num_globals = 10.min(num_functions / 10);
-    let num_types = 5.min(num_functions / 20);
-
-    // Add globals
-    for i in 0..num_globals {
-        wat.push_str(&format!(
-            "  (global $global{} (mut i32) (i32.const {}))\n",
-            i, i
-        ));
-    }
-
-    // Add types
-    for i in 0..num_types {
-        wat.push_str(&format!(
-            "  (type $type{} (func (param i32 i32) (result i32)))\n",
-            i
-        ));
-    }
-
-    // Add functions
-    for i in 0..num_functions {
-        wat.push_str(&format!(
-            "  (func $func{} (param $x i32) (param $y i32) (result i32)\n",
-            i
-        ));
-        wat.push_str("    (local $temp i32)\n");
-        wat.push_str("    (local $result i32)\n");
-        wat.push_str("    ;; Initialize local\n");
-        wat.push_str("    (local.set $temp (i32.const 0))\n");
-        wat.push_str("    ;; Calculate sum\n");
-        wat.push_str("    (local.set $temp\n");
-        wat.push_str("      (i32.add (local.get $x) (local.get $y)))\n");
-        wat.push_str("    ;; Double the result\n");
-        wat.push_str("    (local.set $result\n");
-        wat.push_str("      (i32.mul (local.get $temp) (i32.const 2)))\n");
-        if num_globals > 0 {
-            wat.push_str("    ;; Add global value\n");
-            wat.push_str("    (local.set $result\n");
-            wat.push_str(&format!(
-                "      (i32.add (local.get $result) (global.get $global{})))\n",
-                i % num_globals
-            ));
-        }
-        wat.push_str("    (local.get $result))\n");
-    }
-
-    wat.push_str(")\n");
-    wat
 }

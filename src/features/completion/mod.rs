@@ -3,8 +3,8 @@ use crate::symbols::*;
 use crate::utils::{
     determine_context_from_line, find_containing_function, get_line_at_position, InstructionContext,
 };
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 #[cfg(all(test, feature = "native"))]
 mod tests;
@@ -571,8 +571,8 @@ fn make_completion(label: &str, detail: &str) -> CompletionItem {
         .with_detail(detail)
 }
 
-static NUMBER_CONST_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap());
+static NUMBER_CONST_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap());
 
 /// Get completions for annotation names
 fn get_annotation_completions() -> Vec<CompletionItem> {
