@@ -61,6 +61,41 @@ mod tests {
     }
 
     #[test]
+    fn test_ref_null_func_and_ref_is_null() {
+        let source = r#"(module
+  (func $test (result i32)
+    ref.null func
+    ref.is_null
+  )
+)"#;
+        let diags = validate_wat(source);
+        assert!(diags.is_empty(), "Expected no errors, got: {:?}", diags);
+    }
+
+    #[test]
+    fn test_ref_func() {
+        let source = r#"(module
+  (func $target)
+  (func $test (result funcref)
+    ref.func $target
+  )
+)"#;
+        let diags = validate_wat(source);
+        assert!(diags.is_empty(), "Expected no errors, got: {:?}", diags);
+    }
+
+    #[test]
+    fn test_elem_with_ref_expressions() {
+        let source = r#"(module
+  (func $f1)
+  (table 2 funcref)
+  (elem (i32.const 0) funcref (ref.func $f1) (ref.null func))
+)"#;
+        let diags = validate_wat(source);
+        assert!(diags.is_empty(), "Expected no errors, got: {:?}", diags);
+    }
+
+    #[test]
     fn test_try_table_exception_handling() {
         let source = r#"
 (module

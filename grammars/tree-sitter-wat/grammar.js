@@ -332,7 +332,7 @@ module.exports = grammar({
 
     _instruction_ref: $ =>
       choice(
-        seq("ref.null", choice($.ref_kind, $.index)),
+        seq("ref.null", choice($.ref_kind, $.ref_type, $.index)),
         seq("ref.func", $.index),
         seq("ref.extern", $.nat),
         $.op_func_bind,
@@ -897,7 +897,7 @@ module.exports = grammar({
     offset_value: $ => seq("offset", imm("="), $.align_offset_value),
 
     // proposal: reference-types
-    ref_kind: $ => /extern|func|struct|array|i31|any|eq|null|none|noextern|nofunc|exn|noexn/,
+    ref_kind: $ => choice("extern", "func", "struct", "array", "i31", "any", "eq", "null", "none", "noextern", "nofunc", "exn", "noexn"),
 
     // Helper for instructions that take either a heap type or (ref ...) form
     _heap_type_or_ref: $ => choice($.ref_kind, $.index, $.ref_type_ref),

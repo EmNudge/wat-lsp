@@ -141,6 +141,95 @@ mod tests {
     }
 
     #[test]
+    fn test_ref_null_func_and_ref_is_null() {
+        let document = r#"(module
+  (func $test (result i32)
+    ref.null func
+    ref.is_null
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        assert!(
+            diagnostics.is_empty(),
+            "ref.null func + ref.is_null should not produce syntax errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_ref_null_funcref_lenient() {
+        let document = r#"(module
+  (func $test (result i32)
+    ref.null funcref
+    ref.is_null
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        assert!(
+            diagnostics.is_empty(),
+            "ref.null funcref should be accepted leniently, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_ref_func() {
+        let document = r#"(module
+  (func $target)
+  (func $test (result funcref)
+    ref.func $target
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        assert!(
+            diagnostics.is_empty(),
+            "ref.func $name should not produce syntax errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_ref_is_null_standalone() {
+        let document = r#"(module
+  (func $test (param funcref) (result i32)
+    local.get 0
+    ref.is_null
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        assert!(
+            diagnostics.is_empty(),
+            "ref.is_null should not produce syntax errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_elem_with_ref_func_and_ref_null() {
+        let document = r#"(module
+  (func $f1)
+  (table 2 funcref)
+  (elem (i32.const 0) funcref (ref.func $f1) (ref.null func))
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        assert!(
+            diagnostics.is_empty(),
+            "elem with ref.func and ref.null func should not produce syntax errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_store8_load8_valid() {
         // These are valid WASM instructions and should not produce errors
         let document = r#"(module
