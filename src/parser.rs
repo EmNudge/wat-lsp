@@ -508,7 +508,9 @@ fn extract_functions_with_offset(
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
                         if field_child.kind() == "module_field_func" {
-                            if let Some(func) = extract_function(&field_child, source, func_index) {
+                            if let Some(func) =
+                                extract_function(&field_child, source, func_index, symbol_table)
+                            {
                                 // Skip duplicates from error recovery
                                 let is_duplicate = if let Some(ref name) = func.name {
                                     seen_names.contains(name)
@@ -536,7 +538,9 @@ fn extract_functions_with_offset(
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
                 if field_child.kind() == "module_field_func" {
-                    if let Some(func) = extract_function(&field_child, source, func_index) {
+                    if let Some(func) =
+                        extract_function(&field_child, source, func_index, symbol_table)
+                    {
                         let is_duplicate = if let Some(ref name) = func.name {
                             seen_names.contains(name)
                         } else {
@@ -670,7 +674,12 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
 }
 
 /// Extract a single function from a func node
-fn extract_function(func_node: &Node, source: &str, index: usize) -> Option<Function> {
+fn extract_function(
+    func_node: &Node,
+    source: &str,
+    index: usize,
+    symbol_table: &SymbolTable,
+) -> Option<Function> {
     let range = func_node.range();
 
     // Try to find function name and its range
@@ -684,10 +693,21 @@ fn extract_function(func_node: &Node, source: &str, index: usize) -> Option<Func
     };
 
     // Extract parameters, results, locals, and blocks
-    let parameters = extract_parameters(func_node, source);
-    let results = extract_results(func_node, source);
+    let mut parameters = extract_parameters(func_node, source);
+    let mut results = extract_results(func_node, source);
     let locals = extract_locals(func_node, source);
     let blocks = extract_blocks(func_node, source);
+
+    // If results (and/or params) are empty but there's a (type $t) reference, resolve from the type
+    if results.is_empty() {
+        if let Some((type_params, type_results)) = resolve_type_use(func_node, source, symbol_table)
+        {
+            results = type_results;
+            if parameters.is_empty() {
+                parameters = type_params;
+            }
+        }
+    }
 
     // Extract doc comment from preceding comments
     let doc_comment = extract_doc_comment(func_node, source);
@@ -785,6 +805,55 @@ fn extract_results(func_node: &Node, source: &str) -> Vec<ValueType> {
     }
 
     results
+}
+
+/// Resolve params and results from a `(type $t)` reference on a function node.
+/// Returns `Some((params, results))` if a type_use was found and resolved.
+fn resolve_type_use(
+    func_node: &Node,
+    source: &str,
+    symbol_table: &SymbolTable,
+) -> Option<(Vec<Parameter>, Vec<ValueType>)> {
+    let mut cursor = func_node.walk();
+    for child in func_node.children(&mut cursor) {
+        if child.kind() == "type_use" {
+            let mut type_cursor = child.walk();
+            for type_child in child.children(&mut type_cursor) {
+                #[cfg(feature = "native")]
+                let kind = type_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let kind = type_child.kind();
+
+                if kind == "index" || kind == "identifier" {
+                    let type_ref = source[type_child.byte_range()].trim();
+                    let type_def = if let Some(td) = symbol_table.get_type_by_name(type_ref) {
+                        Some(td)
+                    } else if let Ok(idx) = type_ref.parse::<usize>() {
+                        symbol_table.get_type_by_index(idx)
+                    } else {
+                        None
+                    };
+
+                    if let Some(td) = type_def {
+                        if let TypeKind::Func { params, results } = &td.kind {
+                            let parameters = params
+                                .iter()
+                                .enumerate()
+                                .map(|(i, vt)| Parameter {
+                                    name: None,
+                                    param_type: vt.clone(),
+                                    index: i,
+                                    range: None,
+                                })
+                                .collect();
+                            return Some((parameters, results.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Extract local variables from a function node
