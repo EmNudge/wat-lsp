@@ -86,19 +86,6 @@ fn unified_tree_walk(
             .map(|f| f.results.as_slice())
             .unwrap_or(&[]);
 
-        // Check if function uses (type $ref) syntax - if so, the symbol table might not
-        // have resolved the return types from the type definition
-        let mut cursor = node.walk();
-        let has_type_use = node.children(&mut cursor).any(|c| c.kind() == "type_use");
-
-        // For return type validation: use Some(results) when we know them, None otherwise
-        let expected_for_validation = if has_type_use && expected_results.is_empty() {
-            // Function uses type reference but symbol table didn't resolve it - skip validation
-            None
-        } else {
-            Some(expected_results)
-        };
-
         let mut cursor = node.walk();
         let mut found_instr_list = false;
         for child in node.children(&mut cursor) {
@@ -107,7 +94,7 @@ fn unified_tree_walk(
                     &child,
                     source,
                     symbols,
-                    expected_for_validation,
+                    Some(expected_results),
                     diagnostics,
                 );
                 found_instr_list = true;
@@ -116,8 +103,7 @@ fn unified_tree_walk(
         }
 
         // If no instr_list but function expects return values, report error
-        // Skip this check if function uses type_use (we don't know the expected results)
-        if !found_instr_list && !expected_results.is_empty() && !has_type_use {
+        if !found_instr_list && !expected_results.is_empty() {
             let range = node_to_lsp_range(&node);
             diagnostics.push(Diagnostic {
                 range,
