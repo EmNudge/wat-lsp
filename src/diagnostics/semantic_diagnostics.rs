@@ -2182,6 +2182,75 @@ mod tests {
         assert!(operand_errors[0].message.contains("at most 2 operands"));
     }
 
+    #[test]
+    fn test_call_ref_type_use_syntax() {
+        // Issue #124: call_ref (type $t) syntax should be recognized
+        let document = r#"(module
+  (type $t (func (param i32) (result i32)))
+  (func $inc (type $t) (param $x i32) (result i32)
+    local.get $x
+    i32.const 1
+    i32.add)
+  (table 1 funcref)
+  (elem (i32.const 0) $inc)
+
+  (func (export "dispatch") (param $i i32) (param $x i32) (result i32)
+    local.get $i
+    ref.func $inc
+    drop
+    local.get $x
+    call_ref (type $t))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("call_ref") || d.message.contains("type"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            0,
+            "call_ref (type $t) should produce no errors, got: {:?}",
+            errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_return_call_ref_type_use_syntax() {
+        // return_call_ref (type $t) should also be recognized
+        let document = r#"(module
+  (type $t (func (param i32) (result i32)))
+  (func $inc (type $t) (param $x i32) (result i32)
+    local.get $x
+    i32.const 1
+    i32.add)
+
+  (func $dispatch (type $t) (param $x i32) (result i32)
+    local.get $x
+    return_call_ref (type $t))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("return_call_ref") || d.message.contains("Syntax error"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            0,
+            "return_call_ref (type $t) should produce no errors, got: {:?}",
+            errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     // Atomic operations validation tests
 
     #[test]
