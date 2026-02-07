@@ -6,6 +6,7 @@ const navLinks = [
   { label: 'Intro', href: '/intro/what-is-wat/' },
   { label: 'Guides', href: '/types/' },
   { label: 'Reference', href: '/instructions/i32/' },
+  { label: 'Playground', href: '/playground/' },
 ];
 
 function isActive(href: string) {
@@ -13,8 +14,16 @@ function isActive(href: string) {
   if (href.startsWith('/instructions/')) {
     return pathname.startsWith('/instructions/');
   }
-  // Guides: everything else that's not home or intro or instructions
-  return pathname !== '/' && !pathname.startsWith('/intro/') && !pathname.startsWith('/instructions/');
+  if (href.startsWith('/playground/')) {
+    return pathname.startsWith('/playground/');
+  }
+  // Guides: everything else that's not home or intro or instructions or playground
+  return (
+    pathname !== '/' &&
+    !pathname.startsWith('/intro/') &&
+    !pathname.startsWith('/instructions/') &&
+    !pathname.startsWith('/playground/')
+  );
 }
 ---
 
