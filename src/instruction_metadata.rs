@@ -599,6 +599,106 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map
 }
 
+/// Infer the stack arity of a SIMD instruction from its name pattern.
+/// Returns `Some((consumes, produces))` for recognized SIMD patterns, or `None`.
+///
+/// This covers v128.* operations and lane-typed instructions (i8x16, i16x8, i32x4,
+/// i64x2, f32x4, f64x2) without enumerating every individual opcode.
+pub fn infer_simd_instruction_arity(name: &str) -> Option<(usize, usize)> {
+    // ── v128.* prefix operations ──────────────────────────────────────
+    if name.starts_with("v128.") {
+        return match name {
+            "v128.const" => Some((0, 1)),
+            "v128.not" | "v128.any_true" => Some((1, 1)),
+            "v128.and" | "v128.or" | "v128.xor" | "v128.andnot" => Some((2, 1)),
+            "v128.bitselect" => Some((3, 1)),
+            n if n.starts_with("v128.load") => {
+                if n.contains("_lane") {
+                    Some((2, 1)) // address + v128 → v128
+                } else {
+                    Some((1, 1)) // address → v128  (includes splat/zero/extend variants)
+                }
+            }
+            _ if name.starts_with("v128.store") => Some((2, 0)), // address + v128 → ∅
+            _ => None,
+        };
+    }
+
+    // ── Lane-typed operations (i8x16.*, i16x8.*, …, f64x2.*) ─────────
+    let is_simd_lane = name.starts_with("i8x16.")
+        || name.starts_with("i16x8.")
+        || name.starts_with("i32x4.")
+        || name.starts_with("i64x2.")
+        || name.starts_with("f32x4.")
+        || name.starts_with("f64x2.");
+
+    if !is_simd_lane {
+        return None;
+    }
+
+    // Splat: scalar → v128
+    if name.ends_with(".splat") {
+        return Some((1, 1));
+    }
+
+    // Extract lane: v128 (+ imm) → scalar
+    if name.contains(".extract_lane") {
+        return Some((1, 1));
+    }
+
+    // Replace lane: v128 + scalar (+ imm) → v128
+    if name.contains(".replace_lane") {
+        return Some((2, 1));
+    }
+
+    // Reductions: v128 → i32
+    if name.ends_with(".all_true") || name.ends_with(".bitmask") {
+        return Some((1, 1));
+    }
+
+    // Relaxed SIMD ternary ops: 3 v128 → v128
+    if name.contains(".relaxed_madd")
+        || name.contains(".relaxed_nmadd")
+        || name.contains(".relaxed_laneselect")
+        || name.contains(".relaxed_dot_i8x16_i7x16_add")
+    {
+        return Some((3, 1));
+    }
+
+    // Unary ops: 1 v128 → 1 v128
+    let suffix = name.rsplit('.').next().unwrap_or("");
+    let is_unary = matches!(
+        suffix,
+        "neg"
+            | "abs"
+            | "popcnt"
+            | "sqrt"
+            | "ceil"
+            | "floor"
+            | "trunc"
+            | "nearest"
+            | "not"
+            | "trunc_sat_f32x4_s"
+            | "trunc_sat_f32x4_u"
+            | "trunc_sat_f64x2_s"
+            | "trunc_sat_f64x2_u"
+    ) || suffix.starts_with("extend_low")
+        || suffix.starts_with("extend_high")
+        || suffix.starts_with("extadd_pairwise")
+        || suffix.starts_with("promote_low")
+        || suffix.starts_with("demote")
+        || suffix.starts_with("convert");
+
+    if is_unary {
+        return Some((1, 1));
+    }
+
+    // Default for remaining lane ops: binary (2 → 1).
+    // This covers add, sub, mul, min, max, eq, ne, lt, gt, le, ge,
+    // shl, shr, avgr, swizzle, shuffle, narrow, extmul, dot, pmin, pmax, …
+    Some((2, 1))
+}
+
 /// Check if an instruction terminates control flow (makes subsequent code unreachable).
 /// These instructions mark the stack as "uncertain" because code after them is dead.
 /// This is used by both native and WASM builds for consistent stack tracking.
@@ -881,5 +981,135 @@ mod tests {
         assert!(map.contains_key("local.get"));
         assert!(map.contains_key("call"));
         assert!(map.contains_key("i32.const"));
+    }
+
+    #[test]
+    fn test_simd_arity_binary_ops() {
+        // Binary lane ops: 2 v128 → 1 v128
+        for instr in &[
+            "i32x4.add",
+            "i16x8.sub",
+            "f32x4.mul",
+            "i64x2.eq",
+            "i8x16.shuffle",
+            "i32x4.shl",
+            "i16x8.narrow_i32x4_s",
+            "i32x4.extmul_low_i16x8_s",
+            "f32x4.pmin",
+            "i8x16.swizzle",
+        ] {
+            let arity = infer_simd_instruction_arity(instr);
+            assert_eq!(arity, Some((2, 1)), "expected binary arity for {instr}");
+        }
+    }
+
+    #[test]
+    fn test_simd_arity_unary_ops() {
+        // Unary lane ops: 1 v128 → 1 v128
+        for instr in &[
+            "i32x4.neg",
+            "f32x4.abs",
+            "f64x2.sqrt",
+            "f32x4.ceil",
+            "i8x16.popcnt",
+            "i32x4.extend_low_i16x8_s",
+            "i16x8.extadd_pairwise_i8x16_s",
+            "f64x2.promote_low_f32x4",
+            "f32x4.demote_f64x2_zero",
+            "i32x4.trunc_sat_f32x4_s",
+            "f32x4.convert_i32x4_s",
+        ] {
+            let arity = infer_simd_instruction_arity(instr);
+            assert_eq!(arity, Some((1, 1)), "expected unary arity for {instr}");
+        }
+    }
+
+    #[test]
+    fn test_simd_arity_special_ops() {
+        // Splat: 1 scalar → 1 v128
+        assert_eq!(infer_simd_instruction_arity("i32x4.splat"), Some((1, 1)));
+        assert_eq!(infer_simd_instruction_arity("f64x2.splat"), Some((1, 1)));
+
+        // Extract lane: 1 v128 → 1 scalar
+        assert_eq!(
+            infer_simd_instruction_arity("i32x4.extract_lane"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            infer_simd_instruction_arity("i8x16.extract_lane_s"),
+            Some((1, 1))
+        );
+
+        // Replace lane: v128 + scalar → v128
+        assert_eq!(
+            infer_simd_instruction_arity("i32x4.replace_lane"),
+            Some((2, 1))
+        );
+
+        // Reductions: v128 → i32
+        assert_eq!(infer_simd_instruction_arity("i32x4.all_true"), Some((1, 1)));
+        assert_eq!(infer_simd_instruction_arity("i16x8.bitmask"), Some((1, 1)));
+    }
+
+    #[test]
+    fn test_simd_arity_v128_ops() {
+        // v128 bitwise
+        assert_eq!(infer_simd_instruction_arity("v128.and"), Some((2, 1)));
+        assert_eq!(infer_simd_instruction_arity("v128.or"), Some((2, 1)));
+        assert_eq!(infer_simd_instruction_arity("v128.not"), Some((1, 1)));
+        assert_eq!(infer_simd_instruction_arity("v128.bitselect"), Some((3, 1)));
+        assert_eq!(infer_simd_instruction_arity("v128.any_true"), Some((1, 1)));
+
+        // v128 const
+        assert_eq!(infer_simd_instruction_arity("v128.const"), Some((0, 1)));
+
+        // v128 memory ops
+        assert_eq!(infer_simd_instruction_arity("v128.load"), Some((1, 1)));
+        assert_eq!(
+            infer_simd_instruction_arity("v128.load32_splat"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            infer_simd_instruction_arity("v128.load64_zero"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            infer_simd_instruction_arity("v128.load32_lane"),
+            Some((2, 1))
+        );
+        assert_eq!(infer_simd_instruction_arity("v128.store"), Some((2, 0)));
+        assert_eq!(
+            infer_simd_instruction_arity("v128.store32_lane"),
+            Some((2, 0))
+        );
+    }
+
+    #[test]
+    fn test_simd_arity_relaxed_ops() {
+        // Relaxed SIMD ternary ops: 3 → 1
+        assert_eq!(
+            infer_simd_instruction_arity("f32x4.relaxed_madd"),
+            Some((3, 1))
+        );
+        assert_eq!(
+            infer_simd_instruction_arity("f64x2.relaxed_nmadd"),
+            Some((3, 1))
+        );
+        assert_eq!(
+            infer_simd_instruction_arity("i8x16.relaxed_laneselect"),
+            Some((3, 1))
+        );
+        assert_eq!(
+            infer_simd_instruction_arity("i32x4.relaxed_dot_i8x16_i7x16_add_s"),
+            Some((3, 1))
+        );
+    }
+
+    #[test]
+    fn test_simd_arity_non_simd_returns_none() {
+        // Non-SIMD instructions should return None
+        assert_eq!(infer_simd_instruction_arity("i32.add"), None);
+        assert_eq!(infer_simd_instruction_arity("local.get"), None);
+        assert_eq!(infer_simd_instruction_arity("call"), None);
     }
 }

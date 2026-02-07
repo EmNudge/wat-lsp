@@ -1345,7 +1345,9 @@ impl From<CoreDiagnostic> for WasmDiagnostic {
     }
 }
 
-use crate::instruction_metadata::{get_instruction_arity_map, OperandMode};
+use crate::instruction_metadata::{
+    get_instruction_arity_map, infer_simd_instruction_arity, OperandMode,
+};
 use crate::ts_facade::Node;
 use crate::utils::{
     determine_instruction_context_at_node, find_containing_function, InstructionContext, STRUCT_OPS,
@@ -1558,10 +1560,15 @@ fn check_folded_expr_operand_count(
         .filter(|c| c.kind() == "expr")
         .count();
 
-    // Validate operand count using the arity map
+    // Validate operand count using the arity map, with SIMD pattern fallback
     let arity_map = get_instruction_arity_map();
-    if let Some(arity) = arity_map.get(instr_name.as_str()) {
-        match arity.operand_mode {
+    let resolved = if let Some(arity) = arity_map.get(instr_name.as_str()) {
+        Some((arity.operand_mode, true))
+    } else {
+        infer_simd_instruction_arity(&instr_name).map(|(c, _)| (OperandMode::Fixed(c), false))
+    };
+    if let Some((operand_mode, check_dynamic)) = resolved {
+        match operand_mode {
             OperandMode::Fixed(expected) => {
                 if operand_count > expected {
                     // Error: too many operands
@@ -1597,7 +1604,7 @@ fn check_folded_expr_operand_count(
                     }
                 }
             }
-            OperandMode::Dynamic => {
+            OperandMode::Dynamic if check_dynamic => {
                 // Dynamic operand count - check based on instruction type
                 check_dynamic_operands(
                     node,
@@ -1608,6 +1615,7 @@ fn check_folded_expr_operand_count(
                     diagnostics,
                 );
             }
+            _ => {}
         }
     }
 }
