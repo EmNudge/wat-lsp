@@ -42,6 +42,7 @@ fn compile_tree_sitter_grammar() {
     let grammar_path = format!("{}/grammar.js", grammar_dir);
 
     println!("cargo:rerun-if-changed={}", grammar_path);
+    println!("cargo:rerun-if-changed={}/src/scanner.c", grammar_dir);
 
     // Generate the parser from grammar.js using tree-sitter CLI
     // On Windows, npm installs binaries as .cmd files

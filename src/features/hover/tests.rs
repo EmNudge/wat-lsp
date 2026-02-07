@@ -511,3 +511,22 @@ fn test_hover_on_custom_annotation() {
         }
     }
 }
+
+#[test]
+fn test_no_hover_in_nested_block_comment() {
+    let document = "(; outer (; i32.add ;) ;)";
+    let symbols = create_test_symbols();
+    let tree = create_test_tree(document);
+    // Position inside the inner comment, on "i32.add"
+    let position = Position::new(0, 14);
+
+    // Verify we're inside a comment
+    assert!(is_inside_comment(&tree, document, position));
+
+    // Hover should return None for content inside nested comments
+    let hover = provide_hover(document, &symbols, &tree, position.into());
+    assert!(
+        hover.is_none(),
+        "Expected no hover inside nested block comment"
+    );
+}

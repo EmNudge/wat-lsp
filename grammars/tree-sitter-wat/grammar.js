@@ -14,6 +14,8 @@ const imm = rule => token.immediate(rule);
 module.exports = grammar({
   name: "wat",
 
+  externals: $ => [$.comment_block, $.comment_block_annot],
+
   extras: $ => [$.annotation, $.comment_block, $.comment_line, /[\s\uFEFF\u2060\u200B\u00A0]/],
 
   conflicts: $ => [[$.op_let], [$.op_select]],
@@ -68,12 +70,6 @@ module.exports = grammar({
         "end",
         optional($.identifier),
       ),
-
-    comment_block: $ => seq("(;", repeat(choice($.comment_block, $.comment_block_inner)), ";)"),
-
-    comment_block_annot: $ => seq("(;", repeat(choice($.comment_block_annot, $.comment_block_inner)), ";)"),
-
-    comment_block_inner: $ => token(choice(/[^(;]+/, "(", ";")),
 
     comment_line: $ => prec.left(token(seq(";;", /.*/))),
 

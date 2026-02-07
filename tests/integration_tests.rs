@@ -620,3 +620,30 @@ mod import_diagnostics {
         );
     }
 }
+
+#[test]
+fn test_nested_block_comments_ignored() {
+    let wat = r#"(module
+  (; outer comment (; nested comment ;) still outer ;)
+  (func $after (param $x i32) (result i32)
+    (; another (; deeply (; triple ;) nested ;) comment ;)
+    (local.get $x))
+)"#;
+
+    let diagnostics = get_all_diagnostics(wat);
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        .collect();
+
+    if !errors.is_empty() {
+        for diag in &errors {
+            eprintln!("Error: {} at line {}", diag.message, diag.range.start.line);
+        }
+    }
+
+    assert!(
+        errors.is_empty(),
+        "Expected no error diagnostics with nested block comments"
+    );
+}

@@ -94,7 +94,7 @@ fn is_foldable_kind(kind: &str) -> bool {
 
 /// Check if a node is a comment
 fn is_comment_kind(kind: &str) -> bool {
-    kind == "comment" || kind == "block_comment"
+    kind == "comment_block" || kind == "comment_line"
 }
 
 /// Recursively collect foldable nodes from the tree-sitter AST.

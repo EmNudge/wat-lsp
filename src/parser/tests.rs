@@ -612,3 +612,24 @@ fn test_parse_function_comment_with_one_blank_line() {
         .unwrap()
         .contains("one blank line"));
 }
+
+#[test]
+fn test_parse_nested_block_comment() {
+    let wat = r#"(module
+  (; outer (; inner ;) ;)
+  (func $after_comment (result i32)
+    (i32.const 42))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+    assert_eq!(
+        symbols.functions.len(),
+        1,
+        "Function after nested block comment should be parsed"
+    );
+
+    let func = &symbols.functions[0];
+    assert_eq!(func.name, Some("$after_comment".to_string()));
+    assert_eq!(func.results.len(), 1);
+    assert_eq!(func.results[0], ValueType::I32);
+}
