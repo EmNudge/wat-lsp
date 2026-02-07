@@ -3486,4 +3486,64 @@ mod tests {
             type_errors.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    #[test]
+    fn test_simd_i32x4_add_no_false_positive() {
+        // Regression test: SIMD binary ops must consume 2 and produce 1 on the stack.
+        // Previously i32x4.add was unknown to the arity map, so the stack tracker
+        // skipped it, leaving 2 values on the stack and emitting a false type mismatch.
+        let document = r#"(module
+  (func (export "add4") (param $x v128) (param $y v128) (result v128)
+    local.get $x
+    local.get $y
+    i32x4.add)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Valid SIMD i32x4.add should produce no diagnostics, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_simd_various_ops_no_false_positive() {
+        // Broader SIMD coverage: unary, ternary, splat, extract, replace, reduction
+        let document = r#"(module
+  (func $unary (param $a v128) (result v128)
+    local.get $a
+    f32x4.neg)
+
+  (func $splat (param $x i32) (result v128)
+    local.get $x
+    i32x4.splat)
+
+  (func $bitwise (param $a v128) (param $b v128) (result v128)
+    local.get $a
+    local.get $b
+    v128.and)
+
+  (func $not (param $a v128) (result v128)
+    local.get $a
+    v128.not)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Valid SIMD functions should produce no diagnostics, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }

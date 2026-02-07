@@ -1,0 +1,4 @@
+{
+  "description": "Valid SIMD instructions in linear style should produce no diagnostics",
+  "diagnostics": []
+}

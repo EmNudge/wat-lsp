@@ -11,7 +11,8 @@
 
 use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
-    get_instruction_arity_map, is_terminating_instruction, InstructionArity, OperandMode,
+    get_instruction_arity_map, infer_simd_instruction_arity, is_terminating_instruction,
+    InstructionArity, OperandMode,
 };
 use crate::symbols::{SymbolTable, TypeKind, ValueType};
 use crate::utils::node_to_range;
@@ -262,29 +263,34 @@ fn process_instruction(
         return;
     }
 
-    // Look up instruction arity
-    if let Some(arity) = arity_map.get(instr_name) {
-        // Get the number of operands to consume
-        let consumes = match arity.operand_mode {
+    // Look up instruction arity (explicit map, then SIMD pattern fallback)
+    let (consumes, produces) = if let Some(arity) = arity_map.get(instr_name) {
+        let c = match arity.operand_mode {
             OperandMode::Fixed(n) => n,
-            OperandMode::Dynamic => {
-                // For dynamic instructions, look up the actual count
-                get_dynamic_operand_count(node, instr_name, symbols, source)
-            }
+            OperandMode::Dynamic => get_dynamic_operand_count(node, instr_name, symbols, source),
         };
+        (c, arity.produces)
+    } else if let Some((c, p)) = infer_simd_instruction_arity(instr_name) {
+        (c, p)
+    } else {
+        // Unknown instruction - skip (might be a newer instruction we don't know about)
+        return;
+    };
 
-        // Try to consume operands
-        if let Err(available) = stack.consume(consumes) {
-            let diagnostic =
-                create_stack_underflow_diagnostic(node, instr_name, consumes, available);
-            diagnostics.push(diagnostic);
-        }
-
-        // Produce results with actual types
-        let result_types = infer_instruction_result_types(instr_name, node, symbols, source);
-        stack.produce(result_types);
+    // Try to consume operands
+    if let Err(available) = stack.consume(consumes) {
+        let diagnostic = create_stack_underflow_diagnostic(node, instr_name, consumes, available);
+        diagnostics.push(diagnostic);
     }
-    // Unknown instruction - skip (might be a newer instruction we don't know about)
+
+    // Produce results with actual types
+    let result_types = infer_instruction_result_types(instr_name, node, symbols, source);
+    // If type inference returned fewer types than `produces`, pad with Unknown
+    let mut types = result_types;
+    while types.len() < produces {
+        types.push(ValueType::Unknown);
+    }
+    stack.produce(types);
 }
 
 /// Get the operand count for a dynamic instruction
