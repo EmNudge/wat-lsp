@@ -3546,4 +3546,30 @@ mod tests {
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    #[test]
+    fn test_if_return_no_else_linear() {
+        // Linear if without else — return inside if, fallthrough produces value
+        let document = r#"(module
+  (func (param $x i32) (result i32)
+    local.get $x
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+    i32.const 1
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Valid linear if/return/end should have no diagnostics, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }
