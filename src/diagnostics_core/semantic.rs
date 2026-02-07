@@ -105,6 +105,24 @@ pub fn track_stack_in_instr_list(
                         diagnostics.push(diagnostic);
                     }
                 }
+                // Consume block param types from the outer stack (multi-value proposal)
+                let params = get_block_param_types(&child, source);
+                if !params.is_empty() {
+                    if let Err(available) = stack.consume(params.len()) {
+                        let block_name = if contains_block_if(&child) {
+                            "if"
+                        } else {
+                            "block"
+                        };
+                        let diagnostic = create_stack_underflow_diagnostic(
+                            &child,
+                            block_name,
+                            params.len(),
+                            available,
+                        );
+                        diagnostics.push(diagnostic);
+                    }
+                }
                 if !sequence_always_terminates(&child, source) {
                     let results = get_block_result_types(&child, source);
                     stack.produce(results);
@@ -117,6 +135,19 @@ pub fn track_stack_in_instr_list(
                 if let Err(available) = stack.consume(1) {
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
+                }
+                // Consume block param types from the outer stack (multi-value proposal)
+                let params = get_block_param_types(&child, source);
+                if !params.is_empty() {
+                    if let Err(available) = stack.consume(params.len()) {
+                        let diagnostic = create_stack_underflow_diagnostic(
+                            &child,
+                            "if",
+                            params.len(),
+                            available,
+                        );
+                        diagnostics.push(diagnostic);
+                    }
                 }
                 // Only produce results if the if can fall through
                 if !sequence_always_terminates(&child, source) {
@@ -196,6 +227,24 @@ fn process_instr_node(
                         diagnostics.push(diagnostic);
                     }
                 }
+                // Consume block param types from the outer stack (multi-value proposal)
+                let params = get_block_param_types(&child, source);
+                if !params.is_empty() {
+                    if let Err(available) = stack.consume(params.len()) {
+                        let block_name = if contains_block_if(&child) {
+                            "if"
+                        } else {
+                            "block"
+                        };
+                        let diagnostic = create_stack_underflow_diagnostic(
+                            &child,
+                            block_name,
+                            params.len(),
+                            available,
+                        );
+                        diagnostics.push(diagnostic);
+                    }
+                }
                 if !sequence_always_terminates(&child, source) {
                     let results = get_block_result_types(&child, source);
                     stack.produce(results);
@@ -207,6 +256,19 @@ fn process_instr_node(
                 if let Err(available) = stack.consume(1) {
                     let diagnostic = create_stack_underflow_diagnostic(&child, "if", 1, available);
                     diagnostics.push(diagnostic);
+                }
+                // Consume block param types from the outer stack (multi-value proposal)
+                let params = get_block_param_types(&child, source);
+                if !params.is_empty() {
+                    if let Err(available) = stack.consume(params.len()) {
+                        let diagnostic = create_stack_underflow_diagnostic(
+                            &child,
+                            "if",
+                            params.len(),
+                            available,
+                        );
+                        diagnostics.push(diagnostic);
+                    }
                 }
                 if !sequence_always_terminates(&child, source) {
                     let results = get_block_result_types(&child, source);
@@ -995,6 +1057,17 @@ fn process_folded_expr(
         }
     }
 
+    // For block expressions (block, loop, if), consume param types from the outer stack
+    // This handles multi-value block params per the Wasm 2.0 multi-value proposal
+    let block_params = get_block_param_types_from_expr(expr, source);
+    if !block_params.is_empty() {
+        if let Err(available) = stack.consume(block_params.len()) {
+            let diagnostic =
+                create_stack_underflow_diagnostic(expr, "block", block_params.len(), available);
+            diagnostics.push(diagnostic);
+        }
+    }
+
     // Check if the expression always terminates (e.g., a block where all paths return)
     // If so, mark uncertain and don't produce values
     if sequence_always_terminates(expr, source) {
@@ -1173,6 +1246,73 @@ pub fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType>
         }
     }
     vec![]
+}
+
+/// Get block param types from a folded expression (expr node)
+/// Navigates expr > expr1_* or expr > expr1 > expr1_* to find block nodes
+fn get_block_param_types_from_expr(expr: &Node, source: &str) -> Vec<ValueType> {
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "expr1_block" || kind == "expr1_loop" || kind == "expr1_if" {
+            return get_block_param_types(&child, source);
+        }
+        if kind == "expr1" {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let inner_kind = inner_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let inner_kind = inner_child.kind();
+
+                if inner_kind == "expr1_block"
+                    || inner_kind == "expr1_loop"
+                    || inner_kind == "expr1_if"
+                {
+                    return get_block_param_types(&inner_child, source);
+                }
+            }
+        }
+    }
+    vec![]
+}
+
+/// Get param types from a block/loop/if node (for multi-value block params)
+/// Mirrors get_block_result_types but looks for func_type_params_many instead of func_type_results
+pub fn get_block_param_types(block_node: &Node, source: &str) -> Vec<ValueType> {
+    let mut types = Vec::new();
+    let mut cursor = block_node.walk();
+    for child in block_node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        // Handle func_type_params_many directly (folded format: expr1_block, expr1_loop)
+        if kind == "func_type_params_many" {
+            types.extend(parse_func_type_results(&child, source));
+        }
+        // Handle block_block, loop_block (linear format), if_block/block_if (both formats)
+        if kind == "block_block" || kind == "loop_block" || kind == "if_block" || kind == "block_if"
+        {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let inner_kind = inner_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let inner_kind = inner_child.kind();
+
+                if inner_kind == "func_type_params_many" {
+                    types.extend(parse_func_type_results(&inner_child, source));
+                }
+            }
+        }
+    }
+    types
 }
 
 /// Parse result types from a func_type_results node
