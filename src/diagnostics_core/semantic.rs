@@ -419,6 +419,20 @@ pub fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
         if kind == "index" || kind == "identifier" {
             return Some(source[child.byte_range()].trim().to_string());
         }
+        // Also check inside type_use nodes (e.g. call_ref (type $t))
+        if kind == "type_use" {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let inner_kind = inner_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let inner_kind = inner_child.kind();
+
+                if inner_kind == "index" || inner_kind == "identifier" {
+                    return Some(source[inner_child.byte_range()].trim().to_string());
+                }
+            }
+        }
         // Also check inside op_index nodes
         if kind.starts_with("op_") {
             let mut inner_cursor = child.walk();
