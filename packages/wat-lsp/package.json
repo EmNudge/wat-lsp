@@ -16,7 +16,9 @@
     "./wasm": {
       "types": "./dist/wasm/wat_lsp_rust.d.ts",
       "import": "./dist/wasm/wat_lsp_rust.js"
-    }
+    },
+    "./wasm/tree-sitter.wasm": "./dist/wasm/tree-sitter.wasm",
+    "./wasm/wat_lsp_rust_bg.wasm": "./dist/wasm/wat_lsp_rust_bg.wasm"
   },
   "files": [
     "dist",
