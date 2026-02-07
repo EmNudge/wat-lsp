@@ -3627,4 +3627,157 @@ mod tests {
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    // --- Multi-value block param tests (issue #123) ---
+
+    #[test]
+    fn test_block_with_params_no_false_positive() {
+        // Block with (param i32 i32) (result i32) containing i32.add
+        // The block consumes 2 values from the outer stack and produces 1
+        let document = r#"(module
+  (func $test (result i32)
+    i32.const 1
+    i32.const 2
+    block (param i32 i32) (result i32)
+      i32.add
+    end))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == Some(NumberOrString::String("return-arity-mismatch".to_string()))
+                    || d.code == Some(NumberOrString::String("stack-underflow".to_string()))
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            0,
+            "Block with params should not produce false errors, got: {:?}",
+            errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_loop_with_params_no_false_positive() {
+        // Loop with (param i32) (result i32) — consumes 1 from outer stack, produces 1
+        let document = r#"(module
+  (func $test (result i32)
+    i32.const 42
+    loop (param i32) (result i32)
+    end))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == Some(NumberOrString::String("return-arity-mismatch".to_string()))
+                    || d.code == Some(NumberOrString::String("stack-underflow".to_string()))
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            0,
+            "Loop with params should not produce false errors, got: {:?}",
+            errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_if_with_block_params_no_false_positive() {
+        // If with block params: consumes condition (1) + block params from outer stack
+        let document = r#"(module
+  (func $test (param $x i32) (result i32)
+    i32.const 10
+    local.get $x
+    if (param i32) (result i32)
+      i32.const 1
+      i32.add
+    else
+      i32.const 2
+      i32.add
+    end))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == Some(NumberOrString::String("return-arity-mismatch".to_string()))
+                    || d.code == Some(NumberOrString::String("stack-underflow".to_string()))
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            0,
+            "If with block params should not produce false errors, got: {:?}",
+            errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_folded_block_with_params_no_false_positive() {
+        // Folded block: (block (param i32) (result i32) ...)
+        let document = r#"(module
+  (func $test (result i32)
+    (i32.const 5)
+    (block (param i32) (result i32)
+      (i32.const 1)
+      i32.add)))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == Some(NumberOrString::String("return-arity-mismatch".to_string()))
+                    || d.code == Some(NumberOrString::String("stack-underflow".to_string()))
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            0,
+            "Folded block with params should not produce false errors, got: {:?}",
+            errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_block_params_underflow() {
+        // Block with params but insufficient values on outer stack should produce underflow
+        let document = r#"(module
+  (func $test (result i32)
+    i32.const 1
+    block (param i32 i32) (result i32)
+      i32.add
+    end))"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("stack-underflow".to_string())))
+            .collect();
+        assert!(
+            !underflow_errors.is_empty(),
+            "Block with insufficient outer stack values should produce underflow error"
+        );
+    }
 }
