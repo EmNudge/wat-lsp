@@ -240,7 +240,7 @@ fn test_parse_basic_memory() {
 }
 
 #[test]
-fn test_typedef_new_fields() {
+fn test_typedef_basic() {
     let wat = r#"
 (module
   (type $func_type (func (param i32) (result i32)))
@@ -250,20 +250,12 @@ fn test_typedef_new_fields() {
     let symbols = parse_document(wat).unwrap();
     assert_eq!(symbols.types.len(), 1);
     let typedef = &symbols.types[0];
-
-    // Verify new fields have default values
-    assert_eq!(typedef.supertype, None, "Default supertype should be None");
-    assert!(typedef.is_final, "Default is_final should be true");
-    assert_eq!(
-        typedef.rec_group_id, None,
-        "Default rec_group_id should be None"
-    );
+    assert_eq!(typedef.name, Some("$func_type".to_string()));
+    assert_eq!(typedef.index, 0);
 }
 
 #[test]
-fn test_rec_group_assigns_rec_group_id() {
-    // This test verifies that types in rec groups get a rec_group_id
-    // Note: The actual implementation may vary based on parser behavior
+fn test_rec_group_types() {
     let wat = r#"
 (module
   (rec
@@ -283,7 +275,6 @@ fn test_rec_group_assigns_rec_group_id() {
 
 #[test]
 fn test_subtype_parsing() {
-    // Test that sub types are parsed with supertype and is_final
     let wat = r#"
 (module
   (type $parent (struct (field i32)))
@@ -294,15 +285,7 @@ fn test_subtype_parsing() {
     let symbols = parse_document(wat).unwrap();
     assert_eq!(symbols.types.len(), 2, "Should have 2 types");
 
-    // Parent should be final (no sub keyword)
-    let parent = symbols.get_type_by_name("$parent").unwrap();
-    assert!(parent.is_final, "Parent should be final (default)");
-    assert_eq!(parent.supertype, None, "Parent should have no supertype");
-
-    // Child should not be final (has sub keyword without final)
-    // Note: Parsing depends on grammar structure
-    // The child type should exist
-    let _child = symbols.get_type_by_name("$child").unwrap();
+    assert!(symbols.get_type_by_name("$parent").is_some());
     assert!(symbols.get_type_by_name("$child").is_some());
 }
 

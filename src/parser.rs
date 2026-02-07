@@ -819,7 +819,6 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                             name: name_opt,
                             var_type,
                             is_mutable: true,
-                            initial_value: None,
                             index: local_index,
                             range: range_opt,
                         });
@@ -834,7 +833,6 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                                 name: None,
                                 var_type: extract_value_type(&many_child, source),
                                 is_mutable: true,
-                                initial_value: None,
                                 index: local_index,
                                 range: None,
                             });
@@ -1166,9 +1164,6 @@ fn extract_type_from_single_node(
         name,
         index,
         kind,
-        supertype: None,
-        is_final: true, // Default to final
-        rec_group_id: None,
         line: type_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -1214,9 +1209,6 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         params: Vec::new(),
         results: Vec::new(),
     };
-    let mut supertype: Option<u32> = None;
-    let mut is_final = true; // Default to final
-
     let mut cursor = type_node.walk();
     for child in type_node.children(&mut cursor) {
         // Handle sub_type: (sub final? supertype_index? def_type)
@@ -1228,18 +1220,6 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                 let sub_kind = sub_kind.as_str();
 
                 match sub_kind {
-                    "final" => {
-                        is_final = true;
-                    }
-                    "index" => {
-                        // Parse supertype index
-                        let idx_text = node_text(&sub_child, source);
-                        // Remove $ prefix if present and parse as number
-                        let idx_str = idx_text.trim_start_matches('$');
-                        if let Ok(idx) = idx_str.parse::<u32>() {
-                            supertype = Some(idx);
-                        }
-                    }
                     "def_type" => {
                         // Process the inner type definition
                         let mut def_cursor = sub_child.walk();
@@ -1257,23 +1237,15 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                             }
                         }
                     }
-                    // If no "final" keyword, type is not final (can be subtyped)
                     _ => {
                         // Check if this is a type definition directly
                         if sub_child.kind() == "struct_type" {
                             kind = extract_struct_kind(&sub_child, source);
-                            is_final = false; // sub without final means not final
                         } else if sub_child.kind() == "array_type" {
                             kind = extract_array_kind(&sub_child, source);
-                            is_final = false;
                         }
                     }
                 }
-            }
-            // If we saw "sub" but no "final", the type is not final
-            let text = node_text(&child, source);
-            if !text.contains("final") {
-                is_final = false;
             }
             continue;
         }
@@ -1422,9 +1394,6 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         name,
         index,
         kind,
-        supertype,
-        is_final,
-        rec_group_id: None,
         line: type_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -2044,15 +2013,11 @@ fn extract_data_segment(data_node: &Node, source: &str, index: usize) -> Option<
         }
     }
 
-    // Passive segments have names
-    let is_passive = name.is_some();
-
     Some(DataSegment {
         name,
         index,
         content,
         byte_length,
-        is_passive,
         line: data_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -2102,23 +2067,9 @@ fn extract_elem_segment(elem_node: &Node, source: &str, index: usize) -> Option<
 
     // Extract function names from elem segment
     let mut func_names = Vec::new();
-    let mut table_name = None;
 
     // Look for index nodes which could be function references
     let text = node_text(elem_node, source);
-
-    // Find table name if present (table $name)
-    if let Some(table_pos) = text.find("(table ") {
-        let after_table = &text[table_pos + 7..];
-        if let Some(dollar_pos) = after_table.find('$') {
-            let name_start = dollar_pos;
-            let name_end = after_table[name_start + 1..]
-                .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-                .map(|i| name_start + i + 1)
-                .unwrap_or(after_table.len());
-            table_name = Some(after_table[name_start..name_end].to_string());
-        }
-    }
 
     // Find function references after "func" keyword
     if let Some(func_pos) = text.find(" func ") {
@@ -2141,7 +2092,6 @@ fn extract_elem_segment(elem_node: &Node, source: &str, index: usize) -> Option<
         name,
         index,
         func_names,
-        table_name,
         line: elem_node.range().start_point.row as u32,
         range: name_range,
     })

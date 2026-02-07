@@ -241,13 +241,16 @@ fn test_symbol_table_lookup() {
 
 #[test]
 fn test_value_type_conversion() {
-    assert_eq!(ValueType::parse("i32"), ValueType::I32);
-    assert_eq!(ValueType::parse("i64"), ValueType::I64);
-    assert_eq!(ValueType::parse("f32"), ValueType::F32);
-    assert_eq!(ValueType::parse("f64"), ValueType::F64);
-    assert_eq!(ValueType::parse("funcref"), ValueType::Funcref);
-    assert_eq!(ValueType::parse("externref"), ValueType::Externref);
-    assert_eq!(ValueType::parse("invalid"), ValueType::Unknown);
+    assert_eq!(ValueType::try_parse("i32"), Some(ValueType::I32));
+    assert_eq!(ValueType::try_parse("i64"), Some(ValueType::I64));
+    assert_eq!(ValueType::try_parse("f32"), Some(ValueType::F32));
+    assert_eq!(ValueType::try_parse("f64"), Some(ValueType::F64));
+    assert_eq!(ValueType::try_parse("funcref"), Some(ValueType::Funcref));
+    assert_eq!(
+        ValueType::try_parse("externref"),
+        Some(ValueType::Externref)
+    );
+    assert_eq!(ValueType::try_parse("invalid"), None);
 
     assert_eq!(ValueType::I32.to_string(), "i32");
     assert_eq!(ValueType::F64.to_string(), "f64");

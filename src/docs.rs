@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 mod generated {
     // Include the auto-generated instruction documentation
-    // This brings in: use std::collections::HashMap; use once_cell::sync::Lazy;
-    // and INSTRUCTION_DOCS: Lazy<HashMap<&'static str, &'static str>>
+    // This brings in: use std::collections::HashMap; use std::sync::LazyLock;
+    // and INSTRUCTION_DOCS: LazyLock<HashMap<&'static str, &'static str>>
     include!(concat!(env!("OUT_DIR"), "/instruction_docs.rs"));
 }
 

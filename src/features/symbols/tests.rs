@@ -97,9 +97,6 @@ fn test_add_type() {
             params: vec![ValueType::I32, ValueType::I32],
             results: vec![ValueType::I32],
         },
-        supertype: None,
-        is_final: true,
-        rec_group_id: None,
         line: 0,
         range: None,
     };
@@ -248,7 +245,6 @@ fn test_variable_creation() {
         name: Some("$temp".to_string()),
         var_type: ValueType::F64,
         is_mutable: true,
-        initial_value: Some("3.14".to_string()),
         index: 0,
         range: None,
     };
@@ -303,7 +299,6 @@ fn test_complex_function() {
             name: Some("$temp".to_string()),
             var_type: ValueType::F32,
             is_mutable: true,
-            initial_value: None,
             index: 0,
             range: None,
         }],

@@ -82,12 +82,6 @@ impl ValueType {
             _ => None,
         }
     }
-
-    /// Parse a string into a ValueType, returning Unknown for unrecognized strings.
-    #[allow(dead_code)] // May be useful for future features
-    pub fn parse(s: &str) -> Self {
-        Self::try_parse(s).unwrap_or(ValueType::Unknown)
-    }
 }
 
 /// Convert from wast crate's ValType to our ValueType.
@@ -134,22 +128,17 @@ impl From<&wast::core::ValType<'_>> for ValueType {
 pub struct Variable {
     pub name: Option<String>,
     pub var_type: ValueType,
-    #[allow(dead_code)] // Not currently used in validation
     pub is_mutable: bool,
-    #[allow(dead_code)] // Not currently used
-    pub initial_value: Option<String>,
-    #[allow(dead_code)] // Used by symbol_lookup for indexed access
     pub index: usize,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: Option<String>,
     pub param_type: ValueType,
-    #[allow(dead_code)] // Used by symbol_lookup for indexed access
     pub index: usize,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -163,60 +152,49 @@ pub struct BlockLabel {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_function_by_index
     pub index: usize,
     pub parameters: Vec<Parameter>,
     pub results: Vec<ValueType>,
     pub locals: Vec<Variable>,
     pub blocks: Vec<BlockLabel>,
     pub line: u32,
-    pub end_line: u32, // Used by find_containing_function in utils
-    #[allow(dead_code)] // Not currently used
-    pub start_byte: usize, // Byte offset where function starts
-    #[allow(dead_code)] // Not currently used
-    pub end_byte: usize, // Byte offset where function ends
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
-    /// Documentation comment extracted from comments preceding the function
+    pub end_line: u32,
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub range: Option<Range>,
     pub doc_comment: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Global {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_global_by_index
     pub index: usize,
     pub var_type: ValueType,
     pub is_mutable: bool,
     pub initial_value: Option<String>,
-    #[allow(dead_code)] // Not currently used
     pub line: u32,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Table {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_table_by_index
     pub index: usize,
     pub ref_type: ValueType,
-    pub limits: (u32, Option<u32>), // (min, max)
-    #[allow(dead_code)] // Not currently used
+    pub limits: (u32, Option<u32>),
     pub line: u32,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Memory {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_memory_by_index
     pub index: usize,
-    #[allow(dead_code)] // Used by hover for memory info
-    pub limits: (u64, Option<u64>), // (min, max) - u64 for memory64 support
-    pub is_memory64: bool, // Used by semantic_diagnostics for memory64 validation
-    pub shared: bool,      // Used by semantic_diagnostics for atomic operation validation
-    #[allow(dead_code)] // Not currently used but part of the struct
+    pub limits: (u64, Option<u64>),
+    pub is_memory64: bool,
+    pub shared: bool,
     pub line: u32,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -237,56 +215,38 @@ pub enum TypeKind {
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_type_by_index
     pub index: usize,
     pub kind: TypeKind,
-    #[allow(dead_code)] // Not currently used for subtype validation
-    pub supertype: Option<u32>, // Parent type index for subtyping
-    #[allow(dead_code)] // Not currently used
-    pub is_final: bool, // Whether this type can be subtyped
-    #[allow(dead_code)] // Not currently used
-    pub rec_group_id: Option<usize>, // Which rec group this type belongs to
-    #[allow(dead_code)] // Not currently used
     pub line: u32,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Tag {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_tag_by_index
     pub index: usize,
     pub params: Vec<ValueType>,
-    #[allow(dead_code)] // Not currently used
     pub line: u32,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DataSegment {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_data_by_index
     pub index: usize,
-    pub content: String,    // The string content (for display)
-    pub byte_length: usize, // Length in bytes
-    #[allow(dead_code)] // Not currently used
-    pub is_passive: bool, // true for passive segments (those with names)
-    #[allow(dead_code)] // Not currently used
+    pub content: String,
+    pub byte_length: usize,
     pub line: u32,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ElemSegment {
     pub name: Option<String>,
-    #[allow(dead_code)] // Used by get_elem_by_index
     pub index: usize,
-    pub func_names: Vec<String>, // Function names/indices in this elem
-    #[allow(dead_code)] // Not currently used
-    pub table_name: Option<String>, // Target table if specified
-    #[allow(dead_code)] // Not currently used
+    pub func_names: Vec<String>,
     pub line: u32,
-    pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
+    pub range: Option<Range>,
 }
 
 #[derive(Debug, Clone, Default)]

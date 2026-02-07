@@ -4,55 +4,8 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use wat_lsp_rust::parser::parse_document;
+use wat_lsp_rust::test_utils::generate_large_wat;
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
-
-/// Generate a synthetic WAT file with the specified approximate line count
-fn generate_large_wat(target_lines: usize) -> String {
-    let mut wat = String::from("(module\n");
-
-    let num_functions = target_lines / 15;
-    let num_globals = 10.min(num_functions / 10);
-    let num_types = 5.min(num_functions / 20);
-
-    for i in 0..num_globals {
-        wat.push_str(&format!(
-            "  (global $global{} (mut i32) (i32.const {}))\n",
-            i, i
-        ));
-    }
-
-    for i in 0..num_types {
-        wat.push_str(&format!(
-            "  (type $type{} (func (param i32 i32) (result i32)))\n",
-            i
-        ));
-    }
-
-    for i in 0..num_functions {
-        wat.push_str(&format!(
-            "  (func $func{} (param $x i32) (param $y i32) (result i32)\n",
-            i
-        ));
-        wat.push_str("    (local $temp i32)\n");
-        wat.push_str("    (local $result i32)\n");
-        wat.push_str("    (local.set $temp (i32.const 0))\n");
-        wat.push_str("    (local.set $temp\n");
-        wat.push_str("      (i32.add (local.get $x) (local.get $y)))\n");
-        wat.push_str("    (local.set $result\n");
-        wat.push_str("      (i32.mul (local.get $temp) (i32.const 2)))\n");
-        if num_globals > 0 {
-            wat.push_str("    (local.set $result\n");
-            wat.push_str(&format!(
-                "      (i32.add (local.get $result) (global.get $global{})))\n",
-                i % num_globals
-            ));
-        }
-        wat.push_str("    (local.get $result))\n");
-    }
-
-    wat.push_str(")\n");
-    wat
-}
 
 fn bench_tree_sitter_parse(c: &mut Criterion) {
     let mut group = c.benchmark_group("tree_sitter_parse");
