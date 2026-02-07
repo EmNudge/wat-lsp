@@ -3780,4 +3780,83 @@ mod tests {
             "Block with insufficient outer stack values should produce underflow error"
         );
     }
+
+    #[test]
+    fn test_call_indirect_pops_args_and_table_index() {
+        // Issue #121: call_indirect should pop N params + 1 table index
+        let document = r#"(module
+  (type $sig (func (param i32) (result i32)))
+  (func $f (type $sig) (param $x i32) (result i32) local.get $x)
+  (table 1 funcref)
+  (elem (i32.const 0) $f)
+
+  (func (export "go") (param $n i32) (result i32)
+    i32.const 0
+    local.get $n
+    call_indirect (type $sig))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "call_indirect with correct stack should have no errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_call_indirect_folded_pops_args_and_table_index() {
+        // Folded form of call_indirect should also count operands correctly
+        let document = r#"(module
+  (type $sig (func (param i32) (result i32)))
+  (table 1 funcref)
+
+  (func (export "go") (param $n i32) (result i32)
+    (call_indirect (type $sig) (i32.const 0) (local.get $n)))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Folded call_indirect with correct operands should have no errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_call_indirect_multi_param() {
+        // call_indirect with multi-param type should pop all params + table index
+        let document = r#"(module
+  (type $binop (func (param i32 i32) (result i32)))
+  (table 1 funcref)
+
+  (func (export "go") (result i32)
+    i32.const 10
+    i32.const 20
+    i32.const 0
+    call_indirect (type $binop))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "call_indirect with 2 params + table index should have no errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }
