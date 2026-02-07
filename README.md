@@ -18,6 +18,15 @@ Supports WasmGC, Relaxed SIMD, Exception Handling, and Reference Types.
 
 **Other editors**: Configure to launch `wat-lsp-rust` for `.wat` files.
 
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| [`packages/wat-lsp`](packages/wat-lsp) | WASM build of the LSP for browser and Node.js (`@emnudge/wat-lsp`) |
+| [`packages/vscode-extension`](packages/vscode-extension) | VS Code extension |
+| [`packages/playground`](packages/playground) | Browser-based [playground](https://wat-lsp.emnudge.dev) |
+| [`packages/docs`](packages/docs) | Documentation site |
+
 ## Building
 
 Requires `tree-sitter-cli` (`npm install -g tree-sitter-cli`).

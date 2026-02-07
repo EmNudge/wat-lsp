@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  base: './',
   optimizeDeps: {
     include: ['monaco-editor', 'wabt', 'web-tree-sitter'],
     exclude: ['@emnudge/wat-lsp'],

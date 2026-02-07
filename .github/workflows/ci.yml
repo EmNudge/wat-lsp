@@ -18,6 +18,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       packages: ${{ steps.filter.outputs.packages }}
       playground: ${{ steps.filter.outputs.playground }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -45,6 +46,8 @@ jobs:
               - 'grammars/tree-sitter-wat/**'
               - 'src/**'
               - 'tests/diagnostic_corpus/**'
+            docs:
+              - 'packages/docs/**'
 
   test:
     name: Test
@@ -599,6 +602,184 @@ jobs:
             });
             const botComment = comments.find(c =>
               c.user.type === 'Bot' && c.body.includes('Playground Preview')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  docs-lint:
+    name: Docs Lint
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+      - run: npm ci
+        working-directory: packages/docs
+      - run: npm run lint
+        working-directory: packages/docs
+
+  docs-format:
+    name: Docs Format
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+      - run: npm ci
+        working-directory: packages/docs
+      - run: npm run format
+        working-directory: packages/docs
+
+  docs-typecheck:
+    name: Docs Typecheck
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+      - run: npm ci
+        working-directory: packages/docs
+      - run: npm run typecheck
+        working-directory: packages/docs
+
+  docs-build:
+    name: Docs Build
+    needs: [changes, playground]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      (needs.changes.outputs.docs == 'true' || needs.changes.outputs.playground == 'true' || needs.changes.outputs.rust == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+      - run: npm ci
+        working-directory: packages/docs
+      - run: npm run build
+        working-directory: packages/docs
+
+      - name: Download playground build
+        if: needs.playground.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: playground-dist
+          path: packages/docs/dist/playground/
+
+      - name: Upload docs site
+        uses: actions/upload-artifact@v6
+        with:
+          name: docs-dist
+          path: packages/docs/dist/
+
+  docs-test-wat:
+    name: Docs Test WAT
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+      - run: npm ci
+        working-directory: packages/docs
+      - run: npm run test:wat
+        working-directory: packages/docs
+
+  docs-test:
+    name: Docs Test
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+      - run: npm ci
+        working-directory: packages/docs
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+        working-directory: packages/docs
+
+  deploy-docs:
+    name: Deploy Docs to Cloudflare Pages
+    needs: docs-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      - name: Download docs build
+        uses: actions/download-artifact@v7
+        with:
+          name: docs-dist
+          path: dist
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=wat-docs --branch=${{ github.head_ref || github.ref_name }}
+
+      - name: Comment preview URL on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.deploy.outputs.deployment-url }}';
+            const sha = context.payload.pull_request.head.sha.substring(0, 7);
+            const body = `## 📖 Docs Preview\n\nDeployed to Cloudflare Pages:\n${url} (\`${sha}\`)\n\n[Playground](${url}/playground/)`;
+
+            // Find existing bot comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Docs Preview')
             );
 
             if (botComment) {

@@ -1,0 +1,25 @@
+---
+import MobileMenuFooter from 'virtual:starlight/components/MobileMenuFooter';
+import SidebarPersister from '@astrojs/starlight/components/SidebarPersister.astro';
+import SidebarSublist from '@astrojs/starlight/components/SidebarSublist.astro';
+
+const { sidebar } = Astro.locals.starlightRoute;
+
+// Find which top-level group contains the current page
+function hasCurrentPage(entry: any): boolean {
+  if (entry.type === 'link') return entry.isCurrent;
+  if (entry.type === 'group') return entry.entries.some(hasCurrentPage);
+  return false;
+}
+
+const activeGroup = sidebar.filter((entry: any) => hasCurrentPage(entry));
+const filtered = activeGroup.length > 0 ? activeGroup : sidebar;
+---
+
+<SidebarPersister>
+  <SidebarSublist sublist={filtered} />
+</SidebarPersister>
+
+<div class="md:sl-hidden">
+  <MobileMenuFooter />
+</div>

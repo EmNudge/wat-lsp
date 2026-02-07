@@ -305,7 +305,7 @@ class TMState implements monaco.languages.IState {
 // Initialize Monaco Editor with LSP features
 async function initMonaco(): Promise<void> {
   // Load oniguruma WASM for TextMate grammar support
-  const onigResponse = await fetch('/onig.wasm');
+  const onigResponse = await fetch('./onig.wasm');
   const onigBuffer = await onigResponse.arrayBuffer();
   await oniguruma.loadWASM(onigBuffer);
 
@@ -321,7 +321,7 @@ async function initMonaco(): Promise<void> {
     onigLib: Promise.resolve(onigLib),
     loadGrammar: async (scopeName: string) => {
       if (scopeName === 'source.wat') {
-        const response = await fetch('/wat.tmLanguage.json');
+        const response = await fetch('./wat.tmLanguage.json');
         const grammar = await response.json();
         return vsctm.parseRawGrammar(
           JSON.stringify(grammar),
@@ -1140,8 +1140,8 @@ async function initLSP(): Promise<boolean> {
 
   try {
     const lsp = await createWatLSP({
-      treeSitterWasmPath: '/tree-sitter.wasm',
-      watLspWasmPath: '/wat_lsp_rust_bg.wasm',
+      treeSitterWasmPath: './tree-sitter.wasm',
+      watLspWasmPath: './wat_lsp_rust_bg.wasm',
     });
     watLSP = lsp as WatLSP;
 

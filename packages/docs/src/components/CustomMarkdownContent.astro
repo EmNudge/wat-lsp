@@ -1,0 +1,7 @@
+---
+import CodeMirrorEnhancer from './CodeMirrorEnhancer';
+import '@astrojs/starlight/style/markdown.css';
+---
+
+<div class="sl-markdown-content"><slot /></div>
+<CodeMirrorEnhancer client:only="react" />

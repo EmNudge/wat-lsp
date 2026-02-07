@@ -1,0 +1,86 @@
+{
+  "name": "WebAssembly Text (WAT)",
+  "scopeName": "source.wat",
+  "fileTypes": ["wat", "wast"],
+  "patterns": [
+    { "include": "#block-comment" },
+    { "include": "#line-comment" },
+    { "include": "#strings" },
+    { "include": "#numbers-hex" },
+    { "include": "#numbers-float" },
+    { "include": "#numbers-int" },
+    { "include": "#control-keywords" },
+    { "include": "#instructions-numeric" },
+    { "include": "#instructions-variable" },
+    { "include": "#instructions-memory" },
+    { "include": "#identifiers" },
+    { "include": "#parens" }
+  ],
+  "repository": {
+    "block-comment": {
+      "name": "comment.block.wat",
+      "begin": "\\(;",
+      "end": ";\\)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.wat" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.comment.end.wat" } }
+    },
+    "line-comment": {
+      "name": "comment.line.double-semicolon.wat",
+      "match": ";;.*$"
+    },
+    "strings": {
+      "name": "string.quoted.double.wat",
+      "match": "\"(?:[^\"\\\\]|\\\\.)*\""
+    },
+    "numbers-hex": {
+      "name": "constant.numeric.hex.wat",
+      "match": "[-+]?0x[0-9A-Fa-f]+"
+    },
+    "numbers-float": {
+      "name": "constant.numeric.float.wat",
+      "match": "[-+]?(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][+-]?\\d+)?"
+    },
+    "numbers-int": {
+      "name": "constant.numeric.integer.wat",
+      "match": "[-+]?\\d+"
+    },
+    "control-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.wat",
+          "match": "\\b(block|loop|if|else|end|br|br_if|br_table|call|call_indirect|return|unreachable|nop|select)\\b"
+        },
+        {
+          "name": "keyword.declaration.wat",
+          "match": "\\b(module|func|param|result|local|type|table|memory|global|elem|data|start|export|import|offset|mut)\\b"
+        }
+      ]
+    },
+    "instructions-numeric": {
+      "name": "keyword.operator.numeric.wat",
+      "match": "\\b(?:(?:i32|i64|f32|f64)\\.(?:add|sub|mul|div(?:_s|_u)?|rem(?:_s|_u)?|and|or|xor|shl|shr(?:_s|_u)?|rotl|rotr|eq|ne|lt(?:_s|_u)?|le(?:_s|_u)?|gt(?:_s|_u)?|ge(?:_s|_u)?|const|abs|neg|sqrt|ceil|floor|trunc|nearest|min|max|copysign|convert_i32_s|convert_i32_u|convert_i64_s|convert_i64_u|promote_f32|demote_f64|extend_i32_s|extend_i32_u|extend_i64_s|extend_i64_u|wrap_i64))\\b"
+    },
+    "instructions-variable": {
+      "name": "support.function.variable.wat",
+      "match": "\\b(?:(?:local|global)\\.(?:get|set|tee))\\b"
+    },
+    "instructions-memory": {
+      "name": "support.function.memory.wat",
+      "match": "\\b(?:memory\\.(?:size|grow)|i(?:32|64)\\.(?:load(?:8_s|8_u|16_s|16_u|32_s|32_u)?|store(?:8|16|32)?))\\b"
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.label.wat",
+          "match": "\\$[A-Za-z0-9_\\.\\-]+"
+        }
+      ]
+    },
+    "parens": {
+      "patterns": [
+        { "name": "punctuation.section.parens.begin.wat", "match": "\\(" },
+        { "name": "punctuation.section.parens.end.wat", "match": "\\)" }
+      ]
+    }
+  }
+}
