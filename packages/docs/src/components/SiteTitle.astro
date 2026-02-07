@@ -1,0 +1,97 @@
+---
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+const pathname = Astro.url.pathname;
+
+const navLinks = [
+  { label: 'Intro', href: '/intro/what-is-wat/' },
+  { label: 'Guides', href: '/types/' },
+  { label: 'Reference', href: '/instructions/i32/' },
+];
+
+function isActive(href: string) {
+  if (href.startsWith('/intro/')) return pathname.startsWith('/intro/');
+  if (href.startsWith('/instructions/')) {
+    return pathname.startsWith('/instructions/');
+  }
+  // Guides: everything else that's not home or intro or instructions
+  return pathname !== '/' && !pathname.startsWith('/intro/') && !pathname.startsWith('/instructions/');
+}
+---
+
+<div class="site-header">
+  <a href={siteTitleHref} class="site-title">
+    <svg xmlns="http://www.w3.org/2000/svg" width="612" height="612" viewBox="0 0 612 612" class="logo-size">
+      <path d="m376 0c0 1.08 0 2.16 0 3.3 0 38.76-31.42 70.17-70.17 70.17-38.76 0-70.17-31.42-70.17-70.17l0 0c0-1.14 0-2.22 0-3.3L0 0l0 612 612 0 0-612z" fill="#654ff0"/>
+      <path d="m142.16 329.81 40.56 0 27.69 147.47 0.5 0 33.28-147.47 37.94 0 30.06 149.28 0.59 0 31.56-149.28 39.78 0-51.69 216.69-40.25 0-29.81-147.47-0.78 0-31.91 147.47-41 0zm287.69 0 63.94 0 63.5 216.69-41.84 0-13.81-48.22-72.84 0-10.66 48.22-40.75 0zm24.34 53.41-17.69 79.5 55.06 0-20.31-79.5z" fill="#fff"/>
+    </svg>
+    <span class="title-text">{siteTitle}</span>
+  </a>
+  <nav class="nav-links">
+    {navLinks.map(({ label, href }) => (
+      <a href={href} class:list={['nav-link', { active: isActive(href) }]}>{label}</a>
+    ))}
+  </nav>
+</div>
+
+<style>
+  .logo-size {
+    width: auto;
+    height: 2rem;
+  }
+
+  .site-header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .site-title {
+    gap: 0.5rem;
+    align-items: center;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .title-text {
+    font-weight: 700;
+    display: none;
+  }
+
+  @media (min-width: 1024px) {
+    .title-text {
+      display: inline-block;
+    }
+  }
+
+  .nav-links {
+    display: none;
+    gap: 0.25rem;
+  }
+
+  @media (min-width: 1024px) {
+    .nav-links {
+      display: flex;
+    }
+  }
+
+  .nav-link {
+    padding: 0.25rem 0.75rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--sl-color-gray-2);
+  }
+
+  .nav-link:hover {
+    color: var(--sl-color-white);
+  }
+
+  .nav-link.active {
+    color: var(--sl-color-white);
+    background: var(--sl-color-gray-6);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: inherit;
+  }
+</style>

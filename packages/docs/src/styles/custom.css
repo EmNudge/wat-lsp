@@ -1,0 +1,16 @@
+[data-page-title='WAT Docs'] ~ .tagline,
+[data-page-title='WAT Docs'],
+[data-page-title='WAT Docs'] ~ .actions {
+  text-align: center;
+}
+
+[data-page-title='WAT Docs'] {
+  width: 100%;
+}
+
+/* Center hero content on splash page */
+.hero:has([data-page-title='WAT Docs']) {
+  align-items: center;
+  padding-top: 6rem;
+  padding-bottom: 6rem;
+}
