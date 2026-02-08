@@ -218,6 +218,8 @@ pub struct TypeDef {
     pub name: Option<String>,
     pub index: usize,
     pub kind: TypeKind,
+    pub parent: Option<String>,
+    pub is_final: bool,
     pub line: u32,
     pub range: Option<Range>,
 }

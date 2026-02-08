@@ -1,0 +1,10 @@
+{
+  "description": "Cannot extend a final type",
+  "diagnostics": [
+    {
+      "line": 2,
+      "message_contains": "final",
+      "severity": 1
+    }
+  ]
+}

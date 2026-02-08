@@ -152,6 +152,13 @@ impl WatLSP {
             for diag in semantic_diagnostics {
                 js_array.push(&diagnostic_to_js(&diag));
             }
+
+            // Add subtype hierarchy diagnostics
+            let subtype_diagnostics =
+                crate::diagnostics_core::subtype::validate_subtype_hierarchy(symbols);
+            for diag in subtype_diagnostics {
+                js_array.push(&core_diagnostic_to_js(&diag));
+            }
         }
 
         js_array.into()

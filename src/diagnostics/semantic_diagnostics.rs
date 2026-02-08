@@ -64,6 +64,13 @@ pub fn provide_semantic_diagnostics(
 
     // Single unified tree walk for all semantic checks
     unified_tree_walk(tree.root_node(), source, symbols, &config, &mut diagnostics);
+
+    // Validate subtype hierarchy
+    let subtype_diags = crate::diagnostics_core::subtype::validate_subtype_hierarchy(symbols);
+    for diag in subtype_diags {
+        diagnostics.push(diag.into());
+    }
+
     diagnostics
 }
 
@@ -2216,7 +2223,7 @@ mod tests {
     i32.const 1
     i32.add)
 
-  (func $dispatch (param $x i32) (param $f funcref) (result i32)
+  (func $dispatch (type $t) (param $x i32) (param $f funcref) (result i32)
     local.get $x
     local.get $f
     return_call_ref (type $t))
@@ -3974,6 +3981,84 @@ mod tests {
         assert!(
             !tail_diags.is_empty(),
             "Should detect return arity mismatch, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_invalid_struct_subtype_missing_parent_fields() {
+        let document = r#"(module
+  (type $parent (sub (struct (field i32) (field i64))))
+  (type $child (sub $parent (struct (field i32))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let subtype_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("fields"))
+            .collect();
+        assert!(
+            !subtype_errors.is_empty(),
+            "Expected struct field count error, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_valid_struct_subtype() {
+        let document = r#"(module
+  (type $parent (sub (struct (field i32))))
+  (type $child (sub $parent (struct (field i32) (field i64))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let subtype_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.message.contains("field")
+                    || d.message.contains("parent")
+                    || d.message.contains("final")
+                    || d.message.contains("extend")
+            })
+            .collect();
+        assert_eq!(
+            subtype_errors.len(),
+            0,
+            "Expected no subtype errors, got: {:?}",
+            subtype_errors
+                .iter()
+                .map(|d| &d.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sub_final_cannot_be_extended() {
+        let document = r#"(module
+  (type $sealed (sub final (struct (field i32))))
+  (type $child (sub $sealed (struct (field i32) (field i64))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let final_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("final"))
+            .collect();
+        assert!(
+            !final_errors.is_empty(),
+            "Expected 'cannot extend final' error, got: {:?}",
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }

@@ -1132,6 +1132,7 @@ fn extract_rec_types(
                 if type_node.kind() == "struct_type"
                     || type_node.kind() == "array_type"
                     || type_node.kind() == "type_field"
+                    || type_node.kind() == "sub_type"
                 {
                     // Extract the type
                     if let Some(type_def) = extract_type_from_single_node(
@@ -1171,11 +1172,60 @@ fn extract_type_from_single_node(
         params: Vec::new(),
         results: Vec::new(),
     };
+    let mut parent_ref: Option<String> = None;
+    let mut is_final = false;
 
     let type_kind = type_node.kind();
     #[cfg(all(feature = "wasm", not(feature = "native")))]
     let type_kind = type_kind.as_str();
     match type_kind {
+        "sub_type" => {
+            // Process sub_type children: (sub final? index? def_type)
+            let mut sub_cursor = type_node.walk();
+            for sub_child in type_node.children(&mut sub_cursor) {
+                let sub_kind = sub_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let sub_kind = sub_kind.as_str();
+
+                match sub_kind {
+                    "index" => {
+                        parent_ref = Some(node_text(&sub_child, source));
+                    }
+                    "def_type" => {
+                        let mut def_cursor = sub_child.walk();
+                        for def_child in sub_child.children(&mut def_cursor) {
+                            if def_child.kind() == "struct_type" {
+                                kind = extract_struct_kind(&def_child, source);
+                            } else if def_child.kind() == "array_type" {
+                                kind = extract_array_kind(&def_child, source);
+                            } else if def_child.kind() == "func_type" {
+                                let mut parameters = Vec::new();
+                                let mut results = Vec::new();
+                                let params = extract_parameters(&def_child, source);
+                                for param in params {
+                                    parameters.push(param.param_type);
+                                }
+                                results.extend(extract_results(&def_child, source));
+                                kind = TypeKind::Func {
+                                    params: parameters,
+                                    results,
+                                };
+                            }
+                        }
+                    }
+                    _ => {
+                        if node_text(&sub_child, source) == "final" {
+                            is_final = true;
+                        }
+                        if sub_child.kind() == "struct_type" {
+                            kind = extract_struct_kind(&sub_child, source);
+                        } else if sub_child.kind() == "array_type" {
+                            kind = extract_array_kind(&sub_child, source);
+                        }
+                    }
+                }
+            }
+        }
         "struct_type" => {
             // Extract struct fields
             let mut fields = Vec::new();
@@ -1233,6 +1283,8 @@ fn extract_type_from_single_node(
         name,
         index,
         kind,
+        parent: parent_ref,
+        is_final,
         line: type_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -1278,6 +1330,8 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         params: Vec::new(),
         results: Vec::new(),
     };
+    let mut parent_ref: Option<String> = None;
+    let mut is_final = false;
     let mut cursor = type_node.walk();
     for child in type_node.children(&mut cursor) {
         // Handle sub_type: (sub final? supertype_index? def_type)
@@ -1289,6 +1343,9 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                 let sub_kind = sub_kind.as_str();
 
                 match sub_kind {
+                    "index" => {
+                        parent_ref = Some(node_text(&sub_child, source));
+                    }
                     "def_type" => {
                         // Process the inner type definition
                         let mut def_cursor = sub_child.walk();
@@ -1307,6 +1364,10 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                         }
                     }
                     _ => {
+                        // Check for "final" keyword
+                        if node_text(&sub_child, source) == "final" {
+                            is_final = true;
+                        }
                         // Check if this is a type definition directly
                         if sub_child.kind() == "struct_type" {
                             kind = extract_struct_kind(&sub_child, source);
@@ -1446,6 +1507,46 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                         element_type,
                         mutable,
                     };
+                } else if field_child.kind() == "sub_type" {
+                    // Handle sub_type inside type_field: (sub final? index? def_type)
+                    let mut sub_cursor = field_child.walk();
+                    for sub_child in field_child.children(&mut sub_cursor) {
+                        let sub_kind = sub_child.kind();
+                        #[cfg(all(feature = "wasm", not(feature = "native")))]
+                        let sub_kind = sub_kind.as_str();
+
+                        match sub_kind {
+                            "index" => {
+                                parent_ref = Some(node_text(&sub_child, source));
+                            }
+                            "def_type" => {
+                                let mut def_cursor = sub_child.walk();
+                                for def_child in sub_child.children(&mut def_cursor) {
+                                    if def_child.kind() == "struct_type" {
+                                        kind = extract_struct_kind(&def_child, source);
+                                    } else if def_child.kind() == "array_type" {
+                                        kind = extract_array_kind(&def_child, source);
+                                    } else if def_child.kind() == "func_type" {
+                                        let params = extract_parameters(&def_child, source);
+                                        for param in params {
+                                            parameters.push(param.param_type);
+                                        }
+                                        results.extend(extract_results(&def_child, source));
+                                    }
+                                }
+                            }
+                            _ => {
+                                if node_text(&sub_child, source) == "final" {
+                                    is_final = true;
+                                }
+                                if sub_child.kind() == "struct_type" {
+                                    kind = extract_struct_kind(&sub_child, source);
+                                } else if sub_child.kind() == "array_type" {
+                                    kind = extract_array_kind(&sub_child, source);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1463,6 +1564,8 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         name,
         index,
         kind,
+        parent: parent_ref,
+        is_final,
         line: type_node.range().start_point.row as u32,
         range: name_range,
     })
