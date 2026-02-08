@@ -7,8 +7,10 @@ mod references;
 mod semantic;
 mod stack;
 mod termination;
+pub mod tree_sitter;
 
 pub use references::*;
 pub use semantic::*;
 pub use stack::*;
 pub use termination::*;
+pub use tree_sitter::provide_tree_sitter_diagnostics;

@@ -30,7 +30,8 @@ pub mod hover;
 pub mod references;
 
 // Signature - signature help for function calls
-#[cfg(feature = "native")]
+// The call_info submodule is shared; the LSP wrapper is native-only
+#[cfg(any(feature = "native", feature = "wasm"))]
 pub mod signature;
 
 // Symbols - document symbol extraction

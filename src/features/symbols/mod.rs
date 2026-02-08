@@ -85,7 +85,8 @@ impl ValueType {
 }
 
 /// Convert from wast crate's ValType to our ValueType.
-/// Centralized conversion used by wast_parser.
+/// Used by wast_parser and wast_validator (native-only).
+#[cfg(feature = "native")]
 impl From<&wast::core::ValType<'_>> for ValueType {
     fn from(val_type: &wast::core::ValType) -> Self {
         match val_type {

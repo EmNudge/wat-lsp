@@ -13,6 +13,7 @@ use crate::diagnostics_core::track_stack_in_instr_list as core_track_stack_in_in
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
+use crate::signature::call_info::{find_function_call, find_function_call_ast, CallInfo, CallType};
 use crate::symbol_lookup::{find_symbol_definition_range, IndexContext};
 use crate::symbols::{SymbolTable, ValueType};
 use crate::ts_facade::{self, Language, Parser, Query, Tree};
@@ -138,10 +139,11 @@ impl WatLSP {
 
         // Add tree-sitter based syntax diagnostics and semantic diagnostics
         if let (Some(tree), Some(symbols)) = (&self.tree, &self.symbols) {
-            // Add syntax errors from tree-sitter ERROR nodes
-            let syntax_diagnostics = provide_tree_sitter_diagnostics(tree, &self.document);
+            // Add syntax errors from tree-sitter ERROR nodes (shared implementation)
+            let syntax_diagnostics =
+                crate::diagnostics_core::provide_tree_sitter_diagnostics(tree, &self.document);
             for diag in syntax_diagnostics {
-                js_array.push(&diagnostic_to_js(&diag));
+                js_array.push(&core_diagnostic_to_js(&diag));
             }
 
             // Add semantic diagnostics
@@ -747,205 +749,9 @@ impl WatLSP {
 }
 
 // ============================================================================
-// Signature Help helpers
+// Signature Help helpers (shared call_info module provides CallType, CallInfo,
+// find_function_call_ast, find_function_call, extract_name_from_call)
 // ============================================================================
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum CallType {
-    Direct,        // call $func
-    CallRef,       // call_ref $type
-    ReturnCallRef, // return_call_ref $type
-}
-
-struct CallInfo {
-    name: String,
-    arg_text: String,
-    call_type: CallType,
-}
-
-/// Find function call using AST analysis
-fn find_function_call_ast(node: &crate::ts_facade::Node, document: &str) -> Option<CallInfo> {
-    // Walk up the tree to find a call instruction
-    let mut current = node.clone();
-
-    loop {
-        let kind = current.kind();
-
-        // Check if this is a call instruction
-        if kind == "instr_plain" || kind == "expr1_plain" {
-            let instr_text = &document[current.byte_range()];
-
-            // Determine the call type based on the instruction text
-            let call_type = if instr_text.contains("return_call_ref ") {
-                Some(CallType::ReturnCallRef)
-            } else if instr_text.contains("call_ref ") {
-                Some(CallType::CallRef)
-            } else if instr_text.contains("call ") && !instr_text.contains("call_") {
-                Some(CallType::Direct)
-            } else {
-                None
-            };
-
-            if let Some(call_type) = call_type {
-                // Extract the function/type name from the call instruction
-                let mut name = None;
-                let mut arg_count = 0;
-
-                // Iterate through children to find the function name and count arguments
-                let mut cursor = current.walk();
-                for child in current.children(&mut cursor) {
-                    let child_kind = child.kind();
-
-                    // The function/type name is in an identifier or index node
-                    if child_kind == "index" || child_kind == "identifier" {
-                        if name.is_none() {
-                            // First identifier/index after the operator is the function/type name
-                            name = Some(&document[child.byte_range()]);
-                        } else {
-                            // Subsequent identifiers/indices are arguments
-                            arg_count += 1;
-                        }
-                    }
-                    // Also check inside type_use nodes (e.g. call_ref (type $t))
-                    if child_kind == "type_use" && name.is_none() {
-                        let mut inner_cursor = child.walk();
-                        for inner_child in child.children(&mut inner_cursor) {
-                            if inner_child.kind() == "index" || inner_child.kind() == "identifier" {
-                                name = Some(&document[inner_child.byte_range()]);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if let Some(func_name) = name {
-                    // Create arg_text with appropriate number of commas
-                    let arg_text = if arg_count > 0 {
-                        vec![","; arg_count - 1].join("")
-                    } else {
-                        String::new()
-                    };
-
-                    return Some(CallInfo {
-                        name: func_name.to_string(),
-                        arg_text,
-                        call_type,
-                    });
-                }
-            }
-        }
-
-        // Move to parent
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
-        }
-    }
-
-    None
-}
-
-/// Find function call using string-based analysis (fallback for incomplete code)
-fn find_function_call(line_prefix: &str) -> Option<CallInfo> {
-    let mut depth = 0;
-    let mut paren_pos: Option<usize> = None;
-
-    let chars: Vec<char> = line_prefix.chars().collect();
-
-    // Scan backwards to find the call instruction
-    for i in (0..chars.len()).rev() {
-        match chars[i] {
-            ')' => depth += 1,
-            '(' => {
-                if depth == 0 {
-                    paren_pos = Some(i);
-                    break;
-                } else {
-                    depth -= 1;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let paren_pos = paren_pos?;
-
-    // Now look backwards from paren to find call keyword and function/type name
-    let before_paren = &line_prefix[..paren_pos];
-    let call_pattern = before_paren.trim_end();
-
-    // Try to find return_call_ref first (most specific)
-    if let Some(call_idx) = call_pattern.rfind("return_call_ref ") {
-        let after_call = call_pattern[call_idx + 16..].trim_start();
-        if let Some(name) = extract_name_from_call(after_call) {
-            let arg_text = line_prefix[paren_pos + 1..].to_string();
-            return Some(CallInfo {
-                name,
-                arg_text,
-                call_type: CallType::ReturnCallRef,
-            });
-        }
-    }
-
-    // Try call_ref next
-    if let Some(call_idx) = call_pattern.rfind("call_ref ") {
-        let after_call = call_pattern[call_idx + 9..].trim_start();
-        if let Some(name) = extract_name_from_call(after_call) {
-            let arg_text = line_prefix[paren_pos + 1..].to_string();
-            return Some(CallInfo {
-                name,
-                arg_text,
-                call_type: CallType::CallRef,
-            });
-        }
-    }
-
-    // Finally try regular call (but not call_indirect or call_ref)
-    if let Some(call_idx) = call_pattern.rfind("call ") {
-        let before_call = &call_pattern[..call_idx];
-        if !before_call.ends_with("return_") && !before_call.ends_with('_') {
-            let after_call = call_pattern[call_idx + 5..].trim_start();
-            if let Some(name) = extract_name_from_call(after_call) {
-                let arg_text = line_prefix[paren_pos + 1..].to_string();
-                return Some(CallInfo {
-                    name,
-                    arg_text,
-                    call_type: CallType::Direct,
-                });
-            }
-        }
-    }
-
-    None
-}
-
-/// Extract the function/type name from text after a call keyword
-fn extract_name_from_call(after_call: &str) -> Option<String> {
-    let trimmed = after_call.trim_start();
-    // Handle (type $t) annotation form
-    if trimmed.starts_with("(type ") || trimmed.starts_with("(type\t") {
-        let inner = &trimmed[6..]; // skip "(type "
-        let name_end = inner
-            .find(|c: char| c == ')' || c.is_whitespace())
-            .unwrap_or(inner.len());
-        let name = inner[..name_end].trim().to_string();
-        if !name.is_empty() {
-            return Some(name);
-        }
-    }
-    // Extract function name/index (stop at whitespace or paren)
-    let name_end = after_call
-        .find(|c: char| c.is_whitespace() || c == '(')
-        .unwrap_or(after_call.len());
-
-    let name = after_call[..name_end].to_string();
-    if !name.is_empty() {
-        Some(name)
-    } else {
-        None
-    }
-}
 
 /// Provide signature help for direct function calls (call $func)
 fn provide_direct_call_signature_js(symbols: &SymbolTable, call_info: &CallInfo) -> JsValue {
@@ -1983,61 +1789,6 @@ fn find_undefined_identifiers(
 
 // ============================================================================
 
-/// Provide tree-sitter based syntax diagnostics (WASM version)
-fn provide_tree_sitter_diagnostics(
-    tree: &crate::ts_facade::Tree,
-    source: &str,
-) -> Vec<WasmDiagnostic> {
-    let mut diagnostics = Vec::new();
-    walk_tree_for_syntax_errors(tree.root_node(), source, &mut diagnostics);
-    diagnostics
-}
-
-/// Recursively walk the tree and collect ERROR nodes as diagnostics
-fn walk_tree_for_syntax_errors(node: Node, source: &str, diagnostics: &mut Vec<WasmDiagnostic>) {
-    if node.kind() == "ERROR" {
-        let start_point = node.start_position();
-        let end_point = node.end_position();
-        let text = &source[node.byte_range()];
-
-        let message = if text.trim().is_empty() {
-            "Syntax error: unexpected token".to_string()
-        } else {
-            format!("Syntax error near: {}", text.lines().next().unwrap_or(text))
-        };
-
-        diagnostics.push(WasmDiagnostic {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-            end_line: end_point.row as u32,
-            end_character: end_point.column as u32,
-            message,
-            severity: 1, // Error
-        });
-    }
-
-    // Check for MISSING nodes as well (incomplete syntax)
-    if node.is_missing() {
-        let start_point = node.start_position();
-        let end_point = node.end_position();
-
-        diagnostics.push(WasmDiagnostic {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-            end_line: end_point.row as u32,
-            end_character: end_point.column as u32,
-            message: format!("Missing {}", node.kind()),
-            severity: 1, // Error
-        });
-    }
-
-    // Recursively check children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_tree_for_syntax_errors(child, source, diagnostics);
-    }
-}
-
 fn diagnostic_to_js(diag: &WasmDiagnostic) -> JsValue {
     let obj = js_sys::Object::new();
 
@@ -2055,6 +1806,21 @@ fn diagnostic_to_js(diag: &WasmDiagnostic) -> JsValue {
     js_sys::Reflect::set(&obj, &"message".into(), &diag.message.clone().into()).ok();
     js_sys::Reflect::set(&obj, &"severity".into(), &diag.severity.into()).ok();
 
+    obj.into()
+}
+
+/// Convert a core::types::Diagnostic to a JavaScript object
+fn core_diagnostic_to_js(diag: &CoreDiagnostic) -> JsValue {
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(&obj, &"range".into(), &range_to_js(&diag.range)).ok();
+    js_sys::Reflect::set(&obj, &"message".into(), &diag.message.clone().into()).ok();
+    let severity: u32 = match diag.severity {
+        crate::core::types::DiagnosticSeverity::Error => 1,
+        crate::core::types::DiagnosticSeverity::Warning => 2,
+        crate::core::types::DiagnosticSeverity::Information => 3,
+        crate::core::types::DiagnosticSeverity::Hint => 4,
+    };
+    js_sys::Reflect::set(&obj, &"severity".into(), &severity.into()).ok();
     obj.into()
 }
 

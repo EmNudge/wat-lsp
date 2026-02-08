@@ -4,6 +4,7 @@
 //! documentation that is generated at build time from `docs/instructions.md`
 //! and `docs/annotations.md`.
 
+#[cfg(feature = "native")]
 use std::collections::HashMap;
 
 mod generated {
@@ -26,7 +27,8 @@ pub fn get_instruction_doc(name: &str) -> Option<&'static str> {
     INSTRUCTION_DOCS.get(name).copied()
 }
 
-/// Get all instruction names
+/// Get all instruction names (native-only: used by wat-docs binary)
+#[cfg(feature = "native")]
 pub fn instruction_names() -> Vec<&'static str> {
     let mut names: Vec<_> = INSTRUCTION_DOCS.keys().copied().collect();
     names.sort();
@@ -34,11 +36,13 @@ pub fn instruction_names() -> Vec<&'static str> {
 }
 
 /// Get all instruction documentation as a reference to the underlying HashMap
+#[cfg(feature = "native")]
 pub fn all_instructions() -> &'static HashMap<&'static str, &'static str> {
     &INSTRUCTION_DOCS
 }
 
 /// Search for instructions matching a pattern (case-insensitive substring match)
+#[cfg(feature = "native")]
 pub fn search_instructions(pattern: &str) -> Vec<(&'static str, &'static str)> {
     let pattern_lower = pattern.to_lowercase();
     let mut results: Vec<_> = INSTRUCTION_DOCS
@@ -54,6 +58,7 @@ pub fn search_instructions(pattern: &str) -> Vec<(&'static str, &'static str)> {
 }
 
 /// Search for instructions where the name matches a pattern
+#[cfg(feature = "native")]
 pub fn search_instruction_names(pattern: &str) -> Vec<&'static str> {
     let pattern_lower = pattern.to_lowercase();
     let mut results: Vec<_> = INSTRUCTION_DOCS
@@ -74,7 +79,8 @@ pub fn get_annotation_doc(name: &str) -> Option<&'static str> {
     ANNOTATION_DOCS.get(name).copied()
 }
 
-/// Get all annotation names
+/// Get all annotation names (native-only: used by wat-docs binary)
+#[cfg(feature = "native")]
 pub fn annotation_names() -> Vec<&'static str> {
     let mut names: Vec<_> = ANNOTATION_DOCS.keys().copied().collect();
     names.sort();
@@ -82,6 +88,7 @@ pub fn annotation_names() -> Vec<&'static str> {
 }
 
 /// Get all annotation documentation as a reference to the underlying HashMap
+#[cfg(feature = "native")]
 pub fn all_annotations() -> &'static HashMap<&'static str, &'static str> {
     &ANNOTATION_DOCS
 }
