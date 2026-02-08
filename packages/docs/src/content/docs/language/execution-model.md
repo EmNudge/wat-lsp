@@ -1,6 +1,8 @@
 ---
 title: 'Execution Model'
 description: 'Stack machine, memory layout, traps, and module instantiation.'
+sidebar:
+  order: 8
 ---
 
 Understanding the execution model helps you reason about what your WAT code actually does at runtime.

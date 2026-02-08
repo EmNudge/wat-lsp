@@ -1,6 +1,8 @@
 ---
 title: Reference
 description: Reference type operations
+sidebar:
+  order: 10
 ---
 
 ## ref.null

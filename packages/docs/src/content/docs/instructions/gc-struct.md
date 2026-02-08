@@ -1,6 +1,8 @@
 ---
 title: GC Struct
 description: WasmGC struct operations
+sidebar:
+  order: 13
 ---
 
 ## struct.new

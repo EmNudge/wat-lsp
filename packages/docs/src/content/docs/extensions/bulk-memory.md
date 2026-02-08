@@ -1,6 +1,9 @@
 ---
 title: 'Bulk Memory Operations'
 description: 'Efficient copying and filling for memory and tables.'
+sidebar:
+  order: 2
+  label: Bulk Memory Ops
 ---
 
 Bulk memory adds fast, in-engine operations for copying and filling regions of memory and tables.

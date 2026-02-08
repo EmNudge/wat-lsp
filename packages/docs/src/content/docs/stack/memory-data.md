@@ -1,6 +1,8 @@
 ---
 title: 'Memory & Data'
 description: Linear memory, loads/stores, memory size/grow, and data segments.
+sidebar:
+  order: 4
 ---
 
 WebAssembly exposes a contiguous byte array called linear memory. You interact with it via typed load/store instructions and can initialize it with data segments.

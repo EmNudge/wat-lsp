@@ -1,5 +1,7 @@
 ---
 title: What is WAT?
+sidebar:
+  order: 1
 ---
 
 **WAT** (WebAssembly Text Format) is the human-readable form of WebAssembly.

@@ -1,6 +1,8 @@
 ---
 title: Exceptions
 description: Exception handling operations
+sidebar:
+  order: 17
 ---
 
 ## throw

@@ -290,12 +290,21 @@ function categorize(name) {
   return 'misc';
 }
 
+// Get the sidebar order for a category based on its position in the categories object
+function getCategoryOrder(category) {
+  const keys = Object.keys(categories).filter((k) => k !== 'misc');
+  const index = keys.indexOf(category);
+  return index >= 0 ? index + 1 : undefined;
+}
+
 // Generate markdown for a category page
 function generateCategoryPage(category, instructions) {
   const cat = categories[category];
+  const order = getCategoryOrder(category);
+  const sidebarYaml = order != null ? `\nsidebar:\n  order: ${order}` : '';
   let content = `---
 title: ${cat.title}
-description: ${cat.description}
+description: ${cat.description}${sidebarYaml}
 ---
 
 `;
@@ -352,7 +361,7 @@ async function main() {
     console.log(`Generated ${filename} with ${instrs.length} instructions`);
   }
 
-  console.log('\nDone! Update astro.config.mjs to add these pages to the sidebar.');
+  console.log('\nDone!');
 }
 
 main().catch(console.error);

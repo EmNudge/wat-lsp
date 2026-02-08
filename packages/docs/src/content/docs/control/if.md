@@ -1,6 +1,8 @@
 ---
 title: 'if / else'
 description: Conditional execution with optional result values.
+sidebar:
+  order: 3
 ---
 
 `if` consumes an `i32` condition (0 = false, non-zero = true). Both branches must match result types when present.

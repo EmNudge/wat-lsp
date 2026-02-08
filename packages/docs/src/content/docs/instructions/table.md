@@ -1,6 +1,8 @@
 ---
 title: Table
 description: Table operations
+sidebar:
+  order: 9
 ---
 
 ## table.get

@@ -1,6 +1,8 @@
 ---
 title: GC i31
 description: WasmGC i31 operations
+sidebar:
+  order: 15
 ---
 
 ## ref.i31

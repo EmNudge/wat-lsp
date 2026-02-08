@@ -1,6 +1,9 @@
 ---
 title: 'Import/Export of Mutable Globals'
 description: 'Share and modify mutable globals between JS and Wasm.'
+sidebar:
+  order: 6
+  label: Import/Export Mutable Globals
 ---
 
 ## Export a mutable global from Wasm

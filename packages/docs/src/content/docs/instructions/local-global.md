@@ -1,6 +1,8 @@
 ---
 title: Local & Global
 description: Local and global variable operations
+sidebar:
+  order: 5
 ---
 
 ## local.get

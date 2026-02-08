@@ -1,6 +1,8 @@
 ---
 title: Constants
 description: i32.const, i64.const, f32.const, f64.const and using immediates.
+sidebar:
+  order: 8
 ---
 
 Push literal values onto the stack.

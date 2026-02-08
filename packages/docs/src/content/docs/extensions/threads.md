@@ -1,6 +1,8 @@
 ---
 title: 'Threads & Atomics'
 description: 'Shared memory and atomic operations for multi-threaded WebAssembly.'
+sidebar:
+  order: 14
 ---
 
 The threads proposal adds shared linear memory and atomic operations to WebAssembly, enabling safe multi-threaded programming. Memory is declared with the `shared` keyword so it can be accessed from multiple threads via `SharedArrayBuffer` on the host side. All atomic operations provide sequential consistency and require naturally aligned addresses (e.g., 4-byte alignment for `i32` operations). Thread synchronization is supported through `memory.atomic.wait32`/`memory.atomic.wait64` to suspend a thread until a memory location changes, and `memory.atomic.notify` to wake waiting threads. An `atomic.fence` instruction ensures memory ordering between atomic and non-atomic accesses.

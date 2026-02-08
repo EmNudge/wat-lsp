@@ -1,6 +1,8 @@
 ---
 title: 'Bitwise & Shifts'
 description: and, or, xor, shifts, and rotates for integers.
+sidebar:
+  order: 5
 ---
 
 Bitwise ops are for integers only.

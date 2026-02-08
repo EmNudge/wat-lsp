@@ -1,6 +1,8 @@
 ---
 title: Conversions
 description: Int/float conversions, extend/wrap, promote/demote, trunc/convert.
+sidebar:
+  order: 6
 ---
 
 ```wat

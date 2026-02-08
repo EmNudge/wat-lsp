@@ -1,6 +1,8 @@
 ---
 title: Operators
 description: The essential WAT instructions for arithmetic, comparison, locals, and control flow.
+sidebar:
+  order: 3
 ---
 
 WebAssembly is a stack machine. Most instructions pop operands from the stack and push results back.

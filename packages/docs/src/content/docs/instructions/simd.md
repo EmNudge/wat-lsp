@@ -1,6 +1,8 @@
 ---
 title: SIMD (v128)
 description: 128-bit SIMD operations
+sidebar:
+  order: 18
 ---
 
 ## v128.const

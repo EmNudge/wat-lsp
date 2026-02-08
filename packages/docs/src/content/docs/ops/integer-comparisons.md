@@ -1,6 +1,8 @@
 ---
 title: Integer Comparisons
 description: eq, ne, lt/le/gt/ge with signed/unsigned variants.
+sidebar:
+  order: 2
 ---
 
 Comparisons push `i32` booleans (0 = false, 1 = true).

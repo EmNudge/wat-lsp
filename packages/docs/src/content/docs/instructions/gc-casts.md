@@ -1,6 +1,8 @@
 ---
 title: GC Casts
 description: WasmGC type cast operations
+sidebar:
+  order: 16
 ---
 
 ## ref.test

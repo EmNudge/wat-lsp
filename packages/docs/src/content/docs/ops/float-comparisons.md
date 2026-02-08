@@ -1,6 +1,8 @@
 ---
 title: Float Comparisons
 description: f32/f64 eq, ne, lt/le/gt/ge with NaN semantics.
+sidebar:
+  order: 4
 ---
 
 Float comparisons push `i32` booleans. NaN makes `eq` false and `ne` true; all other comparisons with NaN return false.

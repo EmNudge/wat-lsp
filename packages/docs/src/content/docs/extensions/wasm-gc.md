@@ -1,6 +1,8 @@
 ---
 title: 'Garbage Collection (WasmGC)'
 description: 'Low-level primitives for managed structs/arrays to support GC languages.'
+sidebar:
+  order: 4
 ---
 
 WasmGC provides reference-typed objects (structs, arrays) that engines can manage with garbage collection. This enables efficient runtimes for languages like Kotlin, Java, and Dart.

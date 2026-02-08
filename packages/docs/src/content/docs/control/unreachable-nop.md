@@ -1,6 +1,8 @@
 ---
 title: 'unreachable & nop'
 description: Trap immediately, or do nothing.
+sidebar:
+  order: 8
 ---
 
 - `unreachable` — traps when executed. Useful for asserting impossible states.

@@ -1,6 +1,8 @@
 ---
 title: 'br & br_if'
 description: Structured branches to labeled blocks and loops.
+sidebar:
+  order: 4
 ---
 
 `br` performs an unconditional jump to the end of a `block` or to the top of a `loop`. `br_if` pops a condition and branches if non-zero.

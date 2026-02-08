@@ -1,6 +1,9 @@
 ---
 title: Parametric Instructions
 description: 'Stack-level utilities: drop and select for branchless control.'
+sidebar:
+  order: 1
+  label: Parametric
 ---
 
 Parametric instructions operate directly on the value stack.

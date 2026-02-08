@@ -1,6 +1,9 @@
 ---
 title: 'Extended Constant Expressions'
 description: 'Richer constant initializers for globals, tables, and element/data offsets.'
+sidebar:
+  order: 3
+  label: Extended Const Expressions
 ---
 
 Extended const expressions allow more forms in places that require constants, like global initializers and element/data offsets.

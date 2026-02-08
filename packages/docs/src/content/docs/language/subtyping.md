@@ -1,6 +1,8 @@
 ---
 title: 'Subtyping'
 description: 'The WebAssembly type hierarchy and subtyping rules.'
+sidebar:
+  order: 6
 ---
 
 The GC proposal introduces a type hierarchy that enables runtime casts, polymorphism, and safe downcasting. Subtyping determines when one type can be used where another is expected.

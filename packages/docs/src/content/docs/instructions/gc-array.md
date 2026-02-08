@@ -1,6 +1,8 @@
 ---
 title: GC Array
 description: WasmGC array operations
+sidebar:
+  order: 14
 ---
 
 ## array.new

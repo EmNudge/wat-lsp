@@ -1,6 +1,8 @@
 ---
 title: Module Structure
 description: Module definition constructs
+sidebar:
+  order: 11
 ---
 
 ## module

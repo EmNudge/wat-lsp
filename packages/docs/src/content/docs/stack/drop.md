@@ -1,6 +1,8 @@
 ---
 title: drop
 description: Discard the top-of-stack value.
+sidebar:
+  order: 2
 ---
 
 `drop` removes the top value from the stack.

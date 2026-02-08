@@ -1,6 +1,8 @@
 ---
 title: loop
 description: Repeat a block; branches target the top to continue.
+sidebar:
+  order: 2
 ---
 
 Branching to a `loop` label jumps back to the top, like `continue` in other languages. Combine with an outer `block` for a clean break target.
