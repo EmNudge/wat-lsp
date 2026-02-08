@@ -365,11 +365,6 @@ fn process_call_indirect_node(
     let text = &source[node.byte_range()];
     let instr_name = text.split_whitespace().next().unwrap_or("call_indirect");
 
-    if is_terminating_instruction(instr_name) {
-        stack.mark_uncertain();
-        return;
-    }
-
     // Get operand count: N params + 1 table index
     let operand_count = get_dynamic_operand_count(node, instr_name, symbols, source);
     if operand_count > 0 {
@@ -378,6 +373,15 @@ fn process_call_indirect_node(
                 create_stack_underflow_diagnostic(node, instr_name, operand_count, available);
             diagnostics.push(diagnostic);
         }
+    }
+
+    // Handle return_call_indirect: validate return types and mark uncertain
+    if is_terminating_instruction(instr_name) {
+        if let Some(diag) = validate_tail_call_return_types(node, instr_name, symbols, source) {
+            diagnostics.push(diag);
+        }
+        stack.mark_uncertain();
+        return;
     }
 
     // Produce result types
@@ -425,7 +429,24 @@ fn process_instruction(
     arity_map: &HashMap<&'static str, InstructionArity>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Handle control flow that makes subsequent code dead
+    // Handle tail call instructions: consume operands, validate return types, then mark uncertain
+    if matches!(instr_name, "return_call" | "return_call_ref") {
+        let operand_count = get_dynamic_operand_count(node, instr_name, symbols, source);
+        if operand_count > 0 {
+            if let Err(available) = stack.consume(operand_count) {
+                let diagnostic =
+                    create_stack_underflow_diagnostic(node, instr_name, operand_count, available);
+                diagnostics.push(diagnostic);
+            }
+        }
+        if let Some(diag) = validate_tail_call_return_types(node, instr_name, symbols, source) {
+            diagnostics.push(diag);
+        }
+        stack.mark_uncertain();
+        return;
+    }
+
+    // Handle other control flow that makes subsequent code dead
     if is_terminating_instruction(instr_name) {
         stack.mark_uncertain();
         return;
@@ -469,7 +490,7 @@ pub fn get_dynamic_operand_count(
     source: &str,
 ) -> usize {
     match instr_name {
-        "call" => {
+        "call" | "return_call" => {
             // Get function index/name and look up parameter count
             if let Some(func_ref) = get_index_from_node(node, source) {
                 if let Some(func) = symbols.get_function_by_name(&func_ref) {
@@ -760,7 +781,7 @@ pub fn infer_instruction_result_types(
             .unwrap_or_else(|| vec![ValueType::Unknown]),
 
         // Call instructions - need function signature lookup
-        "call" => get_call_result_types(node, symbols, source),
+        "call" | "return_call" => get_call_result_types(node, symbols, source),
         "call_ref" | "return_call_ref" => get_call_ref_result_types(node, symbols, source),
         "call_indirect" | "return_call_indirect" => {
             get_call_indirect_result_types(node, symbols, source)
@@ -1126,7 +1147,32 @@ fn process_folded_expr(
 ) {
     // Get instruction info from the expression
     if let Some((instr_name, explicit_operands)) = get_folded_expr_info(expr, source) {
-        // Handle control flow that makes subsequent code dead
+        // Handle tail call instructions: consume operands, validate return types, mark uncertain
+        if matches!(
+            instr_name.as_str(),
+            "return_call" | "return_call_ref" | "return_call_indirect"
+        ) {
+            let expected =
+                get_expected_operands_by_name(&instr_name, symbols, source, arity_map, expr);
+            let from_stack = expected.saturating_sub(explicit_operands);
+            if from_stack > 0 {
+                if let Err(available) = stack.consume(from_stack) {
+                    let diagnostic =
+                        create_stack_underflow_diagnostic(expr, &instr_name, from_stack, available);
+                    diagnostics.push(diagnostic);
+                }
+            }
+            // Validate tail call return type compatibility
+            if let Some(diag) =
+                validate_tail_call_in_folded_expr(expr, &instr_name, symbols, source)
+            {
+                diagnostics.push(diag);
+            }
+            stack.mark_uncertain();
+            return;
+        }
+
+        // Handle other control flow that makes subsequent code dead
         if is_terminating_instruction(&instr_name) {
             stack.mark_uncertain();
             return;
@@ -1540,6 +1586,141 @@ pub fn check_return_types(
             );
         }
     }
+}
+
+/// Validate tail call return types in a folded expression.
+/// Finds the instruction node inside the expr and delegates to validate_tail_call_return_types.
+fn validate_tail_call_in_folded_expr(
+    expr: &Node,
+    instr_name: &str,
+    symbols: &SymbolTable,
+    source: &str,
+) -> Option<Diagnostic> {
+    // Navigate to find the relevant node for type resolution
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind.starts_with("expr1_") {
+            if kind == "expr1_call" {
+                return validate_tail_call_return_types(&child, instr_name, symbols, source);
+            }
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let inner_kind = inner_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let inner_kind = inner_child.kind();
+
+                if inner_kind == "instr_plain" {
+                    return validate_tail_call_return_types(
+                        &inner_child,
+                        instr_name,
+                        symbols,
+                        source,
+                    );
+                }
+            }
+        }
+        if kind == "expr1" {
+            let mut mid_cursor = child.walk();
+            for mid_child in child.children(&mut mid_cursor) {
+                #[cfg(feature = "native")]
+                let mid_kind = mid_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let mid_kind = mid_child.kind();
+
+                if mid_kind == "expr1_call" {
+                    return validate_tail_call_return_types(
+                        &mid_child, instr_name, symbols, source,
+                    );
+                }
+                if mid_kind.starts_with("expr1_") {
+                    let mut inner_cursor = mid_child.walk();
+                    for inner_child in mid_child.children(&mut inner_cursor) {
+                        #[cfg(feature = "native")]
+                        let inner_kind = inner_child.kind();
+                        #[cfg(all(feature = "wasm", not(feature = "native")))]
+                        let inner_kind = inner_child.kind();
+
+                        if inner_kind == "instr_plain" {
+                            return validate_tail_call_return_types(
+                                &inner_child,
+                                instr_name,
+                                symbols,
+                                source,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Format a slice of ValueTypes for display, e.g. "(i32, f64)"
+fn format_types(types: &[ValueType]) -> String {
+    if types.is_empty() {
+        return "(none)".to_string();
+    }
+    let inner: Vec<_> = types.iter().map(|t| t.to_string()).collect();
+    format!("({})", inner.join(", "))
+}
+
+/// Validate that a tail call instruction's callee return types match the enclosing function's return types.
+/// Returns Some(Diagnostic) if there's a mismatch, None otherwise.
+fn validate_tail_call_return_types(
+    node: &Node,
+    instr_name: &str,
+    symbols: &SymbolTable,
+    source: &str,
+) -> Option<Diagnostic> {
+    // Resolve enclosing function's return types
+    let func_line = node.start_position().row as u32;
+    let enclosing_func = symbols.find_function_containing_line(func_line)?;
+    let enclosing_results = &enclosing_func.results;
+
+    // Resolve callee's return types
+    let callee_results = match instr_name {
+        "return_call" => get_call_result_types(node, symbols, source),
+        "return_call_ref" => get_call_ref_result_types(node, symbols, source),
+        "return_call_indirect" => get_call_indirect_result_types(node, symbols, source),
+        _ => return None,
+    };
+
+    // Skip if we couldn't resolve callee results or they contain Unknown
+    if callee_results.is_empty() || callee_results.contains(&ValueType::Unknown) {
+        return None;
+    }
+
+    // Compare
+    if callee_results != *enclosing_results {
+        let callee_name = get_index_from_node(node, source).unwrap_or_default();
+        let label = if callee_name.is_empty() {
+            instr_name.to_string()
+        } else {
+            format!("{} {}", instr_name, callee_name)
+        };
+        let range = node_to_range(node);
+        return Some(
+            Diagnostic::error(
+                range,
+                format!(
+                    "Tail call return type mismatch: '{}' returns {} but enclosing function returns {}",
+                    label,
+                    format_types(&callee_results),
+                    format_types(enclosing_results),
+                ),
+            )
+            .with_code("tail-call-type-mismatch"),
+        );
+    }
+
+    None
 }
 
 /// Create a diagnostic for stack underflow

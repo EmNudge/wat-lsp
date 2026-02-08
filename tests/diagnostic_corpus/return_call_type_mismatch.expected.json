@@ -1,0 +1,11 @@
+{
+  "description": "Tail call return type mismatch detection",
+  "diagnostics": [
+    {
+      "line": 5,
+      "message_contains": "mismatch",
+      "message_contains_all": ["return", "type"],
+      "severity": 1
+    }
+  ]
+}
