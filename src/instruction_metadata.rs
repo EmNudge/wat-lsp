@@ -119,6 +119,28 @@ impl InstructionArity {
         }
     }
 
+    /// Atomic RMW operation - addr + operand → old value
+    const fn mem_rmw() -> Self {
+        Self {
+            min_params: 0,
+            max_params: 1,
+            param_description: "optional memory index",
+            operand_mode: OperandMode::Fixed(2), // consumes address and operand
+            produces: 1,
+        }
+    }
+
+    /// Atomic cmpxchg operation - addr + expected + replacement → old value
+    const fn mem_cmpxchg() -> Self {
+        Self {
+            min_params: 0,
+            max_params: 1,
+            param_description: "optional memory index",
+            operand_mode: OperandMode::Fixed(3), // consumes address, expected, replacement
+            produces: 1,
+        }
+    }
+
     pub fn is_valid(&self, param_count: usize) -> bool {
         param_count >= self.min_params && param_count <= self.max_params
     }
@@ -607,6 +629,88 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
 
     // Atomic operations
     map.insert("atomic.fence", InstructionArity::nullary()); // no operands, no results
+
+    // Atomic loads - addr → value
+    map.insert("i32.atomic.load", InstructionArity::mem_load());
+    map.insert("i64.atomic.load", InstructionArity::mem_load());
+    map.insert("i32.atomic.load8_u", InstructionArity::mem_load());
+    map.insert("i32.atomic.load16_u", InstructionArity::mem_load());
+    map.insert("i64.atomic.load8_u", InstructionArity::mem_load());
+    map.insert("i64.atomic.load16_u", InstructionArity::mem_load());
+    map.insert("i64.atomic.load32_u", InstructionArity::mem_load());
+
+    // Atomic stores - addr + value → ∅
+    map.insert("i32.atomic.store", InstructionArity::mem_store());
+    map.insert("i64.atomic.store", InstructionArity::mem_store());
+    map.insert("i32.atomic.store8", InstructionArity::mem_store());
+    map.insert("i32.atomic.store16", InstructionArity::mem_store());
+    map.insert("i64.atomic.store8", InstructionArity::mem_store());
+    map.insert("i64.atomic.store16", InstructionArity::mem_store());
+    map.insert("i64.atomic.store32", InstructionArity::mem_store());
+
+    // Atomic RMW i32 full-width - addr + operand → old value
+    map.insert("i32.atomic.rmw.add", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw.sub", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw.and", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw.or", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw.xor", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw.xchg", InstructionArity::mem_rmw());
+
+    // Atomic RMW i32 narrow
+    map.insert("i32.atomic.rmw8.add_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw8.sub_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw8.and_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw8.or_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw8.xor_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw8.xchg_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw16.add_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw16.sub_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw16.and_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw16.or_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw16.xor_u", InstructionArity::mem_rmw());
+    map.insert("i32.atomic.rmw16.xchg_u", InstructionArity::mem_rmw());
+
+    // Atomic RMW i64 full-width
+    map.insert("i64.atomic.rmw.add", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw.sub", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw.and", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw.or", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw.xor", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw.xchg", InstructionArity::mem_rmw());
+
+    // Atomic RMW i64 narrow
+    map.insert("i64.atomic.rmw8.add_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw8.sub_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw8.and_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw8.or_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw8.xor_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw8.xchg_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw16.add_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw16.sub_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw16.and_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw16.or_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw16.xor_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw16.xchg_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw32.add_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw32.sub_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw32.and_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw32.or_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw32.xor_u", InstructionArity::mem_rmw());
+    map.insert("i64.atomic.rmw32.xchg_u", InstructionArity::mem_rmw());
+
+    // Atomic cmpxchg - addr + expected + replacement → old value
+    map.insert("i32.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg());
+    map.insert("i64.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg());
+    map.insert("i32.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg());
+    map.insert("i32.atomic.rmw16.cmpxchg_u", InstructionArity::mem_cmpxchg());
+    map.insert("i64.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg());
+    map.insert("i64.atomic.rmw16.cmpxchg_u", InstructionArity::mem_cmpxchg());
+    map.insert("i64.atomic.rmw32.cmpxchg_u", InstructionArity::mem_cmpxchg());
+
+    // Wait/notify
+    map.insert("memory.atomic.wait32", InstructionArity::exact(0, "", 3, 1)); // addr + expected(i32) + timeout(i64) → i32
+    map.insert("memory.atomic.wait64", InstructionArity::exact(0, "", 3, 1)); // addr + expected(i64) + timeout(i64) → i32
+    map.insert("memory.atomic.notify", InstructionArity::exact(0, "", 2, 1)); // addr + count → woken
 
     map
 }
@@ -1123,5 +1227,83 @@ mod tests {
         assert_eq!(infer_simd_instruction_arity("i32.add"), None);
         assert_eq!(infer_simd_instruction_arity("local.get"), None);
         assert_eq!(infer_simd_instruction_arity("call"), None);
+    }
+
+    #[test]
+    fn test_atomic_instruction_arity() {
+        let map = get_instruction_arity_map();
+
+        // fence: no operands, no results
+        let fence = &map["atomic.fence"];
+        assert_eq!(fence.operand_mode, OperandMode::Fixed(0));
+        assert_eq!(fence.produces, 0);
+
+        // Atomic loads: addr → value (same shape as mem_load)
+        for instr in &[
+            "i32.atomic.load",
+            "i64.atomic.load",
+            "i32.atomic.load8_u",
+            "i32.atomic.load16_u",
+            "i64.atomic.load8_u",
+            "i64.atomic.load16_u",
+            "i64.atomic.load32_u",
+        ] {
+            let arity = &map[*instr];
+            assert_eq!(arity.operand_mode, OperandMode::Fixed(1), "{instr} operands");
+            assert_eq!(arity.produces, 1, "{instr} produces");
+        }
+
+        // Atomic stores: addr + value → ∅ (same shape as mem_store)
+        for instr in &[
+            "i32.atomic.store",
+            "i64.atomic.store",
+            "i32.atomic.store8",
+            "i32.atomic.store16",
+            "i64.atomic.store8",
+            "i64.atomic.store16",
+            "i64.atomic.store32",
+        ] {
+            let arity = &map[*instr];
+            assert_eq!(arity.operand_mode, OperandMode::Fixed(2), "{instr} operands");
+            assert_eq!(arity.produces, 0, "{instr} produces");
+        }
+
+        // Atomic RMW: addr + operand → old value
+        for instr in &[
+            "i32.atomic.rmw.add",
+            "i64.atomic.rmw.sub",
+            "i32.atomic.rmw8.xor_u",
+            "i64.atomic.rmw16.xchg_u",
+            "i64.atomic.rmw32.and_u",
+        ] {
+            let arity = &map[*instr];
+            assert_eq!(arity.operand_mode, OperandMode::Fixed(2), "{instr} operands");
+            assert_eq!(arity.produces, 1, "{instr} produces");
+        }
+
+        // Atomic cmpxchg: addr + expected + replacement → old value
+        for instr in &[
+            "i32.atomic.rmw.cmpxchg",
+            "i64.atomic.rmw.cmpxchg",
+            "i32.atomic.rmw8.cmpxchg_u",
+            "i64.atomic.rmw32.cmpxchg_u",
+        ] {
+            let arity = &map[*instr];
+            assert_eq!(arity.operand_mode, OperandMode::Fixed(3), "{instr} operands");
+            assert_eq!(arity.produces, 1, "{instr} produces");
+        }
+
+        // Wait/notify
+        let wait32 = &map["memory.atomic.wait32"];
+        assert_eq!(wait32.operand_mode, OperandMode::Fixed(3));
+        assert_eq!(wait32.produces, 1);
+
+        let wait64 = &map["memory.atomic.wait64"];
+        assert_eq!(wait64.operand_mode, OperandMode::Fixed(3));
+        assert_eq!(wait64.produces, 1);
+
+        let notify = &map["memory.atomic.notify"];
+        assert_eq!(notify.operand_mode, OperandMode::Fixed(2));
+        assert_eq!(notify.produces, 1);
     }
 }

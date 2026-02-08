@@ -1,0 +1,4 @@
+{
+  "description": "Valid atomic operations with shared memory should produce no diagnostics",
+  "diagnostics": []
+}
