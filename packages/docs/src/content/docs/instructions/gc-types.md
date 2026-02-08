@@ -1,6 +1,8 @@
 ---
 title: GC Types
 description: WasmGC type definitions
+sidebar:
+  order: 12
 ---
 
 ## sub

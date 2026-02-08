@@ -1,11 +1,14 @@
 ---
 title: 'Reference Types (externref)'
 description: 'Hold references to host objects and use function references.'
+sidebar:
+  order: 8
+  label: Reference Types
 ---
 
 This extension lets Wasm store references to host objects (`externref`) and introduces more flexible function references.
 
-See the [Reference Types](/reference-types/) page for fundamentals. Use with tables and `call_indirect` for dynamic dispatch.
+See the [Reference Types](/language/reference-types/) page for fundamentals. Use with tables and `call_indirect` for dynamic dispatch.
 
 ## Instruction Reference
 

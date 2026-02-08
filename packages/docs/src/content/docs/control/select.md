@@ -1,6 +1,8 @@
 ---
 title: select
 description: Choose between two stack values based on an i32 condition.
+sidebar:
+  order: 9
 ---
 
 `select` pops three values — two candidates and a condition — and pushes the first if the condition is non-zero, otherwise the second. Both candidates must share the same type.

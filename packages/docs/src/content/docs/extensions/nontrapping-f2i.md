@@ -1,6 +1,9 @@
 ---
 title: 'Non-trapping float-to-int'
 description: 'Saturating conversions from floats to integers that do not trap.'
+sidebar:
+  order: 9
+  label: "Non-trapping Float\u2192Int"
 ---
 
 Instead of trapping on overflow or NaN, these instructions clamp to min/max and convert NaN to 0.

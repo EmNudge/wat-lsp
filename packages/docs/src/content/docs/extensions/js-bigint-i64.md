@@ -1,6 +1,9 @@
 ---
 title: 'JS BigInt ↔ Wasm i64'
 description: 'Map JavaScript BigInt to WebAssembly i64 parameters and results.'
+sidebar:
+  order: 1
+  label: 'JS BigInt ↔ i64'
 ---
 
 Modern JS engines map Wasm `i64` to JavaScript `BigInt`. You can pass `BigInt` values to Wasm functions that take `i64` and receive `BigInt` from `i64` results.

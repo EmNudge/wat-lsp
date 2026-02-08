@@ -1,6 +1,8 @@
 ---
 title: Interfacing with Hosts
 description: Import functions, export APIs, and share memory to call WAT modules from JavaScript and other hosts.
+sidebar:
+  order: 4
 ---
 
 Most real programs talk to a host (like JavaScript) via imports/exports and linear memory.

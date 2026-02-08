@@ -1,6 +1,8 @@
 ---
 title: 'Typed Function References'
 description: 'Precise typing for function references and call_ref.'
+sidebar:
+  order: 13
 ---
 
 Typed function references make function refs carry specific types and enable `call_ref`.

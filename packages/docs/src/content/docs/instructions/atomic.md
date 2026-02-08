@@ -1,6 +1,8 @@
 ---
 title: Atomics
 description: Atomic memory operations (threads)
+sidebar:
+  order: 19
 ---
 
 ## i32.atomic.load

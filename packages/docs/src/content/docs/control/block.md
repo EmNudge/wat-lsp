@@ -1,6 +1,8 @@
 ---
 title: block
 description: Structured block with optional result type and label targets.
+sidebar:
+  order: 1
 ---
 
 `block` creates a labeled scope. Branching to its label exits the block. It can optionally produce results.

@@ -1,6 +1,9 @@
 ---
 title: 'Fixed-width SIMD (128-bit)'
 description: 'Vector operations with v128 values and lane-wise instructions.'
+sidebar:
+  order: 11
+  label: SIMD (128-bit)
 ---
 
 SIMD enables lane-wise parallel operations on 128-bit vectors.

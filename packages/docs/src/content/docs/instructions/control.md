@@ -1,6 +1,8 @@
 ---
 title: Control Flow
 description: Control flow instructions
+sidebar:
+  order: 6
 ---
 
 ## block

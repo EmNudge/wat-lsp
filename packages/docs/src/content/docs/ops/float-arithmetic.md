@@ -1,6 +1,8 @@
 ---
 title: Float Arithmetic
 description: f32/f64 add, sub, mul, div with IEEE 754 semantics.
+sidebar:
+  order: 3
 ---
 
 Floats follow IEEE 754: NaNs propagate and division by zero yields ±Inf (no trap).

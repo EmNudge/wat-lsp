@@ -1,6 +1,8 @@
 ---
 title: br_table
 description: Multi-way branch (switch) over an index with a default.
+sidebar:
+  order: 5
 ---
 
 `br_table` pops an `i32` index and branches to one of several labels. Out-of-range values fall through to a default label. Useful for `switch`-like dispatch.

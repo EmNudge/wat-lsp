@@ -1,6 +1,8 @@
 ---
 title: Type Names
 description: Value type names used in signatures
+sidebar:
+  order: 20
 ---
 
 ## i32

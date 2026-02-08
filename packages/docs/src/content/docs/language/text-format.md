@@ -1,6 +1,8 @@
 ---
 title: 'Text Format'
 description: 'WAT lexical syntax, literals, identifiers, and syntactic sugar.'
+sidebar:
+  order: 5
 ---
 
 WAT (WebAssembly Text Format) is the human-readable form of WebAssembly. This page covers the lexical building blocks and syntactic sugar that make WAT modules easier to read and write.

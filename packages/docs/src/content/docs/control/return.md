@@ -1,6 +1,8 @@
 ---
 title: return
 description: Exit the current function, optionally pushing results.
+sidebar:
+  order: 6
 ---
 
 `return` exits the current function immediately. Any required result values must already be on the stack.

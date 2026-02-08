@@ -1,6 +1,8 @@
 ---
 title: Traps
 description: When and how execution traps (errors) occur in WebAssembly.
+sidebar:
+  order: 5
 ---
 
 A trap is a runtime error that aborts execution. Common sources:

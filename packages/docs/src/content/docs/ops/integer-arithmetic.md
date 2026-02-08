@@ -1,6 +1,8 @@
 ---
 title: Integer Arithmetic
 description: i32/i64 add, sub, mul, div, rem and typical usage.
+sidebar:
+  order: 1
 ---
 
 Integer instructions wrap on overflow (two's complement). Division by zero traps.

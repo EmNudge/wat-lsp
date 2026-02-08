@@ -1,6 +1,8 @@
 ---
 title: Types
 description: Understand WAT value types, function signatures, locals, and results.
+sidebar:
+  order: 1
 ---
 
 WAT's type system is intentionally small. Most modules only need a handful of core types.

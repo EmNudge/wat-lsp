@@ -1,6 +1,8 @@
 ---
 title: Memory
 description: Memory operations
+sidebar:
+  order: 8
 ---
 
 ## memory.size

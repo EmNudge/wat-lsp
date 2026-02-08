@@ -1,6 +1,8 @@
 ---
 title: 'Constant Expressions'
 description: 'Instructions allowed in initializer contexts.'
+sidebar:
+  order: 7
 ---
 
 Some positions in a WebAssembly module require values known at instantiation time. These are called constant expressions, and only a restricted set of instructions may appear in them.

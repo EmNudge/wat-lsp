@@ -1,6 +1,8 @@
 ---
 title: Float Unary Ops
 description: abs, neg, sqrt, ceil, floor, trunc, nearest, min, max, copysign.
+sidebar:
+  order: 7
 ---
 
 ```wat

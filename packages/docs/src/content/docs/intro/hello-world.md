@@ -1,5 +1,7 @@
 ---
 title: Hello World
+sidebar:
+  order: 2
 ---
 
 Wasm modules can't do anything on their own — they need a host to run them. This page shows a few small WAT programs and how to call them from JavaScript.

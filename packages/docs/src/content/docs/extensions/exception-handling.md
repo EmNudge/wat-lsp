@@ -1,6 +1,8 @@
 ---
 title: 'Exception Handling'
 description: 'try_table/throw for native exception support in Wasm.'
+sidebar:
+  order: 15
 ---
 
 Exception handling introduces `try_table`, `throw`, and related constructs for structured error handling.

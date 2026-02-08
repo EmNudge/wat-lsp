@@ -1,6 +1,9 @@
 ---
 title: 'Sign-extension Operators'
 description: 'Extend smaller integer widths to larger ones with sign preservation.'
+sidebar:
+  order: 10
+  label: Sign-extension Ops
 ---
 
 These operators widen integers while preserving the sign of the smaller type.

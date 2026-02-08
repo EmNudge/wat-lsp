@@ -1,6 +1,8 @@
 ---
 title: 'Multi-value'
 description: 'Functions and blocks can produce multiple results; blocks can take parameters.'
+sidebar:
+  order: 5
 ---
 
 ## Functions returning multiple values

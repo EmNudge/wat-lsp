@@ -1,6 +1,8 @@
 ---
 title: 'call & call_indirect'
 description: Direct calls to known functions and indirect calls via tables.
+sidebar:
+  order: 7
 ---
 
 `call` invokes a function by index or name. `call_indirect` dispatches through a table and type-checks the signature at runtime.

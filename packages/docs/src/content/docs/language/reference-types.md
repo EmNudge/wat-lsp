@@ -1,6 +1,8 @@
 ---
 title: Reference Types
 description: Using funcref and externref, with tables and ref.* instructions.
+sidebar:
+  order: 2
 ---
 
 Reference types let Wasm refer to functions and host objects.

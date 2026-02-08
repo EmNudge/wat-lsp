@@ -1,6 +1,8 @@
 ---
 title: Parametric
 description: Stack manipulation instructions
+sidebar:
+  order: 7
 ---
 
 ## drop

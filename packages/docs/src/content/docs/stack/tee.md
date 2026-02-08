@@ -1,6 +1,8 @@
 ---
 title: local.tee
 description: Store a value into a local and keep it on the stack.
+sidebar:
+  order: 3
 ---
 
 `local.tee` writes to a local variable and leaves the value on the stack for further use.

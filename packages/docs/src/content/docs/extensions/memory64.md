@@ -1,6 +1,8 @@
 ---
 title: 'Memory64'
 description: '64-bit memory and table addressing for large linear memories.'
+sidebar:
+  order: 7
 ---
 
 Memory64 allows memories and tables to use `i64` indices instead of `i32`, expanding the addressable space from 4 GiB to 16 EiB.

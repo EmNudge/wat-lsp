@@ -1,6 +1,8 @@
 ---
 title: 'Tail Calls'
 description: 'return_call and return_call_indirect for optimized recursion.'
+sidebar:
+  order: 12
 ---
 
 Tail calls let a function transfer control to another function as its final action without growing the stack.
