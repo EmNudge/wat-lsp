@@ -316,10 +316,14 @@ jobs:
         with:
           version: 'v0.14.0'
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+          cache: pnpm
 
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli
@@ -335,9 +339,8 @@ jobs:
       - name: Build WASM module
         run: wasm-pack build --target web --no-pack -- --features wasm --no-default-features
 
-      - name: Install package dependencies
-        working-directory: packages/wat-lsp
-        run: npm install
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build NPM package
         working-directory: packages/wat-lsp
@@ -346,8 +349,8 @@ jobs:
           cp ../../pkg/wat_lsp_rust.js dist/wasm/
           cp ../../pkg/wat_lsp_rust.d.ts dist/wasm/
           cp ../../pkg/wat_lsp_rust_bg.wasm dist/wasm/
-          npm run build:wrapper
-          npm run build:assets
+          pnpm run build:wrapper
+          pnpm run build:assets
 
       - name: Upload NPM package artifact
         uses: actions/upload-artifact@v6
@@ -404,10 +407,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+          cache: pnpm
 
       - name: Clean package directory
         run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
@@ -436,9 +443,8 @@ jobs:
           fi
           ls -la packages/wat-lsp/dist/wasm/
 
-      - name: Install package dependencies
-        working-directory: packages/wat-lsp
-        run: npm install
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Validate example files with wat-check-wasm
         shell: bash
@@ -491,10 +497,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+          cache: pnpm
 
       - name: Clean package directory
         run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
@@ -529,25 +539,24 @@ jobs:
           ls -la packages/wat-lsp/dist/
           ls -la packages/wat-lsp/dist/wasm/
 
-      - name: Install playground dependencies
-        working-directory: packages/playground
-        run: npm install
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Setup playground assets
         working-directory: packages/playground
-        run: npm run setup
+        run: pnpm run setup
 
       - name: Build playground
         working-directory: packages/playground
-        run: npm run build
+        run: pnpm run build
 
       - name: Install Playwright browsers
         working-directory: packages/playground
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run Playwright tests
         working-directory: packages/playground
-        run: npm test
+        run: pnpm test
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v6
@@ -628,15 +637,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
-      - run: npm ci
-        working-directory: packages/docs
-      - run: npm run lint
-        working-directory: packages/docs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter wat-docs run lint
 
   docs-lint-instructions:
     name: Docs Lint Instructions
@@ -657,15 +664,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
-      - run: npm ci
-        working-directory: packages/docs
-      - run: npm run format
-        working-directory: packages/docs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter wat-docs run format
 
   docs-typecheck:
     name: Docs Typecheck
@@ -674,15 +679,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
-      - run: npm ci
-        working-directory: packages/docs
-      - run: npm run typecheck
-        working-directory: packages/docs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter wat-docs run typecheck
 
   docs-build:
     name: Docs Build
@@ -695,15 +698,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
-      - run: npm ci
-        working-directory: packages/docs
-      - run: npm run build
-        working-directory: packages/docs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter wat-docs run build
 
       - name: Download playground build
         if: needs.playground.result == 'success'
@@ -725,15 +726,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
-      - run: npm ci
-        working-directory: packages/docs
-      - run: npm run test:wat
-        working-directory: packages/docs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter wat-docs run test:wat
 
   docs-test:
     name: Docs Test
@@ -742,16 +741,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
-      - run: npm ci
-        working-directory: packages/docs
-      - run: npx playwright install --with-deps chromium
-      - run: npm test
-        working-directory: packages/docs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter wat-docs exec playwright install --with-deps chromium
+      - run: pnpm --filter wat-docs test
 
   deploy-docs:
     name: Deploy Docs to Cloudflare Pages

@@ -12,12 +12,15 @@
 # LSP
 .claude/
 
+# Node
+node_modules/
+package-lock.json
+
 # Tree-sitter-wasm - only source files are checked in, rest is generated
 tree-sitter-wasm/src/
 tree-sitter-wasm/bindings/
 tree-sitter-wasm/binding.gyp
 tree-sitter-wasm/*.wasm
-tree-sitter-wasm/node_modules/
 tree-sitter-wasm/build/
 tree-sitter-wasm/Cargo.toml
 tree-sitter-wasm/Cargo.lock
@@ -27,23 +30,17 @@ tree-sitter-wasm/vscode-extension/
 # Playground
 playground/public/*.wasm
 playground/public/wat.tmLanguage.json
-playground/node_modules/
 playground/dist/
 playground/test-results/
-playground/package-lock.json
 
 # Packages
-packages/wat-lsp/node_modules/
 packages/wat-lsp/dist/
-packages/wat-lsp/package-lock.json
 
 # VS Code Extension
-packages/vscode-extension/node_modules/
 packages/vscode-extension/out/
 packages/vscode-extension/grammars/queries/
 packages/vscode-extension/server/
 packages/vscode-extension/*.vsix
-packages/vscode-extension/package-lock.json
 
 # wasm-pack output folder
 pkg/
