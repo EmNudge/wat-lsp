@@ -17,7 +17,7 @@ use wat_lsp_rust::{completion, definition, diagnostics, hover, parser, reference
 #[command(name = "wat-bench")]
 #[command(about = "Benchmark WAT LSP operations")]
 struct Args {
-    /// WAT file or directory to benchmark (defaults to docs/examples)
+    /// WAT file or directory to benchmark (defaults to packages/playground/examples)
     #[arg(short, long)]
     path: Option<PathBuf>,
 
@@ -274,7 +274,7 @@ fn collect_wat_files(args: &Args) -> Vec<PathBuf> {
     let path = args
         .path
         .clone()
-        .unwrap_or_else(|| PathBuf::from("docs/examples"));
+        .unwrap_or_else(|| PathBuf::from("packages/playground/examples"));
 
     if path.is_file() {
         vec![path]

@@ -4,8 +4,8 @@
  * These tests verify that the sidebar correctly colors files based on
  * whether they have errors:
  *
- * - docs/examples/*.wat (valid examples) should NOT have .has-error class
- * - docs/examples/invalid/*.wat (invalid examples) should have .has-error class
+ * - examples/*.wat (valid examples) should NOT have .has-error class
+ * - examples/invalid/*.wat (invalid examples) should have .has-error class
  *
  * This is a simple proxy test for LSP correctness - if the LSP is working,
  * valid files will be white and invalid files will be red.
@@ -20,8 +20,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Path to docs examples (relative to project root)
-const DOCS_DIR = path.join(__dirname, '../../../docs/examples');
+// Path to examples (co-located in the playground package)
+const DOCS_DIR = path.join(__dirname, '../examples');
 const INVALID_DIR = path.join(DOCS_DIR, 'invalid');
 
 /**

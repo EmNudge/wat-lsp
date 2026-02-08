@@ -1,8 +1,8 @@
 //! Documentation access module for WAT instruction and annotation documentation
 //!
 //! This module provides programmatic access to the instruction and annotation
-//! documentation that is generated at build time from `docs/instructions.md`
-//! and `docs/annotations.md`.
+//! documentation that is generated at build time from `packages/docs/instructions.md`
+//! and `packages/docs/annotations.md`.
 
 #[cfg(feature = "native")]
 use std::collections::HashMap;

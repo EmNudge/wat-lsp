@@ -7,7 +7,7 @@ fn main() {
     // Instruction documentation generation
     println!("cargo:rerun-if-changed=packages/docs/instructions.md");
     // Annotation documentation generation
-    println!("cargo:rerun-if-changed=docs/annotations.md");
+    println!("cargo:rerun-if-changed=packages/docs/annotations.md");
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
 
@@ -22,7 +22,7 @@ fn main() {
     // Generate annotation docs
     let annotation_dest_path = Path::new(&out_dir).join("annotation_docs.rs");
     let annotation_content =
-        fs::read_to_string("docs/annotations.md").unwrap_or_else(|_| String::new());
+        fs::read_to_string("packages/docs/annotations.md").unwrap_or_else(|_| String::new());
     let annotation_docs = parse_docs(&annotation_content);
     let annotation_generated = generate_rust_code(&annotation_docs, "ANNOTATION_DOCS");
     fs::write(&annotation_dest_path, annotation_generated)
