@@ -360,6 +360,29 @@ function registerLSPProviders() {
       }));
     }
   });
+
+  monaco.languages.registerCompletionItemProvider('wat', {
+    triggerCharacters: ['.', '$', '@', '2', '4'],
+    provideCompletionItems: (model, position) => {
+      watLSP.parse(model.getValue());
+      const completions = watLSP.provideCompletion(
+        position.lineNumber - 1,
+        position.column - 1
+      );
+      if (!completions || completions.length === 0) return { suggestions: [] };
+      return {
+        suggestions: completions.map((item: any) => ({
+          label: item.label,
+          kind: item.kind ?? monaco.languages.CompletionItemKind.Text,
+          detail: item.detail,
+          documentation: item.documentation,
+          insertText: item.insertText ?? item.label,
+          insertTextRules: item.insertTextRules,
+          range: undefined as any,
+        }))
+      };
+    }
+  });
 }
 
 watch(() => store.activeFileId, (newId, oldId) => {
