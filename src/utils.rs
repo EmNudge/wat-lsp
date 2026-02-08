@@ -440,17 +440,27 @@ pub fn get_line_at_position(document: &str, line_num: usize) -> Option<&str> {
 /// A word includes alphanumerics, underscores, dollar signs, dots, and hyphens.
 pub fn get_word_at_position(document: &str, position: Position) -> Option<String> {
     let line = get_line_at_position(document, position.line as usize)?;
-    let col = position.character as usize;
 
-    if col > line.len() {
+    let chars: Vec<char> = line.chars().collect();
+
+    // Convert UTF-16 offset to char index
+    let mut utf16_count = 0u32;
+    let mut col = 0usize;
+    for ch in &chars {
+        if utf16_count >= position.character {
+            break;
+        }
+        utf16_count += ch.len_utf16() as u32;
+        col += 1;
+    }
+
+    if col > chars.len() {
         return None;
     }
 
     // Find word boundaries
     let mut start = col;
     let mut end = col;
-
-    let chars: Vec<char> = line.chars().collect();
 
     // Move back to start of word
     while start > 0 && is_word_char(chars.get(start - 1).copied()?) {
@@ -474,20 +484,29 @@ pub fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$' || c == '.' || c == '-'
 }
 
+/// Convert a UTF-16 character offset to a byte offset within a line.
+/// LSP positions use UTF-16 offsets, but Rust strings are UTF-8.
+/// Clamps to end of line if the offset is beyond the line length.
+pub fn utf16_offset_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
+    let mut utf16_count = 0u32;
+    let mut byte_offset = 0;
+    for ch in line.chars() {
+        if utf16_count >= utf16_offset {
+            return byte_offset;
+        }
+        utf16_count += ch.len_utf16() as u32;
+        byte_offset += ch.len_utf8();
+    }
+    byte_offset
+}
+
 /// Convert an LSP Position to a byte offset in the source text
 pub fn position_to_byte(source: &str, position: Position) -> usize {
     let mut byte_offset = 0;
 
     for (current_line, line) in source.lines().enumerate() {
         if current_line == position.line as usize {
-            // Add character offset within this line
-            let char_offset = position.character as usize;
-            let line_bytes: Vec<_> = line.char_indices().collect();
-            if char_offset < line_bytes.len() {
-                return byte_offset + line_bytes[char_offset].0;
-            } else {
-                return byte_offset + line.len();
-            }
+            return byte_offset + utf16_offset_to_byte_offset(line, position.character);
         }
         byte_offset += line.len() + 1; // +1 for newline
     }
