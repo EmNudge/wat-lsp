@@ -33,14 +33,22 @@ const hexView = computed(() => {
 <template>
   <div class="output-panel">
     <div class="tabs">
-      <button 
-        v-for="tab in tabs" 
+      <button
+        v-for="tab in tabs"
         :key="tab.id"
         class="tab-btn"
         :class="{ active: activeTab === tab.id }"
         @click="activeTab = tab.id"
       >
         {{ tab.label }}
+      </button>
+      <div class="tabs-spacer"></div>
+      <button
+        class="btn btn-primary compile-btn"
+        @click="store.compile()"
+        :disabled="store.isCompiling"
+      >
+        {{ store.isCompiling ? 'Compiling...' : 'Compile' }}
       </button>
     </div>
 
@@ -131,6 +139,17 @@ const hexView = computed(() => {
   background-color: var(--bg-soft);
   color: var(--primary-color);
   border-bottom: 2px solid var(--primary-color);
+}
+
+.tabs-spacer {
+  flex: 1;
+}
+
+.compile-btn {
+  margin: 0.25rem 0.5rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  flex-shrink: 0;
 }
 
 .tab-content {
