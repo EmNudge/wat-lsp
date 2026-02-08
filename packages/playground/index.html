@@ -4,108 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WAT LSP Playground</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>WAT LSP Playground</h1>
-      <p>WebAssembly Text Format editor with Language Server features</p>
-    </header>
-
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <!-- File tree is now in sidebar -->
-      </div>
-      <div class="toolbar-right">
-        <button id="compile-btn" class="btn btn-primary">Compile</button>
-        <button id="run-btn" class="btn btn-success" disabled>Run</button>
-        <button id="download-btn" class="btn btn-secondary" disabled>Download .wasm</button>
-      </div>
-    </div>
-
-    <div class="main-content">
-      <div class="file-tree-panel" id="file-tree-panel">
-        <div class="panel-header">
-          <span>Examples</span>
-        </div>
-        <div id="file-tree" class="file-tree-container">
-          <!-- Populated dynamically -->
-        </div>
-        <div class="resize-handle-right" id="file-tree-resize"></div>
-      </div>
-      <div class="editor-panel">
-        <div class="editor-tabs-container">
-          <div class="editor-tabs" id="editor-tabs">
-            <!-- Tabs populated dynamically -->
-          </div>
-          <div class="lsp-status">
-            <span class="lsp-indicator" id="lsp-indicator"></span>
-            <span id="lsp-status-text">LSP Loading...</span>
-          </div>
-        </div>
-        <div id="editor"></div>
-      </div>
-
-      <div class="output-panel">
-        <div class="resize-handle"></div>
-        <div class="tabs">
-          <button class="tab active" data-tab="module-info">Module Info</button>
-          <button class="tab" data-tab="outline">Outline</button>
-          <button class="tab" data-tab="console">Console</button>
-          <button class="tab" data-tab="hex">Hex View</button>
-        </div>
-
-        <div class="tab-content">
-          <div id="module-info" class="tab-pane active">
-            <div class="info-section">
-              <h3>Imports</h3>
-              <div id="imports-list" class="info-list">
-                <p class="placeholder">Compile to see imports</p>
-              </div>
-            </div>
-            <div class="info-section">
-              <h3>Exports</h3>
-              <div id="exports-list" class="info-list">
-                <p class="placeholder">Compile to see exports</p>
-              </div>
-            </div>
-            <div class="info-section">
-              <h3>Run Function</h3>
-              <div class="run-controls">
-                <select id="export-fn-select" disabled>
-                  <option value="">Select function...</option>
-                </select>
-                <input type="text" id="fn-args" placeholder="Arguments (comma-separated)" disabled>
-                <button id="call-fn-btn" class="btn btn-small" disabled>Call</button>
-              </div>
-              <div id="fn-result" class="fn-result"></div>
-            </div>
-          </div>
-
-          <div id="outline" class="tab-pane">
-            <div id="outline-view" class="outline-tree">
-              <p class="placeholder">Parse document to see outline</p>
-            </div>
-          </div>
-
-          <div id="console" class="tab-pane">
-            <div id="console-output"></div>
-          </div>
-
-          <div id="hex" class="tab-pane">
-            <pre id="hex-view"></pre>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <footer>
-      <span>WAT LSP Playground - Open File (Ctrl/Cmd+P), Go to Definition (F12), Find References (Shift+F12)</span>
-      <span id="status">Ready</span>
-    </footer>
-  </div>
-
-  <script type="module" src="main.ts"></script>
+  <div id="app"></div>
+  <script type="module" src="src/main.ts"></script>
 </body>
 </html>
