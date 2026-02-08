@@ -65,13 +65,6 @@ function stopHeightResize() {
         </div>
       </div>
       <div class="header-actions">
-        <button 
-          class="btn btn-primary" 
-          @click="store.compile()" 
-          :disabled="store.isCompiling"
-        >
-          {{ store.isCompiling ? 'Compiling...' : 'Compile' }}
-        </button>
         <a href="/" class="nav-link">Documentation</a>
       </div>
     </header>
