@@ -1,5 +1,6 @@
 use super::*;
 use crate::parser::parse_document;
+use tower_lsp::lsp_types::SymbolKind;
 
 #[test]
 fn test_empty_document() {

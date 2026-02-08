@@ -9,11 +9,19 @@ pub mod test_utils;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod completion;
 
-// Definition - implements go-to-definition
+// Definition - shared core logic for go-to-definition
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod definition_core;
+
+// Definition - native LSP wrapper
 #[cfg(feature = "native")]
 pub mod definition;
 
-// Document symbols - provides outline/symbol tree for a document
+// Document symbols - shared core logic for symbol outline
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod document_symbols_core;
+
+// Document symbols - native LSP wrapper
 #[cfg(feature = "native")]
 pub mod document_symbols;
 

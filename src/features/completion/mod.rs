@@ -4,8 +4,6 @@ use crate::utils::{
     determine_context_from_line, find_containing_function, get_line_at_position,
     utf16_offset_to_byte_offset, InstructionContext,
 };
-use regex::Regex;
-use std::sync::LazyLock;
 
 #[cfg(all(test, feature = "native"))]
 mod tests;
@@ -27,9 +25,7 @@ pub fn provide_completion(
     let line_prefix = &line[..utf16_offset_to_byte_offset(line, position.character)];
 
     // Emmet-like number constant expansion (e.g., 5i32 -> (i32.const 5))
-    if let Some(caps) = NUMBER_CONST_REGEX.captures(line_prefix) {
-        let number = caps.get(1).unwrap().as_str();
-        let type_str = caps.get(2).unwrap().as_str();
+    if let Some((number, type_str)) = parse_number_const_suffix(line_prefix) {
         let clean_number = number.replace('_', "");
         let insert_text = format!("({}.const {})", type_str, clean_number);
 
@@ -572,8 +568,38 @@ fn make_completion(label: &str, detail: &str) -> CompletionItem {
         .with_detail(detail)
 }
 
-static NUMBER_CONST_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"([\d._]+)((?:i|f)(?:32|64))$").unwrap());
+/// Parse a number constant suffix like `5i32` or `3.14f64` at the end of text.
+/// Returns `(number_part, type_suffix)` if found — equivalent to the regex
+/// `([\d._]+)((?:i|f)(?:32|64))$` but without pulling in the regex crate.
+fn parse_number_const_suffix(text: &str) -> Option<(&str, &str)> {
+    // Must end with i32, i64, f32, or f64
+    let (prefix, suffix) = if text.len() >= 3 {
+        let (p, s) = text.split_at(text.len() - 3);
+        match s {
+            "i32" | "i64" | "f32" | "f64" => (p, s),
+            _ => return None,
+        }
+    } else {
+        return None;
+    };
+
+    // Walk backwards through prefix to find the number part (digits, dots, underscores)
+    if prefix.is_empty() {
+        return None;
+    }
+    let num_start = prefix
+        .bytes()
+        .rposition(|b| !b.is_ascii_digit() && b != b'.' && b != b'_')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let number = &prefix[num_start..];
+    if number.is_empty() || !number.bytes().any(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    // Reconstruct full slices from original text
+    let num_start_abs = text.len() - suffix.len() - number.len();
+    Some((&text[num_start_abs..text.len() - suffix.len()], suffix))
+}
 
 /// Get completions for annotation names
 fn get_annotation_completions() -> Vec<CompletionItem> {

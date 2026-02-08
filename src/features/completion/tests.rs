@@ -268,14 +268,27 @@ fn test_get_keyword_completions() {
 }
 
 #[test]
-fn test_number_const_regex() {
-    assert!(NUMBER_CONST_REGEX.is_match("5i32"));
-    assert!(NUMBER_CONST_REGEX.is_match("3.14f64"));
-    assert!(NUMBER_CONST_REGEX.is_match("1_000_000i64"));
-    assert!(NUMBER_CONST_REGEX.is_match("0.5f32"));
+fn test_number_const_parser() {
+    assert!(parse_number_const_suffix("5i32").is_some());
+    assert!(parse_number_const_suffix("3.14f64").is_some());
+    assert!(parse_number_const_suffix("1_000_000i64").is_some());
+    assert!(parse_number_const_suffix("0.5f32").is_some());
 
-    assert!(!NUMBER_CONST_REGEX.is_match("abc"));
-    assert!(!NUMBER_CONST_REGEX.is_match("123"));
+    assert!(parse_number_const_suffix("abc").is_none());
+    assert!(parse_number_const_suffix("123").is_none());
+
+    // Check extracted parts
+    let (num, ty) = parse_number_const_suffix("5i32").unwrap();
+    assert_eq!(num, "5");
+    assert_eq!(ty, "i32");
+
+    let (num, ty) = parse_number_const_suffix("3.14f64").unwrap();
+    assert_eq!(num, "3.14");
+    assert_eq!(ty, "f64");
+
+    let (num, ty) = parse_number_const_suffix("1_000_000i64").unwrap();
+    assert_eq!(num, "1_000_000");
+    assert_eq!(ty, "i64");
 }
 
 #[test]
