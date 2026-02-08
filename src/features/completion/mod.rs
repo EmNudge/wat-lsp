@@ -1,7 +1,8 @@
 use crate::core::types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position};
 use crate::symbols::*;
 use crate::utils::{
-    determine_context_from_line, find_containing_function, get_line_at_position, InstructionContext,
+    determine_context_from_line, find_containing_function, get_line_at_position,
+    utf16_offset_to_byte_offset, InstructionContext,
 };
 use regex::Regex;
 use std::sync::LazyLock;
@@ -23,7 +24,7 @@ pub fn provide_completion(
         None => return completions,
     };
 
-    let line_prefix = &line[..position.character.min(line.len() as u32) as usize];
+    let line_prefix = &line[..utf16_offset_to_byte_offset(line, position.character)];
 
     // Emmet-like number constant expansion (e.g., 5i32 -> (i32.const 5))
     if let Some(caps) = NUMBER_CONST_REGEX.captures(line_prefix) {

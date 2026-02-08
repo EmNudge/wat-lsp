@@ -4,7 +4,9 @@ pub mod call_info;
 #[cfg(feature = "native")]
 use crate::symbols::*;
 #[cfg(feature = "native")]
-use crate::utils::{format_function_signature, get_line_at_position, node_at_position};
+use crate::utils::{
+    format_function_signature, get_line_at_position, node_at_position, utf16_offset_to_byte_offset,
+};
 #[cfg(feature = "native")]
 use tower_lsp::lsp_types::*;
 #[cfg(feature = "native")]
@@ -33,7 +35,7 @@ pub fn provide_signature_help(
     // Fall back to string-based approach for incomplete code
     let call_info = call_info.or_else(|| {
         let line = get_line_at_position(document, position.line as usize)?;
-        let line_prefix = &line[..position.character.min(line.len() as u32) as usize];
+        let line_prefix = &line[..utf16_offset_to_byte_offset(line, position.character)];
         find_function_call(line_prefix)
     })?;
 
