@@ -142,6 +142,32 @@ pub fn provide_completion(
         return completions;
     }
 
+    // Atomic instruction completions (deeper prefixes before shallower ones)
+    for type_prefix in ["i32", "i64"] {
+        if line_prefix.ends_with(&format!("{}.atomic.", type_prefix)) {
+            completions.extend(get_atomic_type_completions(type_prefix));
+            return completions;
+        }
+    }
+
+    if line_prefix.ends_with("memory.atomic.") {
+        completions.push(make_completion(
+            "wait32",
+            "Wait on i32 value in shared memory",
+        ));
+        completions.push(make_completion(
+            "wait64",
+            "Wait on i64 value in shared memory",
+        ));
+        completions.push(make_completion("notify", "Notify waiters on shared memory"));
+        return completions;
+    }
+
+    if line_prefix.ends_with("atomic.") {
+        completions.push(make_completion("fence", "Atomic memory fence"));
+        return completions;
+    }
+
     // Type-prefixed instruction completion (e.g., i32., f64.)
     for type_prefix in ["i32", "i64", "f32", "f64"] {
         if line_prefix.ends_with(&format!("{}.", type_prefix)) {
@@ -172,6 +198,10 @@ pub fn provide_completion(
         completions.push(make_completion(
             "init",
             "Initialize memory from data segment",
+        ));
+        completions.push(make_completion(
+            "atomic.",
+            "Atomic memory operations (threads)",
         ));
         return completions;
     }
@@ -457,6 +487,7 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
 
     if type_prefix.starts_with('i') {
         // Integer-specific instructions
+        completions.push(make_completion("atomic.", "Atomic operations (threads)"));
         let int_ops = vec![
             ("div_s", "Signed division"),
             ("div_u", "Unsigned division"),
@@ -507,6 +538,66 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
         ];
         for (name, desc) in float_ops {
             completions.push(make_completion(name, desc));
+        }
+    }
+
+    completions
+}
+
+fn get_atomic_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
+    let mut completions = vec![
+        make_completion("load", "Atomic load"),
+        make_completion("load8_u", "Atomic load 8-bit unsigned"),
+        make_completion("load16_u", "Atomic load 16-bit unsigned"),
+        make_completion("store", "Atomic store"),
+        make_completion("store8", "Atomic store 8-bit"),
+        make_completion("store16", "Atomic store 16-bit"),
+    ];
+
+    if type_prefix == "i64" {
+        completions.push(make_completion("load32_u", "Atomic load 32-bit unsigned"));
+        completions.push(make_completion("store32", "Atomic store 32-bit"));
+    }
+
+    // RMW operations
+    for op in &[
+        ("rmw.add", "Atomic add"),
+        ("rmw.sub", "Atomic subtract"),
+        ("rmw.and", "Atomic bitwise AND"),
+        ("rmw.or", "Atomic bitwise OR"),
+        ("rmw.xor", "Atomic bitwise XOR"),
+        ("rmw.xchg", "Atomic exchange"),
+        ("rmw.cmpxchg", "Atomic compare-exchange"),
+    ] {
+        completions.push(make_completion(op.0, op.1));
+    }
+
+    // Narrow RMW operations
+    for width in &["rmw8", "rmw16"] {
+        for op in &[
+            ("add_u", "Atomic add unsigned"),
+            ("sub_u", "Atomic subtract unsigned"),
+            ("and_u", "Atomic AND unsigned"),
+            ("or_u", "Atomic OR unsigned"),
+            ("xor_u", "Atomic XOR unsigned"),
+            ("xchg_u", "Atomic exchange unsigned"),
+            ("cmpxchg_u", "Atomic compare-exchange unsigned"),
+        ] {
+            completions.push(make_completion(&format!("{}.{}", width, op.0), op.1));
+        }
+    }
+
+    if type_prefix == "i64" {
+        for op in &[
+            ("rmw32.add_u", "Atomic add 32-bit unsigned"),
+            ("rmw32.sub_u", "Atomic subtract 32-bit unsigned"),
+            ("rmw32.and_u", "Atomic AND 32-bit unsigned"),
+            ("rmw32.or_u", "Atomic OR 32-bit unsigned"),
+            ("rmw32.xor_u", "Atomic XOR 32-bit unsigned"),
+            ("rmw32.xchg_u", "Atomic exchange 32-bit unsigned"),
+            ("rmw32.cmpxchg_u", "Atomic compare-exchange 32-bit unsigned"),
+        ] {
+            completions.push(make_completion(op.0, op.1));
         }
     }
 
