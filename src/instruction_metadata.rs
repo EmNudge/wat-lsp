@@ -702,10 +702,19 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     map.insert("i32.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg());
     map.insert("i64.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg());
     map.insert("i32.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg());
-    map.insert("i32.atomic.rmw16.cmpxchg_u", InstructionArity::mem_cmpxchg());
+    map.insert(
+        "i32.atomic.rmw16.cmpxchg_u",
+        InstructionArity::mem_cmpxchg(),
+    );
     map.insert("i64.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg());
-    map.insert("i64.atomic.rmw16.cmpxchg_u", InstructionArity::mem_cmpxchg());
-    map.insert("i64.atomic.rmw32.cmpxchg_u", InstructionArity::mem_cmpxchg());
+    map.insert(
+        "i64.atomic.rmw16.cmpxchg_u",
+        InstructionArity::mem_cmpxchg(),
+    );
+    map.insert(
+        "i64.atomic.rmw32.cmpxchg_u",
+        InstructionArity::mem_cmpxchg(),
+    );
 
     // Wait/notify
     map.insert("memory.atomic.wait32", InstructionArity::exact(0, "", 3, 1)); // addr + expected(i32) + timeout(i64) → i32
@@ -1249,7 +1258,11 @@ mod tests {
             "i64.atomic.load32_u",
         ] {
             let arity = &map[*instr];
-            assert_eq!(arity.operand_mode, OperandMode::Fixed(1), "{instr} operands");
+            assert_eq!(
+                arity.operand_mode,
+                OperandMode::Fixed(1),
+                "{instr} operands"
+            );
             assert_eq!(arity.produces, 1, "{instr} produces");
         }
 
@@ -1264,7 +1277,11 @@ mod tests {
             "i64.atomic.store32",
         ] {
             let arity = &map[*instr];
-            assert_eq!(arity.operand_mode, OperandMode::Fixed(2), "{instr} operands");
+            assert_eq!(
+                arity.operand_mode,
+                OperandMode::Fixed(2),
+                "{instr} operands"
+            );
             assert_eq!(arity.produces, 0, "{instr} produces");
         }
 
@@ -1277,7 +1294,11 @@ mod tests {
             "i64.atomic.rmw32.and_u",
         ] {
             let arity = &map[*instr];
-            assert_eq!(arity.operand_mode, OperandMode::Fixed(2), "{instr} operands");
+            assert_eq!(
+                arity.operand_mode,
+                OperandMode::Fixed(2),
+                "{instr} operands"
+            );
             assert_eq!(arity.produces, 1, "{instr} produces");
         }
 
@@ -1289,7 +1310,11 @@ mod tests {
             "i64.atomic.rmw32.cmpxchg_u",
         ] {
             let arity = &map[*instr];
-            assert_eq!(arity.operand_mode, OperandMode::Fixed(3), "{instr} operands");
+            assert_eq!(
+                arity.operand_mode,
+                OperandMode::Fixed(3),
+                "{instr} operands"
+            );
             assert_eq!(arity.produces, 1, "{instr} produces");
         }
 

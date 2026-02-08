@@ -151,8 +151,14 @@ pub fn provide_completion(
     }
 
     if line_prefix.ends_with("memory.atomic.") {
-        completions.push(make_completion("wait32", "Wait on i32 value in shared memory"));
-        completions.push(make_completion("wait64", "Wait on i64 value in shared memory"));
+        completions.push(make_completion(
+            "wait32",
+            "Wait on i32 value in shared memory",
+        ));
+        completions.push(make_completion(
+            "wait64",
+            "Wait on i64 value in shared memory",
+        ));
         completions.push(make_completion("notify", "Notify waiters on shared memory"));
         return completions;
     }
@@ -481,10 +487,7 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
 
     if type_prefix.starts_with('i') {
         // Integer-specific instructions
-        completions.push(make_completion(
-            "atomic.",
-            "Atomic operations (threads)",
-        ));
+        completions.push(make_completion("atomic.", "Atomic operations (threads)"));
         let int_ops = vec![
             ("div_s", "Signed division"),
             ("div_u", "Unsigned division"),
@@ -580,10 +583,7 @@ fn get_atomic_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
             ("xchg_u", "Atomic exchange unsigned"),
             ("cmpxchg_u", "Atomic compare-exchange unsigned"),
         ] {
-            completions.push(make_completion(
-                &format!("{}.{}", width, op.0),
-                op.1,
-            ));
+            completions.push(make_completion(&format!("{}.{}", width, op.0), op.1));
         }
     }
 
