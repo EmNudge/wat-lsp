@@ -1,11 +1,22 @@
+// Shared call-info extraction (available for both native and WASM)
+pub mod call_info;
+
+#[cfg(feature = "native")]
 use crate::symbols::*;
+#[cfg(feature = "native")]
 use crate::utils::{format_function_signature, get_line_at_position, node_at_position};
+#[cfg(feature = "native")]
 use tower_lsp::lsp_types::*;
+#[cfg(feature = "native")]
 use tree_sitter::Tree;
 
-#[cfg(test)]
+#[cfg(feature = "native")]
+use call_info::{find_function_call, find_function_call_ast, CallType};
+
+#[cfg(all(test, feature = "native"))]
 mod tests;
 
+#[cfg(feature = "native")]
 pub fn provide_signature_help(
     document: &str,
     symbols: &SymbolTable,
@@ -14,7 +25,7 @@ pub fn provide_signature_help(
 ) -> Option<SignatureHelp> {
     // Try AST-based approach first
     let call_info = if let Some(node) = node_at_position(tree, document, position.into()) {
-        find_function_call_ast(node, document)
+        find_function_call_ast(&node, document)
     } else {
         None
     };
@@ -35,9 +46,10 @@ pub fn provide_signature_help(
 }
 
 /// Provide signature help for direct function calls (call $func)
+#[cfg(feature = "native")]
 fn provide_direct_call_signature(
     symbols: &SymbolTable,
-    call_info: &CallInfo,
+    call_info: &call_info::CallInfo,
 ) -> Option<SignatureHelp> {
     // Look up the function in the symbol table
     let func = if call_info.name.starts_with('$') {
@@ -80,9 +92,10 @@ fn provide_direct_call_signature(
 }
 
 /// Provide signature help for indirect calls via typed function references (call_ref $type)
+#[cfg(feature = "native")]
 fn provide_call_ref_signature(
     symbols: &SymbolTable,
-    call_info: &CallInfo,
+    call_info: &call_info::CallInfo,
 ) -> Option<SignatureHelp> {
     // Look up the type in the symbol table
     let type_def = if call_info.name.starts_with('$') {
@@ -166,206 +179,4 @@ fn provide_call_ref_signature(
         active_signature: Some(0),
         active_parameter: Some(active_parameter.min(params.len() as u32 + 1)),
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum CallType {
-    Direct,        // call $func
-    CallRef,       // call_ref $type
-    ReturnCallRef, // return_call_ref $type
-}
-
-struct CallInfo {
-    name: String,
-    arg_text: String,
-    call_type: CallType,
-}
-
-/// Find function call using AST analysis
-fn find_function_call_ast(node: tree_sitter::Node, document: &str) -> Option<CallInfo> {
-    // Walk up the tree to find a call instruction
-    let mut current = node;
-
-    loop {
-        let kind = current.kind();
-
-        // Check if this is a call instruction
-        if kind == "instr_plain" || kind == "expr1_plain" {
-            let instr_text = &document[current.byte_range()];
-
-            // Determine the call type based on the instruction text
-            let call_type = if instr_text.contains("return_call_ref ") {
-                Some(CallType::ReturnCallRef)
-            } else if instr_text.contains("call_ref ") {
-                Some(CallType::CallRef)
-            } else if instr_text.contains("call ") && !instr_text.contains("call_") {
-                Some(CallType::Direct)
-            } else {
-                None
-            };
-
-            if let Some(call_type) = call_type {
-                // Extract the function/type name from the call instruction
-                let mut name = None;
-                let mut arg_count = 0;
-
-                // Iterate through children to find the function name and count arguments
-                let mut cursor = current.walk();
-                for child in current.children(&mut cursor) {
-                    let child_kind = child.kind();
-
-                    // The function/type name is in an identifier or index node
-                    if child_kind == "index" || child_kind == "identifier" {
-                        if name.is_none() {
-                            // First identifier/index after the operator is the function/type name
-                            name = Some(&document[child.byte_range()]);
-                        } else {
-                            // Subsequent identifiers/indices are arguments
-                            arg_count += 1;
-                        }
-                    }
-                    // Also check inside type_use nodes (e.g. call_ref (type $t))
-                    if child_kind == "type_use" && name.is_none() {
-                        let mut inner_cursor = child.walk();
-                        for inner_child in child.children(&mut inner_cursor) {
-                            if inner_child.kind() == "index" || inner_child.kind() == "identifier" {
-                                name = Some(&document[inner_child.byte_range()]);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if let Some(func_name) = name {
-                    // Create arg_text with appropriate number of commas
-                    let arg_text = if arg_count > 0 {
-                        vec![","; arg_count - 1].join("")
-                    } else {
-                        String::new()
-                    };
-
-                    return Some(CallInfo {
-                        name: func_name.to_string(),
-                        arg_text,
-                        call_type,
-                    });
-                }
-            }
-        }
-
-        // Move to parent
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
-        }
-    }
-
-    None
-}
-
-fn find_function_call(line_prefix: &str) -> Option<CallInfo> {
-    // Look for pattern: call $name( or call_ref $type( or return_call_ref $type(
-    // We need to find the most recent unmatched opening paren after the call keyword
-
-    let mut depth = 0;
-    let mut paren_pos: Option<usize> = None;
-
-    let chars: Vec<char> = line_prefix.chars().collect();
-
-    // Scan backwards to find the call instruction
-    for i in (0..chars.len()).rev() {
-        match chars[i] {
-            ')' => depth += 1,
-            '(' => {
-                if depth == 0 {
-                    paren_pos = Some(i);
-                    break;
-                } else {
-                    depth -= 1;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let paren_pos = paren_pos?;
-
-    // Now look backwards from paren to find call keyword and function/type name
-    let before_paren = &line_prefix[..paren_pos];
-
-    // Extract the call instruction and function/type name
-    let call_pattern = before_paren.trim_end();
-
-    // Try to find return_call_ref first (most specific)
-    if let Some(call_idx) = call_pattern.rfind("return_call_ref ") {
-        let after_call = call_pattern[call_idx + 16..].trim_start();
-        if let Some(name) = extract_name_from_call(after_call) {
-            let arg_text = line_prefix[paren_pos + 1..].to_string();
-            return Some(CallInfo {
-                name,
-                arg_text,
-                call_type: CallType::ReturnCallRef,
-            });
-        }
-    }
-
-    // Try call_ref next
-    if let Some(call_idx) = call_pattern.rfind("call_ref ") {
-        let after_call = call_pattern[call_idx + 9..].trim_start();
-        if let Some(name) = extract_name_from_call(after_call) {
-            let arg_text = line_prefix[paren_pos + 1..].to_string();
-            return Some(CallInfo {
-                name,
-                arg_text,
-                call_type: CallType::CallRef,
-            });
-        }
-    }
-
-    // Finally try regular call (but not call_indirect or call_ref)
-    if let Some(call_idx) = call_pattern.rfind("call ") {
-        // Make sure this isn't part of call_indirect or call_ref
-        let before_call = &call_pattern[..call_idx];
-        if !before_call.ends_with("return_") && !before_call.ends_with('_') {
-            let after_call = call_pattern[call_idx + 5..].trim_start();
-            if let Some(name) = extract_name_from_call(after_call) {
-                let arg_text = line_prefix[paren_pos + 1..].to_string();
-                return Some(CallInfo {
-                    name,
-                    arg_text,
-                    call_type: CallType::Direct,
-                });
-            }
-        }
-    }
-
-    None
-}
-
-/// Extract the function/type name from text after a call keyword
-fn extract_name_from_call(after_call: &str) -> Option<String> {
-    let trimmed = after_call.trim_start();
-    // Handle (type $t) annotation form
-    if trimmed.starts_with("(type ") || trimmed.starts_with("(type\t") {
-        let inner = &trimmed[6..]; // skip "(type "
-        let name_end = inner
-            .find(|c: char| c == ')' || c.is_whitespace())
-            .unwrap_or(inner.len());
-        let name = inner[..name_end].trim().to_string();
-        if !name.is_empty() {
-            return Some(name);
-        }
-    }
-    // Extract function name/index (stop at whitespace or paren)
-    let name_end = after_call
-        .find(|c: char| c.is_whitespace() || c == '(')
-        .unwrap_or(after_call.len());
-
-    let name = after_call[..name_end].to_string();
-    if !name.is_empty() {
-        Some(name)
-    } else {
-        None
-    }
 }

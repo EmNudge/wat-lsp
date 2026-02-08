@@ -9,7 +9,8 @@ pub mod instruction_metadata;
 // Documentation access (instruction docs generated at build time)
 pub mod docs;
 
-// Wast-based parser (works in WASM, always available)
+// Wast-based parser (native-only: superseded by tree-sitter for WASM builds)
+#[cfg(feature = "native")]
 pub mod wast_parser;
 
 // Tree-sitter facade (unified interface for native and WASM)
@@ -57,7 +58,7 @@ pub use features::document_symbols;
 #[cfg(feature = "native")]
 pub use features::references;
 
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "wasm"))]
 pub use features::signature;
 
 #[cfg(any(feature = "native", feature = "wasm"))]
