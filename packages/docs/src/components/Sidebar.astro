@@ -13,7 +13,12 @@ function hasCurrentPage(entry: any): boolean {
 }
 
 const activeGroup = sidebar.filter((entry: any) => hasCurrentPage(entry));
-const filtered = activeGroup.length > 0 ? activeGroup : sidebar;
+let filtered = activeGroup.length > 0 ? activeGroup : sidebar;
+
+// Unwrap single top-level group to remove its label
+if (filtered.length === 1 && filtered[0].type === 'group') {
+  filtered = filtered[0].entries;
+}
 ---
 
 <SidebarPersister>

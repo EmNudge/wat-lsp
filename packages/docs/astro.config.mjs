@@ -52,11 +52,11 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
-            { label: 'Language', collapsed: true, autogenerate: { directory: 'language' } },
-            { label: 'Control Flow', collapsed: true, autogenerate: { directory: 'control' } },
-            { label: 'Stack & Memory', collapsed: true, autogenerate: { directory: 'stack' } },
-            { label: 'Numeric Ops', collapsed: true, autogenerate: { directory: 'ops' } },
-            { label: 'Extensions', collapsed: true, autogenerate: { directory: 'extensions' } },
+            { label: 'Language', autogenerate: { directory: 'language' } },
+            { label: 'Control Flow', autogenerate: { directory: 'control' } },
+            { label: 'Stack & Memory', autogenerate: { directory: 'stack' } },
+            { label: 'Numeric Ops', autogenerate: { directory: 'ops' } },
+            { label: 'Extensions', autogenerate: { directory: 'extensions' } },
           ],
         },
         { label: 'Reference', autogenerate: { directory: 'instructions' } },
