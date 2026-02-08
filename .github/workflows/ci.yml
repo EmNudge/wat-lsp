@@ -115,36 +115,38 @@ jobs:
           cargo build --features native --release --bin wat-check
           wrong=()
 
-          echo "=== Checking valid examples (should pass) ==="
+          echo "Valid examples (should pass):"
           for file in packages/playground/examples/*.wat; do
-            echo "Checking $file..."
-            if ! ./target/release/wat-check "$file"; then
-              wrong+=("FAIL $file (expected pass, got fail)")
+            base=$(basename "$file")
+            if ./target/release/wat-check "$file" > /dev/null 2>&1; then
+              echo "  ok    $base"
+            else
+              echo "  FAIL  $base"
+              wrong+=("$file: expected pass, got fail")
             fi
           done
 
           echo ""
-          echo "=== Checking invalid examples (should fail) ==="
+          echo "Invalid examples (should fail):"
           for file in packages/playground/examples/invalid/*.wat; do
-            echo "Checking $file..."
-            if ./target/release/wat-check "$file" 2>/dev/null; then
-              wrong+=("PASS $file (expected fail, got pass)")
+            base=$(basename "$file")
+            if ./target/release/wat-check "$file" > /dev/null 2>&1; then
+              echo "  FAIL  $base"
+              wrong+=("$file: expected fail, got pass")
             else
-              echo "OK: $file correctly rejected"
+              echo "  ok    $base"
             fi
           done
 
           echo ""
           if [ ${#wrong[@]} -gt 0 ]; then
-            echo "=== Wrong results (${#wrong[@]}) ==="
+            echo "Failures (${#wrong[@]}):"
             for entry in "${wrong[@]}"; do
-              echo "  $entry"
+              echo "  - $entry"
             done
-            echo ""
-            echo "Example validation failed"
             exit 1
           fi
-          echo "All example files validated correctly"
+          echo "All examples validated correctly"
 
   clippy:
     name: Clippy
@@ -452,36 +454,38 @@ jobs:
         run: |
           wrong=()
 
-          echo "=== Checking valid examples (should pass) ==="
+          echo "Valid examples (should pass):"
           for file in packages/playground/examples/*.wat; do
-            echo "Checking $file..."
-            if ! node packages/wat-lsp/bin/wat-check-wasm.js "$file" 2>/dev/null; then
-              wrong+=("FAIL $file (expected pass, got fail)")
+            base=$(basename "$file")
+            if node packages/wat-lsp/bin/wat-check-wasm.js "$file" > /dev/null 2>&1; then
+              echo "  ok    $base"
+            else
+              echo "  FAIL  $base"
+              wrong+=("$file: expected pass, got fail")
             fi
           done
 
           echo ""
-          echo "=== Checking invalid examples (should fail) ==="
+          echo "Invalid examples (should fail):"
           for file in packages/playground/examples/invalid/*.wat; do
-            echo "Checking $file..."
-            if node packages/wat-lsp/bin/wat-check-wasm.js "$file" 2>/dev/null; then
-              wrong+=("PASS $file (expected fail, got pass)")
+            base=$(basename "$file")
+            if node packages/wat-lsp/bin/wat-check-wasm.js "$file" > /dev/null 2>&1; then
+              echo "  FAIL  $base"
+              wrong+=("$file: expected fail, got pass")
             else
-              echo "OK: $file correctly rejected"
+              echo "  ok    $base"
             fi
           done
 
           echo ""
           if [ ${#wrong[@]} -gt 0 ]; then
-            echo "=== Wrong results (${#wrong[@]}) ==="
+            echo "Failures (${#wrong[@]}):"
             for entry in "${wrong[@]}"; do
-              echo "  $entry"
+              echo "  - $entry"
             done
-            echo ""
-            echo "WASM example validation failed"
             exit 1
           fi
-          echo "All example files validated correctly (WASM)"
+          echo "All examples validated correctly (WASM)"
 
   playground:
     name: Playground
