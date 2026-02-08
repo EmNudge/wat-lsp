@@ -6,11 +6,13 @@
 mod references;
 mod semantic;
 mod stack;
+pub mod subtype;
 mod termination;
 pub mod tree_sitter;
 
 pub use references::*;
 pub use semantic::*;
 pub use stack::*;
+pub use subtype::validate_subtype_hierarchy;
 pub use termination::*;
 pub use tree_sitter::provide_tree_sitter_diagnostics;

@@ -97,6 +97,8 @@ fn test_add_type() {
             params: vec![ValueType::I32, ValueType::I32],
             results: vec![ValueType::I32],
         },
+        parent: None,
+        is_final: false,
         line: 0,
         range: None,
     };

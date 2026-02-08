@@ -182,6 +182,8 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                     name: type_def.id.map(|id| format!("${}", id.name())),
                     index: type_index,
                     kind: extract_type_def_info(&type_def.def),
+                    parent: extract_parent_ref(&type_def.def),
+                    is_final: type_def.def.final_type == Some(true),
                     line: span_to_line(type_def.span, source),
                     range: type_def.id.map(|id| id_to_range(id, source)),
                 });
@@ -193,6 +195,8 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                         name: rec_type.id.map(|id| format!("${}", id.name())),
                         index: type_index,
                         kind: extract_type_def_info(&rec_type.def),
+                        parent: extract_parent_ref(&rec_type.def),
+                        is_final: rec_type.def.final_type == Some(true),
                         line: span_to_line(rec_type.span, source),
                         range: rec_type.id.map(|id| id_to_range(id, source)),
                     });
@@ -328,6 +332,14 @@ fn extract_func_locals(func: &wast::core::Func, source: &str) -> Vec<Variable> {
 #[inline]
 fn extract_value_type(val_type: &wast::core::ValType) -> ValueType {
     ValueType::from(val_type)
+}
+
+/// Extract parent type reference from wast TypeDef
+fn extract_parent_ref(def: &wast::core::TypeDef) -> Option<String> {
+    def.parent.as_ref().map(|idx| match idx {
+        wast::token::Index::Num(n, _) => n.to_string(),
+        wast::token::Index::Id(id) => format!("${}", id.name()),
+    })
 }
 
 /// Extract type definition info from wast TypeDef

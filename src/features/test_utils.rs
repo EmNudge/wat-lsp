@@ -101,6 +101,8 @@ pub fn create_test_symbols() -> SymbolTable {
             params: vec![ValueType::I32, ValueType::I32],
             results: vec![ValueType::I32],
         },
+        parent: None,
+        is_final: false,
         line: 0,
         range: None,
     };
@@ -158,6 +160,8 @@ pub fn create_signature_test_symbols() -> SymbolTable {
             params: vec![ValueType::I32, ValueType::I64, ValueType::F32],
             results: vec![ValueType::F64],
         },
+        parent: None,
+        is_final: false,
         line: 0,
         range: None,
     };

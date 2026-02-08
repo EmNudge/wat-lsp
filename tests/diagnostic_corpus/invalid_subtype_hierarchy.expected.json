@@ -1,0 +1,11 @@
+{
+  "description": "Struct subtype with fewer fields than parent",
+  "diagnostics": [
+    {
+      "line": 2,
+      "message_contains": "fields",
+      "message_contains_all": ["1", "2"],
+      "severity": 1
+    }
+  ]
+}

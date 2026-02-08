@@ -1,0 +1,4 @@
+{
+  "description": "Valid struct subtype extending parent with additional fields",
+  "diagnostics": []
+}
