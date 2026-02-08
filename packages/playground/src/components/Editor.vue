@@ -326,6 +326,40 @@ function registerLSPProviders() {
       };
     }
   });
+
+  monaco.languages.registerDefinitionProvider('wat', {
+    provideDefinition: (model, position) => {
+      watLSP.parse(model.getValue());
+      const def = watLSP.provideDefinition(position.lineNumber - 1, position.column - 1);
+      if (!def) return null;
+      return {
+        uri: model.uri,
+        range: new monaco.Range(
+          def.range.start.line + 1, def.range.start.character + 1,
+          def.range.end.line + 1, def.range.end.character + 1
+        )
+      };
+    }
+  });
+
+  monaco.languages.registerReferenceProvider('wat', {
+    provideReferences: (model, position, context) => {
+      watLSP.parse(model.getValue());
+      const refs = watLSP.provideReferences(
+        position.lineNumber - 1,
+        position.column - 1,
+        context.includeDeclaration
+      );
+      if (!refs || refs.length === 0) return [];
+      return refs.map((ref: any) => ({
+        uri: model.uri,
+        range: new monaco.Range(
+          ref.range.start.line + 1, ref.range.start.character + 1,
+          ref.range.end.line + 1, ref.range.end.character + 1
+        )
+      }));
+    }
+  });
 }
 
 watch(() => store.activeFileId, (newId, oldId) => {
