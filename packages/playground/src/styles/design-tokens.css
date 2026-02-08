@@ -1,0 +1,89 @@
+:root {
+    /* Flexoki Dark Palette */
+    --bg-color: #10100e;
+    --bg-soft: #1c1c1a;
+    --bg-muted: #282826;
+    --fg-color: #cecdc3;
+    --fg-muted: #878580;
+
+    --primary-color: #654ff0;
+    --primary-muted: rgba(101, 79, 240, 0.2);
+
+    --success-color: #879a39;
+    --warning-color: #d0a215;
+    --error-color: #d14d41;
+    --info-color: #519fdf;
+
+    --border-color: #282826;
+    --hover-bg: #282826;
+
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-color);
+    color: var(--fg-color);
+    font-family: var(--font-family);
+    overflow: hidden;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+    gap: 0.5rem;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background-color: #7b68ff;
+    transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bg-muted);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-muted);
+}
+
+/* Firefox support */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-muted) transparent;
+}

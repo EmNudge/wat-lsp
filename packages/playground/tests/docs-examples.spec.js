@@ -41,15 +41,18 @@ function loadWatFiles(dir) {
 const validExampleIds = loadWatFiles(DOCS_DIR);
 const invalidExampleIds = loadWatFiles(INVALID_DIR).map((id) => `invalid_${id}`);
 
+/** Wait for the WASM LSP to finish initializing. */
+async function waitForLSP(page) {
+  await expect(page.locator('.lsp-status')).toContainText('LSP Ready', {
+    timeout: 15000,
+  });
+}
+
 test.describe('File Tree Error Coloring', () => {
   test('valid examples should not have error coloring', async ({ page }) => {
     test.setTimeout(30000);
     await page.goto('/');
-
-    // Wait for LSP to be ready (which triggers updateAllFileErrors)
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, {
-      timeout: 15000,
-    });
+    await waitForLSP(page);
 
     // Wait a bit for file tree errors to be updated
     await page.waitForTimeout(500);
@@ -78,16 +81,13 @@ test.describe('File Tree Error Coloring', () => {
   test('invalid examples should have error coloring', async ({ page }) => {
     test.setTimeout(30000);
     await page.goto('/');
-
-    // Wait for LSP to be ready (which triggers updateAllFileErrors)
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, {
-      timeout: 15000,
-    });
+    await waitForLSP(page);
 
     // Wait a bit for file tree errors to be updated
     await page.waitForTimeout(500);
 
-    // Check that invalid example files have .has-error class
+    // Invalid items are in a collapsed section (v-show) but still in the DOM.
+    // Check that they have .has-error class.
     const failures = [];
 
     for (const id of invalidExampleIds) {
@@ -111,24 +111,24 @@ test.describe('File Tree Error Coloring', () => {
   test('error coloring uses red color', async ({ page }) => {
     test.setTimeout(30000);
     await page.goto('/');
-
-    // Wait for LSP to be ready
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, {
-      timeout: 15000,
-    });
-
+    await waitForLSP(page);
     await page.waitForTimeout(500);
 
-    // Find an item with .has-error and verify it has red color
+    // Expand the invalid folder so error items are visible
+    await page.locator('.tree-group-header:has-text("invalid")').click();
+    await page.waitForTimeout(200);
+
+    // Find an item with .has-error and verify its .file-name child has red color
     const errorItems = page.locator('.tree-item.has-error');
     const count = await errorItems.count();
 
     if (count > 0) {
       const color = await errorItems.first().evaluate((el) => {
-        return window.getComputedStyle(el).color;
+        const fileName = el.querySelector('.file-name');
+        return window.getComputedStyle(fileName || el).color;
       });
 
-      // Check it's reddish (CSS --error is #f44336 = rgb(244, 67, 54))
+      // Check it's reddish (CSS --error-color is #d14d41 = rgb(209, 77, 65))
       const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
       expect(match, 'Color should be in rgb format').toBeTruthy();
 

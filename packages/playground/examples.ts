@@ -4,6 +4,7 @@
 export interface ExampleDefinition {
   id: string;
   label: string;
+  filename: string;
   code: string;
 }
 
@@ -46,14 +47,16 @@ function filenameToId(path: string): string {
 
 // Build the examples array from imported modules
 const validExamples = Object.entries(exampleModules).map(([path, code]) => {
+  const filename = path.split('/').pop() || '';
   const id = filenameToId(path);
   const label = extractLabel(code, id);
-  return { id, label, code };
+  return { id, label, filename, code };
 });
 
 // Build invalid examples with "Failure - " prefix
 const invalidExamples = Object.entries(invalidExampleModules).map(
   ([path, code]) => {
+    const filename = path.split('/').pop() || '';
     const id = `invalid_${filenameToId(path)}`;
     let label = extractLabel(code, id);
     // Replace "Invalid: " prefix with "Failure - " or add "Failure - " prefix
@@ -62,7 +65,7 @@ const invalidExamples = Object.entries(invalidExampleModules).map(
     } else {
       label = 'Failure - ' + label;
     }
-    return { id, label, code };
+    return { id, label, filename, code };
   }
 );
 

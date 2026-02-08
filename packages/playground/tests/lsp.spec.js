@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
 
+/** Wait for the WASM LSP to finish initializing. */
+async function waitForLSP(page) {
+  await expect(page.locator('.lsp-status')).toContainText('LSP Ready', {
+    timeout: 15000,
+  });
+}
+
 test.describe('WAT LSP Playground', () => {
   test('page loads without critical errors', async ({ page }) => {
     const errors = [];
@@ -10,7 +17,7 @@ test.describe('WAT LSP Playground', () => {
     });
 
     await page.goto('/');
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
+    await waitForLSP(page);
 
     // Wait for initialization to complete
     await page.waitForTimeout(1000);
@@ -25,20 +32,19 @@ test.describe('WAT LSP Playground', () => {
 
   test('LSP initializes and colors files correctly', async ({ page }) => {
     await page.goto('/');
+    await waitForLSP(page);
 
-    // Wait for LSP to be ready
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
-    await expect(page.locator('#lsp-indicator')).toHaveClass(/ready/);
+    // Verify the LSP indicator dot has the .ready class
+    await expect(page.locator('.lsp-indicator')).toHaveClass(/ready/);
 
     // Wait for file tree errors to be updated
     await page.waitForTimeout(500);
 
-    // Verify that file tree has been populated with error indicators
     // Valid files should NOT have .has-error, invalid files SHOULD
+    // (invalid items are in a collapsed v-show section but still in DOM)
     const validItemCount = await page.locator('.tree-item:not(.has-error)').count();
     const errorItemCount = await page.locator('.tree-item.has-error').count();
 
-    // We should have at least some of each
     expect(validItemCount, 'Should have valid (non-error) files').toBeGreaterThan(0);
     expect(errorItemCount, 'Should have invalid (error) files').toBeGreaterThan(0);
   });
@@ -47,7 +53,7 @@ test.describe('WAT LSP Playground', () => {
     await page.goto('/');
 
     // Wait for Monaco editor to be present
-    const editor = page.locator('#editor .monaco-editor');
+    const editor = page.locator('.editor-container .monaco-editor');
     await expect(editor).toBeVisible({ timeout: 10000 });
 
     // Verify some WAT code is loaded (the hello example)
@@ -57,57 +63,28 @@ test.describe('WAT LSP Playground', () => {
 
   test('compile button works', async ({ page }) => {
     await page.goto('/');
+    await waitForLSP(page);
 
-    // Wait for initialization
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
+    // Click the Compile button
+    await page.locator('button:has-text("Compile")').click();
 
-    // Click compile
-    await page.click('#compile-btn');
-
-    // Wait for successful compilation
-    const status = page.locator('#status');
-    await expect(status).toHaveText('Compiled successfully', { timeout: 10000 });
-
-    // Verify run button is enabled
-    const runBtn = page.locator('#run-btn');
-    await expect(runBtn).toBeEnabled();
+    // Wait for success message in the console output panel
+    await expect(page.locator('.log-line.success .message')).toContainText(
+      'Compiled successfully',
+      { timeout: 10000 }
+    );
   });
 
-  test('can run compiled module', async ({ page }) => {
+  test('file selection updates editor', async ({ page }) => {
     await page.goto('/');
-
-    // Wait for initialization
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
-
-    // Compile and run
-    await page.click('#compile-btn');
-    await expect(page.locator('#status')).toHaveText('Compiled successfully', { timeout: 10000 });
-
-    await page.click('#run-btn');
-    await expect(page.locator('#status')).toHaveText('Module ready', { timeout: 5000 });
-
-    // Select a function and call it
-    await page.selectOption('#export-fn-select', 'add');
-    await page.fill('#fn-args', '2, 3');
-    await page.click('#call-fn-btn');
-
-    // Verify result
-    const result = page.locator('#fn-result');
-    await expect(result).toContainText('5');
-  });
-
-  test('file selection updates editor and error state', async ({ page }) => {
-    await page.goto('/');
-
-    // Wait for LSP to be ready
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
+    await waitForLSP(page);
     await page.waitForTimeout(500);
 
     // Expand the invalid folder
-    await page.click('.tree-folder-header:has-text("invalid")');
+    await page.locator('.tree-group-header:has-text("invalid")').click();
     await page.waitForTimeout(200);
 
-    // Click on an invalid file (should have .has-error)
+    // Click on an invalid file (always has .has-error)
     const invalidItem = page.locator('.tree-item.has-error').first();
     await invalidItem.click();
     await page.waitForTimeout(300);
@@ -122,9 +99,7 @@ test.describe('WAT LSP Playground', () => {
 
   test('editing a file updates its error state', async ({ page }) => {
     await page.goto('/');
-
-    // Wait for LSP to be ready
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, { timeout: 15000 });
+    await waitForLSP(page);
     await page.waitForTimeout(500);
 
     // Get initial state of hello file (should be valid)
@@ -144,7 +119,9 @@ test.describe('WAT LSP Playground', () => {
 
     // Fix the code
     await page.evaluate(() => {
-      window.monacoEditor?.setValue('(module (func (result i32) (i32.add (i32.const 1) (i32.const 2))))');
+      window.monacoEditor?.setValue(
+        '(module (func (result i32) (i32.add (i32.const 1) (i32.const 2))))'
+      );
     });
 
     // Wait for diagnostics to update

@@ -61,6 +61,13 @@ function loadCorpusTestCases() {
 
 const testCases = loadCorpusTestCases();
 
+/** Wait for the WASM LSP to finish initializing. */
+async function waitForLSP(page) {
+  await expect(page.locator('.lsp-status')).toContainText('LSP Ready', {
+    timeout: 15000,
+  });
+}
+
 test.describe('Diagnostic Parity (WASM vs Native)', () => {
   // Skip all tests if no corpus found
   test.skip(testCases.length === 0, 'No diagnostic corpus found');
@@ -68,11 +75,7 @@ test.describe('Diagnostic Parity (WASM vs Native)', () => {
   test('corpus files with expected errors should show error indicators', async ({ page }) => {
     test.setTimeout(60000);
     await page.goto('/');
-
-    // Wait for LSP to be ready
-    await expect(page.locator('#lsp-status-text')).toHaveText(/LSP Ready/, {
-      timeout: 15000,
-    });
+    await waitForLSP(page);
 
     const filesExpectingErrors = testCases.filter((tc) => tc.expectsErrors);
     const filesExpectingNoErrors = testCases.filter((tc) => !tc.expectsErrors);
