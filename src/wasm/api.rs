@@ -14,7 +14,7 @@ use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
 use crate::signature::call_info::{find_function_call, find_function_call_ast, CallInfo, CallType};
-use crate::symbol_lookup::{find_symbol_definition_range, IndexContext};
+use crate::symbol_lookup::find_symbol_definition_range;
 use crate::symbols::{SymbolTable, ValueType};
 use crate::ts_facade::{self, Language, Parser, Query, Tree};
 use crate::utils::{
@@ -187,36 +187,22 @@ impl WatLSP {
             None => return JsValue::NULL,
         };
 
-        let position = Position::new(line, col);
-
-        // Get word at position
-        let word = match get_word_at_position(&self.document, position) {
-            Some(w) => w,
+        let tree = match &self.tree {
+            Some(t) => t,
             None => return JsValue::NULL,
         };
 
-        // Find definition for symbols
-        if word.starts_with('$') {
-            if let Some(range) = find_symbol_definition_range(&word, symbols, position) {
-                return definition_to_js(&range);
-            }
-            // Fallback: if no range but symbol exists, use line number
-            if let Some(func) = symbols.get_function_by_name(&word) {
-                return definition_to_js(&Range::from_coords(func.line, 0, func.line, 0));
-            }
-            if let Some(global) = symbols.get_global_by_name(&word) {
-                return definition_to_js(&Range::from_coords(global.line, 0, global.line, 0));
-            }
-        }
+        let position = Position::new(line, col);
 
-        // Find definition for numeric indices
-        if let Ok(index) = word.parse::<usize>() {
-            if let Some(range) = find_index_definition(index, symbols, &self.document, position) {
-                return definition_to_js(&range);
-            }
+        match crate::features::definition_core::provide_definition_core(
+            &self.document,
+            symbols,
+            tree,
+            position,
+        ) {
+            Some(range) => definition_to_js(&range),
+            None => JsValue::NULL,
         }
-
-        JsValue::NULL
     }
 
     /// Debug: get info about a word at position
@@ -569,48 +555,12 @@ impl WatLSP {
             None => return js_sys::Array::new().into(),
         };
 
+        let core_symbols =
+            crate::features::document_symbols_core::provide_document_symbols_core(symbols);
         let result = js_sys::Array::new();
-
-        // Add types
-        for type_def in &symbols.types {
-            result.push(&type_to_js_symbol(type_def));
+        for sym in core_symbols {
+            result.push(&document_symbol_info_to_js(&sym));
         }
-
-        // Add functions with children
-        for func in &symbols.functions {
-            result.push(&function_to_js_symbol(func));
-        }
-
-        // Add globals
-        for global in &symbols.globals {
-            result.push(&global_to_js_symbol(global));
-        }
-
-        // Add tables
-        for table in &symbols.tables {
-            result.push(&table_to_js_symbol(table));
-        }
-
-        // Add memories
-        for memory in &symbols.memories {
-            result.push(&memory_to_js_symbol(memory));
-        }
-
-        // Add tags
-        for tag in &symbols.tags {
-            result.push(&tag_to_js_symbol(tag));
-        }
-
-        // Add data segments
-        for data in &symbols.data_segments {
-            result.push(&data_to_js_symbol(data));
-        }
-
-        // Add element segments
-        for elem in &symbols.elem_segments {
-            result.push(&elem_to_js_symbol(elem));
-        }
-
         result.into()
     }
 
@@ -1068,35 +1018,6 @@ fn reference_to_js(range: &Range) -> JsValue {
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(&obj, &"range".into(), &range_to_js(range)).ok();
     obj.into()
-}
-
-fn find_index_definition(
-    index: usize,
-    symbols: &SymbolTable,
-    document: &str,
-    position: Position,
-) -> Option<Range> {
-    // Determine context from line
-    let lines: Vec<&str> = document.lines().collect();
-    let line = lines.get(position.line as usize)?;
-
-    let context = if line.contains("call") {
-        IndexContext::Function
-    } else if line.contains("global") {
-        IndexContext::Global
-    } else if line.contains("local") {
-        IndexContext::Local
-    } else if line.contains("type") || line.contains("struct") || line.contains("array") {
-        IndexContext::Type
-    } else if line.contains("table") {
-        IndexContext::Table
-    } else if line.contains("memory") {
-        IndexContext::Memory
-    } else {
-        return None;
-    };
-
-    crate::symbol_lookup::find_index_definition_range(index, symbols, context, position)
 }
 
 fn find_symbol_references(
@@ -1825,358 +1746,27 @@ fn core_diagnostic_to_js(diag: &CoreDiagnostic) -> JsValue {
 }
 
 // ============================================================================
-// Document Symbol helpers
+// Document Symbol helpers (shared core → JS conversion)
 // ============================================================================
 
-use crate::symbols::{
-    BlockLabel, DataSegment, ElemSegment, Function, Global, Memory, Parameter, Table, Tag, TypeDef,
-    TypeKind, Variable,
-};
+use crate::core::types::DocumentSymbolInfo;
 
-/// LSP SymbolKind constants (matching the LSP spec)
-mod symbol_kind {
-    pub const FUNCTION: u32 = 12;
-    pub const VARIABLE: u32 = 13;
-    pub const CONSTANT: u32 = 14;
-    pub const STRING: u32 = 15;
-    pub const ARRAY: u32 = 18;
-    pub const OBJECT: u32 = 19;
-    pub const KEY: u32 = 20;
-    pub const EVENT: u32 = 24;
-    pub const INTERFACE: u32 = 11;
-}
-
-fn make_js_range(line: u32, character: u32, end_line: u32, end_character: u32) -> js_sys::Object {
-    let range = js_sys::Object::new();
-    let start = js_sys::Object::new();
-    js_sys::Reflect::set(&start, &"line".into(), &line.into()).ok();
-    js_sys::Reflect::set(&start, &"character".into(), &character.into()).ok();
-    let end = js_sys::Object::new();
-    js_sys::Reflect::set(&end, &"line".into(), &end_line.into()).ok();
-    js_sys::Reflect::set(&end, &"character".into(), &end_character.into()).ok();
-    js_sys::Reflect::set(&range, &"start".into(), &start).ok();
-    js_sys::Reflect::set(&range, &"end".into(), &end).ok();
-    range
-}
-
-fn core_range_to_js_range(range: &Range) -> js_sys::Object {
-    make_js_range(
-        range.start.line,
-        range.start.character,
-        range.end.line,
-        range.end.character,
-    )
-}
-
-fn create_document_symbol(
-    name: &str,
-    detail: Option<&str>,
-    kind: u32,
-    range: js_sys::Object,
-    children: Option<js_sys::Array>,
-) -> JsValue {
+fn document_symbol_info_to_js(sym: &DocumentSymbolInfo) -> JsValue {
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(&obj, &"name".into(), &name.into()).ok();
-    if let Some(d) = detail {
-        js_sys::Reflect::set(&obj, &"detail".into(), &d.into()).ok();
+    js_sys::Reflect::set(&obj, &"name".into(), &sym.name.clone().into()).ok();
+    if let Some(ref d) = sym.detail {
+        js_sys::Reflect::set(&obj, &"detail".into(), &d.clone().into()).ok();
     }
-    js_sys::Reflect::set(&obj, &"kind".into(), &kind.into()).ok();
-    js_sys::Reflect::set(&obj, &"range".into(), &range).ok();
-    js_sys::Reflect::set(&obj, &"selectionRange".into(), &range).ok();
-    if let Some(c) = children {
-        js_sys::Reflect::set(&obj, &"children".into(), &c).ok();
+    js_sys::Reflect::set(&obj, &"kind".into(), &(sym.kind as u32).into()).ok();
+    let range_js = range_to_js(&sym.range);
+    js_sys::Reflect::set(&obj, &"range".into(), &range_js).ok();
+    js_sys::Reflect::set(&obj, &"selectionRange".into(), &range_js).ok();
+    if let Some(ref children) = sym.children {
+        let arr = js_sys::Array::new();
+        for child in children {
+            arr.push(&document_symbol_info_to_js(child));
+        }
+        js_sys::Reflect::set(&obj, &"children".into(), &arr).ok();
     }
     obj.into()
-}
-
-fn type_to_js_symbol(type_def: &TypeDef) -> JsValue {
-    let name = type_def
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(type {})", type_def.index));
-
-    let detail = match &type_def.kind {
-        TypeKind::Func { params, results } => {
-            let params_str = params
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let results_str = results
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(" ");
-            if results_str.is_empty() {
-                format!("(func ({}))", params_str)
-            } else {
-                format!("(func ({}) -> ({}))", params_str, results_str)
-            }
-        }
-        TypeKind::Struct { fields } => format!("(struct {} fields)", fields.len()),
-        TypeKind::Array { element_type, .. } => format!("(array {})", element_type),
-    };
-
-    let range = type_def
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(type_def.line, 0, type_def.line, 0));
-
-    create_document_symbol(&name, Some(&detail), symbol_kind::INTERFACE, range, None)
-}
-
-fn function_to_js_symbol(func: &Function) -> JsValue {
-    let name = func
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(func {})", func.index));
-
-    let params_str = func
-        .parameters
-        .iter()
-        .map(|p| {
-            if let Some(ref name) = p.name {
-                format!("{} {}", name, p.param_type)
-            } else {
-                p.param_type.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let results_str = func
-        .results
-        .iter()
-        .map(|t| t.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let detail = if results_str.is_empty() {
-        format!("({})", params_str)
-    } else {
-        format!("({}) -> ({})", params_str, results_str)
-    };
-
-    let range = func
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(func.line, 0, func.end_line, 0));
-
-    // Build children
-    let children = js_sys::Array::new();
-
-    for param in &func.parameters {
-        children.push(&param_to_js_symbol(param));
-    }
-
-    for local in &func.locals {
-        children.push(&local_to_js_symbol(local));
-    }
-
-    for block in &func.blocks {
-        children.push(&block_to_js_symbol(block));
-    }
-
-    let children_opt = if children.length() > 0 {
-        Some(children)
-    } else {
-        None
-    };
-
-    create_document_symbol(
-        &name,
-        Some(&detail),
-        symbol_kind::FUNCTION,
-        range,
-        children_opt,
-    )
-}
-
-fn param_to_js_symbol(param: &Parameter) -> JsValue {
-    let name = param
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(param {})", param.index));
-
-    let range = param
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(0, 0, 0, 0));
-
-    create_document_symbol(
-        &name,
-        Some(&param.param_type.to_string()),
-        symbol_kind::VARIABLE,
-        range,
-        None,
-    )
-}
-
-fn local_to_js_symbol(local: &Variable) -> JsValue {
-    let name = local
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(local {})", local.index));
-
-    let range = local
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(0, 0, 0, 0));
-
-    create_document_symbol(
-        &name,
-        Some(&local.var_type.to_string()),
-        symbol_kind::VARIABLE,
-        range,
-        None,
-    )
-}
-
-fn block_to_js_symbol(block: &BlockLabel) -> JsValue {
-    let range = block
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(block.line, 0, block.line, 0));
-
-    create_document_symbol(
-        &block.label,
-        Some(&block.block_type),
-        symbol_kind::KEY,
-        range,
-        None,
-    )
-}
-
-fn global_to_js_symbol(global: &Global) -> JsValue {
-    let name = global
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(global {})", global.index));
-
-    let detail = format!(
-        "{}{}",
-        if global.is_mutable { "mut " } else { "" },
-        global.var_type
-    );
-
-    let range = global
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(global.line, 0, global.line, 0));
-
-    create_document_symbol(&name, Some(&detail), symbol_kind::CONSTANT, range, None)
-}
-
-fn table_to_js_symbol(table: &Table) -> JsValue {
-    let name = table
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(table {})", table.index));
-
-    let detail = format!(
-        "{} {} {}",
-        table.limits.0,
-        table.limits.1.map_or("".to_string(), |m| m.to_string()),
-        table.ref_type
-    );
-
-    let range = table
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(table.line, 0, table.line, 0));
-
-    create_document_symbol(&name, Some(&detail), symbol_kind::ARRAY, range, None)
-}
-
-fn memory_to_js_symbol(memory: &Memory) -> JsValue {
-    let name = memory
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(memory {})", memory.index));
-
-    let detail = format!(
-        "{}{}",
-        memory.limits.0,
-        memory
-            .limits
-            .1
-            .map_or("".to_string(), |m| format!(" {}", m))
-    );
-
-    let range = memory
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(memory.line, 0, memory.line, 0));
-
-    create_document_symbol(&name, Some(&detail), symbol_kind::OBJECT, range, None)
-}
-
-fn tag_to_js_symbol(tag: &Tag) -> JsValue {
-    let name = tag
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(tag {})", tag.index));
-
-    let detail = if tag.params.is_empty() {
-        "()".to_string()
-    } else {
-        format!(
-            "({})",
-            tag.params
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(" ")
-        )
-    };
-
-    let range = tag
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(tag.line, 0, tag.line, 0));
-
-    create_document_symbol(&name, Some(&detail), symbol_kind::EVENT, range, None)
-}
-
-fn data_to_js_symbol(data: &DataSegment) -> JsValue {
-    let name = data
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(data {})", data.index));
-
-    let detail = format!("{} bytes", data.byte_length);
-
-    let range = data
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(data.line, 0, data.line, 0));
-
-    create_document_symbol(&name, Some(&detail), symbol_kind::STRING, range, None)
-}
-
-fn elem_to_js_symbol(elem: &ElemSegment) -> JsValue {
-    let name = elem
-        .name
-        .clone()
-        .unwrap_or_else(|| format!("(elem {})", elem.index));
-
-    let detail = format!("{} functions", elem.func_names.len());
-
-    let range = elem
-        .range
-        .as_ref()
-        .map(core_range_to_js_range)
-        .unwrap_or_else(|| make_js_range(elem.line, 0, elem.line, 0));
-
-    create_document_symbol(&name, Some(&detail), symbol_kind::ARRAY, range, None)
 }

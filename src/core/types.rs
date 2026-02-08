@@ -229,6 +229,31 @@ impl Diagnostic {
     }
 }
 
+/// Symbol kind for document symbols (matches LSP SymbolKind values)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum SymbolKindCore {
+    Function = 12,
+    Variable = 13,
+    Constant = 14,
+    String = 15,
+    Array = 18,
+    Object = 19,
+    Key = 20,
+    Event = 24,
+    Interface = 11,
+}
+
+/// A protocol-independent document symbol for outline views
+#[derive(Debug, Clone)]
+pub struct DocumentSymbolInfo {
+    pub name: std::string::String,
+    pub detail: Option<std::string::String>,
+    pub kind: SymbolKindCore,
+    pub range: Range,
+    pub children: Option<Vec<DocumentSymbolInfo>>,
+}
+
 // Conversion implementations for native builds (tower-lsp types)
 #[cfg(feature = "native")]
 impl From<lsp::Position> for Position {
@@ -353,6 +378,42 @@ impl From<Diagnostic> for lsp::Diagnostic {
             related_information: None,
             tags: None,
             data: None,
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl From<SymbolKindCore> for lsp::SymbolKind {
+    fn from(kind: SymbolKindCore) -> Self {
+        match kind {
+            SymbolKindCore::Function => lsp::SymbolKind::FUNCTION,
+            SymbolKindCore::Variable => lsp::SymbolKind::VARIABLE,
+            SymbolKindCore::Constant => lsp::SymbolKind::CONSTANT,
+            SymbolKindCore::String => lsp::SymbolKind::STRING,
+            SymbolKindCore::Array => lsp::SymbolKind::ARRAY,
+            SymbolKindCore::Object => lsp::SymbolKind::OBJECT,
+            SymbolKindCore::Key => lsp::SymbolKind::KEY,
+            SymbolKindCore::Event => lsp::SymbolKind::EVENT,
+            SymbolKindCore::Interface => lsp::SymbolKind::INTERFACE,
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl From<DocumentSymbolInfo> for lsp::DocumentSymbol {
+    #[allow(deprecated)]
+    fn from(sym: DocumentSymbolInfo) -> Self {
+        lsp::DocumentSymbol {
+            name: sym.name,
+            detail: sym.detail,
+            kind: sym.kind.into(),
+            tags: None,
+            deprecated: None,
+            range: sym.range.into(),
+            selection_range: sym.range.into(),
+            children: sym
+                .children
+                .map(|c| c.into_iter().map(Into::into).collect()),
         }
     }
 }
