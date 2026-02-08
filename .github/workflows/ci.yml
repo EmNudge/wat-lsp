@@ -33,8 +33,9 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'build.rs'
-              - 'docs/**'
               - 'packages/docs/instructions.md'
+              - 'packages/docs/annotations.md'
+              - 'packages/playground/examples/**'
               - 'grammars/tree-sitter-wat/**'
               - 'tests/diagnostic_corpus/**'
             packages:
@@ -115,7 +116,7 @@ jobs:
           wrong=()
 
           echo "=== Checking valid examples (should pass) ==="
-          for file in docs/examples/*.wat; do
+          for file in packages/playground/examples/*.wat; do
             echo "Checking $file..."
             if ! ./target/release/wat-check "$file"; then
               wrong+=("FAIL $file (expected pass, got fail)")
@@ -124,7 +125,7 @@ jobs:
 
           echo ""
           echo "=== Checking invalid examples (should fail) ==="
-          for file in docs/examples/invalid/*.wat; do
+          for file in packages/playground/examples/invalid/*.wat; do
             echo "Checking $file..."
             if ./target/release/wat-check "$file" 2>/dev/null; then
               wrong+=("PASS $file (expected fail, got pass)")
@@ -452,7 +453,7 @@ jobs:
           wrong=()
 
           echo "=== Checking valid examples (should pass) ==="
-          for file in docs/examples/*.wat; do
+          for file in packages/playground/examples/*.wat; do
             echo "Checking $file..."
             if ! node packages/wat-lsp/bin/wat-check-wasm.js "$file" 2>/dev/null; then
               wrong+=("FAIL $file (expected pass, got fail)")
@@ -461,7 +462,7 @@ jobs:
 
           echo ""
           echo "=== Checking invalid examples (should fail) ==="
-          for file in docs/examples/invalid/*.wat; do
+          for file in packages/playground/examples/invalid/*.wat; do
             echo "Checking $file..."
             if node packages/wat-lsp/bin/wat-check-wasm.js "$file" 2>/dev/null; then
               wrong+=("PASS $file (expected fail, got pass)")

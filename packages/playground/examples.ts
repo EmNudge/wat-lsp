@@ -1,5 +1,5 @@
 // Example WAT programs for the playground
-// Uses Vite's import.meta.glob to load examples from docs/examples
+// Uses Vite's import.meta.glob to load examples from the examples/ directory
 
 export interface ExampleDefinition {
   id: string;
@@ -8,16 +8,16 @@ export interface ExampleDefinition {
   code: string;
 }
 
-// Import all .wat files from docs/examples as raw strings
-const exampleModules = import.meta.glob<string>('../../docs/examples/*.wat', {
+// Import all .wat files from examples/ as raw strings
+const exampleModules = import.meta.glob<string>('./examples/*.wat', {
   eager: true,
   query: '?raw',
   import: 'default',
 });
 
-// Import invalid examples from docs/examples/invalid
+// Import invalid examples from examples/invalid
 const invalidExampleModules = import.meta.glob<string>(
-  '../../docs/examples/invalid/*.wat',
+  './examples/invalid/*.wat',
   {
     eager: true,
     query: '?raw',
