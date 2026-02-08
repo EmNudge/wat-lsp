@@ -175,6 +175,10 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
     ); // terminates - always branches
     map.insert("call", InstructionArity::dynamic(1, 1, "function index", 0)); // produces depend on function signature (set to 0, handled dynamically)
     map.insert(
+        "return_call",
+        InstructionArity::dynamic(1, 1, "function index", 0),
+    ); // tail call - args depend on callee signature
+    map.insert(
         "call_indirect",
         InstructionArity::dynamic(1, 1, "type index", 0),
     ); // args + table index -> dynamic results

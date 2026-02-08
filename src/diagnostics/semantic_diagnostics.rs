@@ -2208,6 +2208,7 @@ mod tests {
     #[test]
     fn test_return_call_ref_type_use_syntax() {
         // return_call_ref (type $t) should also be recognized
+        // The function needs param + funcref on the stack for return_call_ref
         let document = r#"(module
   (type $t (func (param i32) (result i32)))
   (func $inc (type $t) (param $x i32) (result i32)
@@ -2215,8 +2216,9 @@ mod tests {
     i32.const 1
     i32.add)
 
-  (func $dispatch (type $t) (param $x i32) (result i32)
+  (func $dispatch (param $x i32) (param $f funcref) (result i32)
     local.get $x
+    local.get $f
     return_call_ref (type $t))
 )"#;
 
@@ -3890,6 +3892,88 @@ mod tests {
             diagnostics.len(),
             0,
             "Chained linear call_indirect should have no errors, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_return_call_type_mismatch() {
+        // return_call $callee where callee returns f64 but caller returns i32
+        let document = r#"(module
+  (func $callee (result f64)
+    f64.const 1.0)
+  (func $caller (result i32)
+    return_call $callee)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let tail_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("mismatch"))
+            .collect();
+        assert_eq!(
+            tail_diags.len(),
+            1,
+            "Should detect return type mismatch, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        assert!(tail_diags[0].message.contains("return"));
+        assert!(tail_diags[0].message.contains("type"));
+    }
+
+    #[test]
+    fn test_valid_return_call() {
+        // return_call $callee where both return i32 — no diagnostics
+        let document = r#"(module
+  (func $callee (result i32)
+    i32.const 42)
+  (func $caller (result i32)
+    return_call $callee)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            0,
+            "Valid return_call should produce no errors, got: {:?}",
+            errors.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_return_call_arity_mismatch() {
+        // return_call $callee where callee returns 1 value but caller returns 2
+        let document = r#"(module
+  (func $callee (result i32)
+    i32.const 42)
+  (func $caller (result i32 i32)
+    return_call $callee)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let tail_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("mismatch"))
+            .collect();
+        assert!(
+            !tail_diags.is_empty(),
+            "Should detect return arity mismatch, got: {:?}",
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
