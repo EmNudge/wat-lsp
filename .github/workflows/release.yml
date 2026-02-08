@@ -332,10 +332,14 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+          cache: pnpm
 
       - name: Upgrade npm for OIDC support
         run: npm install -g npm@latest
@@ -360,12 +364,11 @@ jobs:
           npm version "$VERSION_NUM" --no-git-tag-version --allow-same-version
 
       - name: Install dependencies
-        working-directory: packages/wat-lsp
-        run: npm install
+        run: pnpm install
 
       - name: Build npm package
         working-directory: packages/wat-lsp
-        run: npm run build
+        run: pnpm run build
 
       - name: Publish to npm
         working-directory: packages/wat-lsp

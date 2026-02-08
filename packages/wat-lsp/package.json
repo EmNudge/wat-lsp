@@ -28,9 +28,9 @@
     "build:wasm": "cd ../.. && wasm-pack build --target web --no-pack -- --features wasm --no-default-features && mkdir -p packages/wat-lsp/dist/wasm && cp pkg/wat_lsp_rust.js pkg/wat_lsp_rust.d.ts pkg/wat_lsp_rust_bg.wasm packages/wat-lsp/dist/wasm/",
     "build:wrapper": "mkdir -p dist && cp src/*.js dist/ && cp src/*.d.ts dist/",
     "build:assets": "node scripts/copy-assets.js",
-    "build": "npm run build:wasm && npm run build:wrapper && npm run build:assets",
+    "build": "pnpm run build:wasm && pnpm run build:wrapper && pnpm run build:assets",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "pnpm run clean && pnpm run build"
   },
   "repository": {
     "type": "git",
