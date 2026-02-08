@@ -88,10 +88,10 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "pnpm run compile",
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "pnpm run compile",
+    "pretest": "npm run compile",
     "lint": "eslint src --ext ts",
     "package": "vsce package",
     "build:server": "cd ../.. && cargo build --release",
