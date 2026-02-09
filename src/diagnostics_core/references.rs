@@ -209,6 +209,49 @@ pub fn check_try_delegate_clause_references(
     diagnostics
 }
 
+/// Check the function reference in a module_field_start node.
+/// The start directive takes a single function index: (start $func) or (start 0)
+pub fn check_start_references(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "index" {
+            let mut idx_cursor = child.walk();
+            for idx_child in child.children(&mut idx_cursor) {
+                #[cfg(feature = "native")]
+                let idx_kind = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let idx_kind = idx_child.kind();
+
+                if idx_kind == "identifier" {
+                    let identifier_name = &source[idx_child.byte_range()];
+                    if !identifier_name.starts_with('$') {
+                        continue;
+                    }
+
+                    if symbols.get_function_by_name(identifier_name).is_none() {
+                        let diagnostic = create_undefined_reference_diagnostic(
+                            &idx_child,
+                            identifier_name,
+                            &InstructionContext::Call,
+                        );
+                        diagnostics.push(diagnostic);
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    diagnostics
+}
+
 /// Find and validate only the first index identifier in a node
 /// Used for instructions like struct.get where only the first index is a type
 pub fn find_first_index_identifier(

@@ -3224,7 +3224,7 @@ Declares a function to be called automatically when the module is instantiated.
 
 Example:
 
-```wat-snippet
+```wat
 (module
   (func $init
     ;; Initialization code here

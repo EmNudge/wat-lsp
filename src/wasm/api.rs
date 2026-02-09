@@ -1102,6 +1102,14 @@ fn walk_tree_for_diagnostics(
         }
     }
 
+    // Special handling for start directive — shared core
+    if &*kind == "module_field_start" {
+        diagnostics.extend(crate::diagnostics_core::references::check_start_references(
+            &node, source, symbols,
+        ));
+        return;
+    }
+
     // Special handling for catch clauses — shared core
     if &*kind == "catch_clause" {
         diagnostics.extend(
