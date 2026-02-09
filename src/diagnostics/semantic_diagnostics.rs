@@ -213,6 +213,24 @@ fn unified_tree_walk(
         // Continue to recurse - nested expressions need to be checked
     }
 
+    // Check SIMD lane indices (must be before context check since v128.load*_lane
+    // matches Memory context and would early-return before we check lane bounds)
+    if kind == "instr_plain" {
+        let core_diags = crate::diagnostics_core::simd_checks::check_simd_lane_index(&node, source);
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
+    } else if kind == "expr1_plain" {
+        // In folded form, instr_plain is a child that won't be visited separately
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "instr_plain" {
+                let core_diags =
+                    crate::diagnostics_core::simd_checks::check_simd_lane_index(&child, source);
+                diagnostics.extend(core_diags.into_iter().map(Into::into));
+                break;
+            }
+        }
+    }
+
     // Check for undefined references based on instruction context
     // This handles instr_plain nodes and returns early after recursing into nested expr
     let context = determine_instruction_context_at_node(&node, source);

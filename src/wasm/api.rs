@@ -1188,6 +1188,25 @@ fn walk_tree_for_diagnostics(
         }
     }
 
+    // Check SIMD lane indices (must be before context check since v128.load*_lane
+    // matches Memory context and would early-return before we check lane bounds)
+    if &*kind == "instr_plain" {
+        diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
+            &node, source,
+        ));
+    } else if &*kind == "expr1_plain" {
+        // In folded form, instr_plain is a child that won't be visited separately
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "instr_plain" {
+                diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
+                    &child, source,
+                ));
+                break;
+            }
+        }
+    }
+
     // Check for undefined references based on instruction context — shared core
     let context = determine_instruction_context_at_node(&node, source);
     if context != InstructionContext::General {
