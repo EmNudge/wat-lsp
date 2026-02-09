@@ -132,6 +132,14 @@ fn unified_tree_walk(
         // Continue recursing to check nested instructions
     }
 
+    // Special handling for start directive: index is a function reference
+    if kind == "module_field_start" {
+        let core_diags =
+            crate::diagnostics_core::references::check_start_references(&node, source, symbols);
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
+        return;
+    }
+
     // Special handling for try_delegate_clause (legacy try): index is a label reference
     if kind == "try_delegate_clause" {
         let core_diags = crate::diagnostics_core::references::check_try_delegate_clause_references(
@@ -347,6 +355,52 @@ mod tests {
         );
         assert!(diagnostics[0].message.contains("Undefined function"));
         assert!(diagnostics[0].message.contains("$undefined"));
+    }
+
+    #[test]
+    fn test_undefined_start_function() {
+        let document = r#"(module
+  (start $main)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined function"))
+            .collect();
+        assert_eq!(
+            undefined_diags.len(),
+            1,
+            "Undefined start function should produce one diagnostic"
+        );
+        assert!(undefined_diags[0].message.contains("$main"));
+    }
+
+    #[test]
+    fn test_valid_start_function() {
+        let document = r#"(module
+  (func $main (nop))
+  (start $main)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined"))
+            .collect();
+        assert_eq!(
+            undefined_diags.len(),
+            0,
+            "Valid start function should not produce diagnostics"
+        );
     }
 
     #[test]
