@@ -1256,24 +1256,45 @@ fn extract_type_from_single_node(
             };
         }
         "type_field" => {
-            // This is a func type inside a type_field wrapper
-            let mut parameters = Vec::new();
-            let mut results = Vec::new();
+            // type_field wraps a def_type: func_type, struct_type, array_type, or sub_type
             let mut cursor = type_node.walk();
             for child in type_node.children(&mut cursor) {
-                if child.kind() == "func_type" {
-                    let params = extract_parameters(&child, source);
-                    for param in params {
-                        parameters.push(param.param_type);
+                let child_kind = child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let child_kind = child_kind.as_str();
+                match child_kind {
+                    "func_type" => {
+                        let mut parameters = Vec::new();
+                        let mut results = Vec::new();
+                        let params = extract_parameters(&child, source);
+                        for param in params {
+                            parameters.push(param.param_type);
+                        }
+                        results.extend(extract_results(&child, source));
+                        if !parameters.is_empty() || !results.is_empty() {
+                            kind = TypeKind::Func {
+                                params: parameters,
+                                results,
+                            };
+                        }
+                        break;
                     }
-                    results.extend(extract_results(&child, source));
+                    "struct_type" => {
+                        kind = extract_struct_kind(&child, source);
+                        break;
+                    }
+                    "array_type" => {
+                        kind = extract_array_kind(&child, source);
+                        break;
+                    }
+                    "sub_type" => {
+                        // Delegate to extract_type_from_single_node for sub_type
+                        return extract_type_from_single_node(
+                            &child, source, index, name, name_range,
+                        );
+                    }
+                    _ => {}
                 }
-            }
-            if !parameters.is_empty() || !results.is_empty() {
-                kind = TypeKind::Func {
-                    params: parameters,
-                    results,
-                };
             }
         }
         _ => return None,

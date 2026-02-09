@@ -516,14 +516,15 @@ pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
         InstructionArity::dynamic(1, 1, "type index", 0), // args + funcref -> terminates (tail call)
     );
 
-    // Null-checking branches
+    // Null-checking branches — operand count depends on branch target arity
+    // (branch args + ref to test), so use dynamic mode
     map.insert(
         "br_on_null",
-        InstructionArity::exact(1, "label index", 1, 1),
-    ); // ref -> non-null ref (or branches)
+        InstructionArity::dynamic(1, 1, "label index", 1),
+    );
     map.insert(
         "br_on_non_null",
-        InstructionArity::exact(1, "label index", 1, 0), // ref -> (branches with non-null or continues with nothing)
+        InstructionArity::dynamic(1, 1, "label index", 0),
     );
 
     // Reference equality

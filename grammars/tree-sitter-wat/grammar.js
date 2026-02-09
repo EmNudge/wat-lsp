@@ -333,11 +333,11 @@ module.exports = grammar({
         seq("ref.extern", $.nat),
         $.op_func_bind,
         $.op_let,
-        seq("table.get", $.index),
-        seq("table.set", $.index),
-        seq("table.size", $.index),
-        seq("table.grow", $.index),
-        seq("table.fill", $.index),
+        seq("table.get", optional($.index)),
+        seq("table.set", optional($.index)),
+        seq("table.size", optional($.index)),
+        seq("table.grow", optional($.index)),
+        seq("table.fill", optional($.index)),
       ),
 
     _instruction_atomic: $ =>
@@ -619,7 +619,7 @@ module.exports = grammar({
       token(
         new RegExp(
           [
-            "br(_(if|on_null))?",
+            "br(_(if|on_(non_)?null))?",
             "call",
             "data\\.drop",
             "elem\\.drop",
@@ -831,7 +831,7 @@ module.exports = grammar({
       ),
 
     module_field_rec: $ =>
-      seq("(", "rec", repeat1(seq("(", "type", optional(field("identifier", $.identifier)), $.type_field, ")")), ")"),
+      seq("(", "rec", repeat(seq("(", "type", optional(field("identifier", $.identifier)), $.type_field, ")")), ")"),
 
     module_field_tag: $ =>
       seq(
@@ -926,7 +926,7 @@ module.exports = grammar({
     table_fields_elem: $ =>
       seq($.ref_type, "(", "elem", choice(repeat($.index), seq($.elem_expr, repeat($.elem_expr))), ")"),
 
-    table_fields_type: $ => seq(optional($.import), $.table_type),
+    table_fields_type: $ => seq(optional($.import), $.table_type, optional($.expr)),
 
     // proposal: table64
     // Table type can optionally include 'i64' keyword for 64-bit indexing
@@ -956,7 +956,7 @@ module.exports = grammar({
 
     array_type: $ => seq("(", "array", $.storage_type, ")"),
 
-    field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), $.storage_type, ")"),
+    field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), repeat1($.storage_type), ")"),
 
     // Storage type can be mutable or immutable
     storage_type: $ => choice($.value_type, $.mut_storage_type),
