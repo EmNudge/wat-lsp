@@ -42,10 +42,23 @@ mod wasm {
     use std::cell::RefCell;
     use std::ops::Range;
     use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
     use web_tree_sitter_sg::{
         Language as WtsLanguage, Parser as WtsParser, Query as WtsQuery, SyntaxNode,
         Tree as WtsTree, TreeSitter,
     };
+
+    // Import the Query constructor from web-tree-sitter to use `new Query(language, source)`
+    // instead of the deprecated `language.query(source)` API.
+    #[wasm_bindgen(module = "web-tree-sitter")]
+    extern "C" {
+        #[wasm_bindgen(js_name = "Query")]
+        #[derive(Debug)]
+        type JsQuery;
+
+        #[wasm_bindgen(constructor, js_class = "Query", catch)]
+        fn new(language: &WtsLanguage, source: &js_sys::JsString) -> Result<JsQuery, JsValue>;
+    }
 
     thread_local! {
         static UTF16_TO_UTF8_MAP: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
@@ -78,13 +91,14 @@ mod wasm {
     pub struct Language(WtsLanguage);
 
     impl Language {
-        /// Create a query from this language
+        /// Create a query from this language using `new Query(language, source)`
         pub fn query(&self, source: &str) -> Result<Query, String> {
             let js_source = js_sys::JsString::from(source);
-            self.0
-                .query(&js_source)
-                .map(Query)
-                .map_err(|e| format!("Query error: {:?}", e))
+            let js_query =
+                JsQuery::new(&self.0, &js_source).map_err(|e| format!("Query error: {:?}", e))?;
+            // Convert JsQuery to WtsQuery via JsValue (both wrap the same JS Query object)
+            let wts_query: WtsQuery = JsValue::from(js_query).unchecked_into();
+            Ok(Query(wts_query))
         }
     }
 

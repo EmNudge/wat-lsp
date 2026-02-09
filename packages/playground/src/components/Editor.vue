@@ -61,6 +61,16 @@ onBeforeUnmount(() => {
 });
 
 async function initMonaco() {
+  // Configure Monaco web workers to avoid fallback warning
+  self.MonacoEnvironment = {
+    getWorker: function () {
+      return new Worker(
+        new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url),
+        { type: 'module' }
+      );
+    }
+  };
+
   // Load oniguruma WASM
   try {
     const onigResponse = await fetch('./onig.wasm');
