@@ -6,6 +6,7 @@
 pub mod arity;
 pub mod folded_checks;
 pub mod memory_checks;
+pub mod module_checks;
 pub mod references;
 mod semantic;
 mod stack;
@@ -13,6 +14,7 @@ pub mod subtype;
 mod termination;
 pub mod tree_sitter;
 
+pub use module_checks::{check_block_label_mismatch, validate_module_structure};
 pub use references::*;
 pub use semantic::*;
 pub use stack::*;
