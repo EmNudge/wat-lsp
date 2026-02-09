@@ -2,6 +2,7 @@
 //!
 //! This module provides platform-agnostic functions for checking undefined
 //! references in WAT code.
+#![allow(clippy::borrow_deref_ref)]
 
 use crate::core::types::{Diagnostic, Position};
 use crate::symbols::SymbolTable;
@@ -445,6 +446,90 @@ pub fn create_undefined_reference_diagnostic(
     };
 
     Diagnostic::error(range, message)
+}
+
+/// Check module-level references: export descriptors, table_use, memory_use, elem_list,
+/// and abbreviated elem segments (module_field_elem with bare index children).
+///
+/// These are module-level constructs that reference symbols (functions, globals, tables,
+/// memories, tags) but aren't inside instructions, so the normal instruction-context
+/// checking doesn't cover them.
+pub fn check_module_level_references(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Vec<Diagnostic> {
+    #[cfg(feature = "native")]
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = node.kind();
+
+    let context = match &*kind {
+        "export_desc_func" => InstructionContext::Call,
+        "export_desc_global" => InstructionContext::Global,
+        "export_desc_table" => InstructionContext::Table,
+        "export_desc_memory" => InstructionContext::Memory,
+        "export_desc_tag" => InstructionContext::Tag,
+        "table_use" => InstructionContext::Table,
+        "memory_use" => InstructionContext::Memory,
+        "elem_list" | "module_field_elem" => {
+            // elem_list: contains index nodes (func $a $b variant) or elem_expr children
+            //   (elem_expr contain instructions checked by the tree walk — skip those).
+            // module_field_elem: in the abbreviated form `(elem (offset) $a $b)`, bare
+            //   index nodes appear directly under module_field_elem without an elem_list.
+            //   The first index child (before offset) is the elem segment's own name — skip it.
+            let mut diagnostics = Vec::new();
+            let mut cursor = node.walk();
+            let is_field = &*kind == "module_field_elem";
+            let mut seen_offset = false;
+            for child in node.children(&mut cursor) {
+                #[cfg(feature = "native")]
+                let child_kind = child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let child_kind = child.kind();
+
+                if is_field {
+                    // Track when we pass the offset — only index nodes after
+                    // offset/table_use/elem_list are function references.
+                    if child_kind == "offset" {
+                        seen_offset = true;
+                        continue;
+                    }
+                    // Skip non-index children and the optional name index before offset
+                    if child_kind != "index" || !seen_offset {
+                        continue;
+                    }
+                } else if child_kind != "index" {
+                    continue;
+                }
+
+                diagnostics.extend(find_undefined_identifiers(
+                    &child,
+                    source,
+                    symbols,
+                    &InstructionContext::Call,
+                ));
+            }
+            return diagnostics;
+        }
+        _ => return vec![],
+    };
+
+    // For export descriptors and table_use/memory_use, find the index child
+    // and validate its identifier
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let child_kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let child_kind = child.kind();
+
+        if child_kind == "index" {
+            return find_undefined_identifiers(&child, source, symbols, &context);
+        }
+    }
+
+    vec![]
 }
 
 /// Check if a node is nested inside another expr (meaning it can't use stack values)
