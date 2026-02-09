@@ -215,8 +215,11 @@ fn unified_tree_walk(
 
     // Check SIMD lane indices (must be before context check since v128.load*_lane
     // matches Memory context and would early-return before we check lane bounds)
+    // Also check alignment constraints on load/store instructions
     if kind == "instr_plain" {
         let core_diags = crate::diagnostics_core::simd_checks::check_simd_lane_index(&node, source);
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
+        let core_diags = crate::diagnostics_core::alignment_checks::check_alignment(&node, source);
         diagnostics.extend(core_diags.into_iter().map(Into::into));
     } else if kind == "expr1_plain" {
         // In folded form, instr_plain is a child that won't be visited separately
@@ -225,6 +228,9 @@ fn unified_tree_walk(
             if child.kind() == "instr_plain" {
                 let core_diags =
                     crate::diagnostics_core::simd_checks::check_simd_lane_index(&child, source);
+                diagnostics.extend(core_diags.into_iter().map(Into::into));
+                let core_diags =
+                    crate::diagnostics_core::alignment_checks::check_alignment(&child, source);
                 diagnostics.extend(core_diags.into_iter().map(Into::into));
                 break;
             }

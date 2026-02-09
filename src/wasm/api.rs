@@ -1190,8 +1190,12 @@ fn walk_tree_for_diagnostics(
 
     // Check SIMD lane indices (must be before context check since v128.load*_lane
     // matches Memory context and would early-return before we check lane bounds)
+    // Also check alignment constraints on load/store instructions
     if &*kind == "instr_plain" {
         diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
+            &node, source,
+        ));
+        diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
             &node, source,
         ));
     } else if &*kind == "expr1_plain" {
@@ -1200,6 +1204,9 @@ fn walk_tree_for_diagnostics(
         for child in node.children(&mut cursor) {
             if child.kind() == "instr_plain" {
                 diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
+                    &child, source,
+                ));
+                diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
                     &child, source,
                 ));
                 break;
