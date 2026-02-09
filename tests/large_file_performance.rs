@@ -68,15 +68,18 @@ fn test_15k_line_initial_parse_performance() {
     println!("\n=== Total Time ===");
     println!("Parse + Symbols + Diagnostics: {:?}", total_time);
 
-    // Performance assertions
-    assert!(
-        parse_time.as_millis() < 1000,
-        "Initial parse should be under 1 second for 15k lines"
-    );
-    assert!(
-        total_time.as_millis() < 2000,
-        "Total processing should be under 2 seconds"
-    );
+    // Performance assertions (only meaningful in release builds)
+    #[cfg(not(debug_assertions))]
+    {
+        assert!(
+            parse_time.as_millis() < 1000,
+            "Initial parse should be under 1 second for 15k lines"
+        );
+        assert!(
+            total_time.as_millis() < 2000,
+            "Total processing should be under 2 seconds"
+        );
+    }
 }
 
 #[test]
@@ -252,16 +255,19 @@ fn test_15k_line_incremental_edit_performance() {
                 as f64
     );
 
-    // Performance assertions
-    assert!(
-        incremental_time.as_millis() < 50,
-        "Incremental parse should be under 50ms"
-    );
-    assert!(
-        middle_time.as_millis() < 50,
-        "Middle edit should be under 50ms"
-    );
-    assert!(end_time.as_millis() < 50, "End edit should be under 50ms");
+    // Performance assertions (only meaningful in release builds)
+    #[cfg(not(debug_assertions))]
+    {
+        assert!(
+            incremental_time.as_millis() < 50,
+            "Incremental parse should be under 50ms"
+        );
+        assert!(
+            middle_time.as_millis() < 50,
+            "Middle edit should be under 50ms"
+        );
+        assert!(end_time.as_millis() < 50, "End edit should be under 50ms");
+    }
 }
 
 #[test]
@@ -303,8 +309,11 @@ fn test_15k_line_completion_latency() {
     println!("\n=== Completion Latency Summary ===");
     println!("Average: {:?}", (time1 + time2 + time3) / 3);
 
-    // Performance assertions
-    assert!(time1.as_millis() < 100, "Completion should be under 100ms");
-    assert!(time2.as_millis() < 100, "Completion should be under 100ms");
-    assert!(time3.as_millis() < 100, "Completion should be under 100ms");
+    // Performance assertions (only meaningful in release builds)
+    #[cfg(not(debug_assertions))]
+    {
+        assert!(time1.as_millis() < 100, "Completion should be under 100ms");
+        assert!(time2.as_millis() < 100, "Completion should be under 100ms");
+        assert!(time3.as_millis() < 100, "Completion should be under 100ms");
+    }
 }
