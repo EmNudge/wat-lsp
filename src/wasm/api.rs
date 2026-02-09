@@ -1037,15 +1037,25 @@ fn reference_to_js(range: &Range) -> JsValue {
 use crate::ts_facade::Node;
 use crate::utils::{determine_instruction_context_at_node, InstructionContext};
 
+/// Pre-computed configuration for diagnostic checks
+struct DiagnosticConfig {
+    check_atomics: bool,
+    check_memory64: bool,
+}
+
 /// Provide semantic diagnostics for undefined references (WASM version).
-/// All diagnostic logic now delegates to shared `diagnostics_core` modules.
+/// All diagnostic logic delegates to shared `diagnostics_core` modules.
 fn provide_wasm_semantic_diagnostics(
     tree: &crate::ts_facade::Tree,
     source: &str,
     symbols: &SymbolTable,
 ) -> Vec<CoreDiagnostic> {
+    let config = DiagnosticConfig {
+        check_atomics: !symbols.memories.is_empty() && !symbols.memories.iter().any(|m| m.shared),
+        check_memory64: symbols.memories.iter().any(|m| m.is_memory64),
+    };
     let mut diagnostics = Vec::new();
-    walk_tree_for_diagnostics(tree.root_node(), source, symbols, &mut diagnostics);
+    walk_tree_for_diagnostics(tree.root_node(), source, symbols, &config, &mut diagnostics);
     diagnostics
 }
 
@@ -1053,12 +1063,13 @@ fn walk_tree_for_diagnostics(
     node: Node,
     source: &str,
     symbols: &SymbolTable,
+    config: &DiagnosticConfig,
     diagnostics: &mut Vec<CoreDiagnostic>,
 ) {
     let kind = node.kind();
 
     // Check for function body instruction lists — shared stack tracking
-    if kind == "module_field_func" {
+    if &*kind == "module_field_func" {
         let func_line = node.start_position().row as u32;
         let expected_results: &[ValueType] = symbols
             .find_function_containing_line(func_line)
@@ -1092,7 +1103,7 @@ fn walk_tree_for_diagnostics(
     }
 
     // Special handling for catch clauses — shared core
-    if kind == "catch_clause" {
+    if &*kind == "catch_clause" {
         diagnostics.extend(
             crate::diagnostics_core::references::check_catch_clause_references(
                 &node, source, symbols,
@@ -1102,7 +1113,7 @@ fn walk_tree_for_diagnostics(
     }
 
     // Special handling for legacy try catch clause — shared core
-    if kind == "try_catch_clause" {
+    if &*kind == "try_catch_clause" {
         diagnostics.extend(
             crate::diagnostics_core::references::check_try_catch_clause_references(
                 &node, source, symbols,
@@ -1111,12 +1122,32 @@ fn walk_tree_for_diagnostics(
     }
 
     // Check folded expression operand count (expr1_plain nodes) — shared core
-    if kind == "expr1_plain" {
+    if &*kind == "expr1_plain" {
         diagnostics.extend(
             crate::diagnostics_core::folded_checks::check_folded_operand_count(
                 &node, source, symbols,
             ),
         );
+
+        // Also check atomic and memory64 for folded expressions
+        let text = &source[node.byte_range()];
+        let first_token = text.split_whitespace().next().unwrap_or("");
+
+        if config.check_atomics {
+            diagnostics.extend(
+                crate::diagnostics_core::memory_checks::check_atomic_operation(&node, first_token),
+            );
+        }
+        if config.check_memory64 {
+            diagnostics.extend(
+                crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
+                    &node,
+                    source,
+                    symbols,
+                    first_token,
+                ),
+            );
+        }
     }
 
     // Check for undefined references based on instruction context — shared core
@@ -1126,10 +1157,47 @@ fn walk_tree_for_diagnostics(
             &node, source, symbols, &context,
         ));
 
+        // For instr_plain, also check atomic, memory64, and arity (linear format)
+        if &*kind == "instr_plain" {
+            let text = &source[node.byte_range()];
+            let first_token = text.split_whitespace().next().unwrap_or("");
+
+            if config.check_atomics {
+                diagnostics.extend(
+                    crate::diagnostics_core::memory_checks::check_atomic_operation(
+                        &node,
+                        first_token,
+                    ),
+                );
+            }
+
+            let parent_is_expr1 = node
+                .parent()
+                .map(|p| p.kind() == "expr1_plain")
+                .unwrap_or(false);
+            if !parent_is_expr1 {
+                if config.check_memory64 {
+                    diagnostics.extend(
+                        crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
+                            &node,
+                            source,
+                            symbols,
+                            first_token,
+                        ),
+                    );
+                }
+                diagnostics.extend(
+                    crate::diagnostics_core::arity::check_instruction_parameter_count(
+                        &node, source,
+                    ),
+                );
+            }
+        }
+
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "expr" {
-                walk_tree_for_diagnostics(child, source, symbols, diagnostics);
+                walk_tree_for_diagnostics(child, source, symbols, config, diagnostics);
             }
         }
         return;
@@ -1138,7 +1206,7 @@ fn walk_tree_for_diagnostics(
     // Recursively check children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_tree_for_diagnostics(child, source, symbols, diagnostics);
+        walk_tree_for_diagnostics(child, source, symbols, config, diagnostics);
     }
 }
 

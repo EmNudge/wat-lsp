@@ -3,7 +3,9 @@
 //! This module provides platform-agnostic diagnostic functions that work with
 //! both tree-sitter (native) and web-tree-sitter (WASM) through the ts_facade abstraction.
 
+pub mod arity;
 pub mod folded_checks;
+pub mod memory_checks;
 pub mod references;
 mod semantic;
 mod stack;

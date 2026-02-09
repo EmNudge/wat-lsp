@@ -1,24 +1,8 @@
 use crate::diagnostics_core::track_stack_in_instr_list as core_track_stack_in_instr_list;
-use crate::instruction_metadata::get_instruction_arity_map;
 use crate::symbols::{SymbolTable, ValueType};
-use crate::utils::{
-    determine_instruction_context_at_node, find_containing_function, node_to_lsp_range,
-    InstructionContext, STRUCT_OPS,
-};
-use std::sync::OnceLock;
+use crate::utils::{determine_instruction_context_at_node, node_to_lsp_range, InstructionContext};
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Node, Tree};
-
-// Lazy static initialization for instruction arity map
-static INSTRUCTION_ARITY: OnceLock<
-    std::collections::HashMap<&'static str, crate::instruction_metadata::InstructionArity>,
-> = OnceLock::new();
-
-fn get_arity_map(
-) -> &'static std::collections::HashMap<&'static str, crate::instruction_metadata::InstructionArity>
-{
-    INSTRUCTION_ARITY.get_or_init(get_instruction_arity_map)
-}
 
 /// Track stack state through an instruction list and report underflow/type errors
 /// If expected_results is None, skip return type validation (e.g., when function uses type reference)
@@ -132,19 +116,28 @@ fn unified_tree_walk(
 
     // Special handling for catch_clause (try_table): first index is tag, second is label
     if kind == "catch_clause" {
-        check_catch_clause_references(&node, source, symbols, diagnostics);
+        let core_diags = crate::diagnostics_core::references::check_catch_clause_references(
+            &node, source, symbols,
+        );
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
         return;
     }
 
     // Special handling for try_catch_clause (legacy try): index is a tag reference
     if kind == "try_catch_clause" {
-        check_try_catch_clause_references(&node, source, symbols, diagnostics);
+        let core_diags = crate::diagnostics_core::references::check_try_catch_clause_references(
+            &node, source, symbols,
+        );
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
         // Continue recursing to check nested instructions
     }
 
     // Special handling for try_delegate_clause (legacy try): index is a label reference
     if kind == "try_delegate_clause" {
-        check_try_delegate_clause_references(&node, source, symbols, diagnostics);
+        let core_diags = crate::diagnostics_core::references::check_try_delegate_clause_references(
+            &node, source, symbols,
+        );
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
         return;
     }
 
@@ -156,35 +149,27 @@ fn unified_tree_walk(
         let core_diags = crate::diagnostics_core::folded_checks::check_folded_operand_count(
             &node, source, symbols,
         );
-        for diag in core_diags {
-            diagnostics.push(diag.into());
-        }
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
 
         let text = &source[node.byte_range()];
         let first_token = text.split_whitespace().next().unwrap_or("");
 
         // Check atomic operations in folded expressions
-        if config.check_atomics && is_atomic_memory_operation(first_token) {
-            let range = node_to_lsp_range(&node);
-            diagnostics.push(Diagnostic {
-                range,
-                severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String("atomic-non-shared".to_string())),
-                code_description: None,
-                source: Some("wat-lsp".to_string()),
-                message: format!(
-                    "Atomic operation '{}' requires shared memory. Declare memory with 'shared' keyword: (memory 1 1 shared)",
-                    first_token
-                ),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
+        if config.check_atomics {
+            let core_diags =
+                crate::diagnostics_core::memory_checks::check_atomic_operation(&node, first_token);
+            diagnostics.extend(core_diags.into_iter().map(Into::into));
         }
 
         // Also check memory64 for folded expressions
         if config.check_memory64 {
-            check_memory64_for_instruction(&node, source, symbols, first_token, diagnostics);
+            let core_diags = crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
+                &node,
+                source,
+                symbols,
+                first_token,
+            );
+            diagnostics.extend(core_diags.into_iter().map(Into::into));
         }
         // Continue to recurse - nested expressions need to be checked
     }
@@ -193,7 +178,9 @@ fn unified_tree_walk(
     // This handles instr_plain nodes and returns early after recursing into nested expr
     let context = determine_instruction_context_at_node(&node, source);
     if context != InstructionContext::General {
-        check_references(&node, source, symbols, diagnostics, &context);
+        let core_diags =
+            crate::diagnostics_core::references::check_references(&node, source, symbols, &context);
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
 
         // For instr_plain, also check atomic ops and memory64 (linear format)
         if kind == "instr_plain" {
@@ -201,22 +188,12 @@ fn unified_tree_walk(
             let first_token = text.split_whitespace().next().unwrap_or("");
 
             // Check atomic operations
-            if config.check_atomics && is_atomic_memory_operation(first_token) {
-                let range = node_to_lsp_range(&node);
-                diagnostics.push(Diagnostic {
-                    range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("atomic-non-shared".to_string())),
-                    code_description: None,
-                    source: Some("wat-lsp".to_string()),
-                    message: format!(
-                        "Atomic operation '{}' requires shared memory. Declare memory with 'shared' keyword: (memory 1 1 shared)",
-                        first_token
-                    ),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
+            if config.check_atomics {
+                let core_diags = crate::diagnostics_core::memory_checks::check_atomic_operation(
+                    &node,
+                    first_token,
+                );
+                diagnostics.extend(core_diags.into_iter().map(Into::into));
             }
 
             // Check memory64 operations for linear format only
@@ -226,12 +203,22 @@ fn unified_tree_walk(
                 .map(|p| p.kind() == "expr1_plain")
                 .unwrap_or(false);
             if !parent_is_expr1 && config.check_memory64 {
-                check_memory64_for_instruction(&node, source, symbols, first_token, diagnostics);
+                let core_diags =
+                    crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
+                        &node,
+                        source,
+                        symbols,
+                        first_token,
+                    );
+                diagnostics.extend(core_diags.into_iter().map(Into::into));
             }
 
             // Check parameter count for linear format only
             if !parent_is_expr1 {
-                check_instruction_parameter_count(&node, source, diagnostics);
+                let core_diags = crate::diagnostics_core::arity::check_instruction_parameter_count(
+                    &node, source,
+                );
+                diagnostics.extend(core_diags.into_iter().map(Into::into));
             }
         }
 
@@ -252,637 +239,12 @@ fn unified_tree_walk(
     }
 }
 
-/// Check memory64 hints for a specific instruction
-fn check_memory64_for_instruction(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    first_token: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    // Check memory.size and memory.grow
-    if first_token == "memory.size" || first_token == "memory.grow" {
-        if let Some(memory) = get_memory_for_instruction(node, source, symbols) {
-            if memory.is_memory64 {
-                let range = node_to_lsp_range(node);
-                let (return_type, param_info) = if first_token == "memory.size" {
-                    ("i64", "")
-                } else {
-                    ("i64", " and takes i64 delta parameter")
-                };
-                diagnostics.push(Diagnostic {
-                    range,
-                    severity: Some(DiagnosticSeverity::HINT),
-                    code: Some(NumberOrString::String("memory64-type".to_string())),
-                    code_description: None,
-                    source: Some("wat-lsp".to_string()),
-                    message: format!(
-                        "'{}' on memory64 returns {}{}",
-                        first_token, return_type, param_info
-                    ),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
-            }
-        }
-    }
-
-    // Check load/store operations
-    if is_memory_load_store(first_token) {
-        if let Some(memory) = get_memory_for_instruction(node, source, symbols) {
-            if memory.is_memory64 {
-                let range = node_to_lsp_range(node);
-                diagnostics.push(Diagnostic {
-                    range,
-                    severity: Some(DiagnosticSeverity::HINT),
-                    code: Some(NumberOrString::String("memory64-address".to_string())),
-                    code_description: None,
-                    source: Some("wat-lsp".to_string()),
-                    message: format!("'{}' on memory64 requires i64 address operand", first_token),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
-            }
-        }
-    }
-
-    // Check bulk memory operations
-    if first_token == "memory.copy" || first_token == "memory.fill" {
-        if let Some(memory) = get_memory_for_instruction(node, source, symbols) {
-            if memory.is_memory64 {
-                let range = node_to_lsp_range(node);
-                diagnostics.push(Diagnostic {
-                    range,
-                    severity: Some(DiagnosticSeverity::HINT),
-                    code: Some(NumberOrString::String("memory64-bulk".to_string())),
-                    code_description: None,
-                    source: Some("wat-lsp".to_string()),
-                    message: format!(
-                        "'{}' on memory64 requires i64 address operands",
-                        first_token
-                    ),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
-            }
-        }
-    }
-}
-
-/// Check references in a catch_clause node
-/// For (catch $tag $label) and (catch_ref $tag $label): first index is tag, second is label
-/// For (catch_all $label) and (catch_all_ref $label): single index is label
-fn check_catch_clause_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let text = &source[node.byte_range()];
-
-    // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
-    let has_tag =
-        text.contains("catch_ref") || (text.contains("catch") && !text.contains("catch_all"));
-
-    // Collect all index children
-    let mut cursor = node.walk();
-    let indices: Vec<_> = node
-        .children(&mut cursor)
-        .filter(|c| c.kind() == "index")
-        .collect();
-
-    for (i, index_node) in indices.iter().enumerate() {
-        // Find the identifier within the index
-        let mut idx_cursor = index_node.walk();
-        for child in index_node.children(&mut idx_cursor) {
-            if child.kind() == "identifier" {
-                let identifier_name = &source[child.byte_range()];
-                if !identifier_name.starts_with('$') {
-                    continue;
-                }
-
-                let start_point = child.start_position();
-                let position = Position {
-                    line: start_point.row as u32,
-                    character: start_point.column as u32,
-                };
-
-                // First index in catch/catch_ref is a tag, everything else is a label
-                let (is_defined, context) = if has_tag && i == 0 {
-                    // This is the tag reference
-                    (
-                        symbols.get_tag_by_name(identifier_name).is_some(),
-                        InstructionContext::Tag,
-                    )
-                } else {
-                    // This is the label reference
-                    let defined =
-                        if let Some(func) = find_containing_function(symbols, position.into()) {
-                            func.blocks.iter().any(|block| {
-                                format!("${}", block.label) == identifier_name
-                                    || block.label == identifier_name
-                            })
-                        } else {
-                            false
-                        };
-                    (defined, InstructionContext::Branch)
-                };
-
-                if !is_defined {
-                    let diagnostic =
-                        create_undefined_reference_diagnostic(&child, identifier_name, &context);
-                    diagnostics.push(diagnostic);
-                }
-            }
-        }
-    }
-}
-
-/// Check references in a try_catch_clause node (legacy try syntax)
-/// For (catch $tag instr*): the index is a tag reference
-fn check_try_catch_clause_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    // Find the index child which contains the tag reference
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "index" {
-            // Find the identifier within the index
-            let mut idx_cursor = child.walk();
-            for idx_child in child.children(&mut idx_cursor) {
-                if idx_child.kind() == "identifier" {
-                    let identifier_name = &source[idx_child.byte_range()];
-                    if !identifier_name.starts_with('$') {
-                        continue;
-                    }
-
-                    // Check if the tag is defined
-                    if symbols.get_tag_by_name(identifier_name).is_none() {
-                        let diagnostic = create_undefined_reference_diagnostic(
-                            &idx_child,
-                            identifier_name,
-                            &InstructionContext::Tag,
-                        );
-                        diagnostics.push(diagnostic);
-                    }
-                }
-            }
-            // Only one index in try_catch_clause
-            break;
-        }
-    }
-}
-
-/// Check references in a try_delegate_clause node (legacy try syntax)
-/// For (delegate $label): the index is a label reference
-fn check_try_delegate_clause_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    // Find the index child which contains the label reference
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "index" {
-            // Find the identifier within the index
-            let mut idx_cursor = child.walk();
-            for idx_child in child.children(&mut idx_cursor) {
-                if idx_child.kind() == "identifier" {
-                    let identifier_name = &source[idx_child.byte_range()];
-                    if !identifier_name.starts_with('$') {
-                        continue;
-                    }
-
-                    let start_point = idx_child.start_position();
-                    let position = Position {
-                        line: start_point.row as u32,
-                        character: start_point.column as u32,
-                    };
-
-                    // Check if the label is defined
-                    let is_defined =
-                        if let Some(func) = find_containing_function(symbols, position.into()) {
-                            func.blocks.iter().any(|block| {
-                                format!("${}", block.label) == identifier_name
-                                    || block.label == identifier_name
-                            })
-                        } else {
-                            false
-                        };
-
-                    if !is_defined {
-                        let diagnostic = create_undefined_reference_diagnostic(
-                            &idx_child,
-                            identifier_name,
-                            &InstructionContext::Branch,
-                        );
-                        diagnostics.push(diagnostic);
-                    }
-                }
-            }
-            // Only one index in try_delegate_clause
-            break;
-        }
-    }
-}
-
-/// Check if references in this instruction are defined
-fn check_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-    context: &InstructionContext,
-) {
-    let text = &source[node.byte_range()];
-    let first_token = text.split_whitespace().next().unwrap_or("");
-
-    // For struct.get/struct.set, only the first index is a type reference
-    // The second index is a field reference which we don't validate yet
-    if *context == InstructionContext::Type && STRUCT_OPS.contains(&first_token) {
-        // Only validate the first index child
-        find_first_index_identifier(node, source, symbols, diagnostics, context);
-        return;
-    }
-
-    // memory.init takes a data segment index, not a memory index
-    // Skip validation since we don't track data segments yet
-    if *context == InstructionContext::Memory && first_token == "memory.init" {
-        return;
-    }
-
-    find_undefined_identifiers(node, source, symbols, diagnostics, context);
-}
-
-/// Find and validate only the first index identifier in a node
-/// Used for instructions like struct.get where only the first index is a type
-fn find_first_index_identifier(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-    context: &InstructionContext,
-) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "index" {
-            // Found the first index, check its identifier
-            find_undefined_identifiers(&child, source, symbols, diagnostics, context);
-            return; // Only check the first one
-        }
-        // Recurse into instr_plain to find the index
-        if child.kind() == "instr_plain" {
-            find_first_index_identifier(&child, source, symbols, diagnostics, context);
-            return;
-        }
-    }
-}
-
-/// Recursively find identifier nodes and check if they're defined
-fn find_undefined_identifiers(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-    context: &InstructionContext,
-) {
-    if node.kind() == "identifier" {
-        let identifier_name = &source[node.byte_range()];
-
-        // Only check identifiers that start with $
-        if !identifier_name.starts_with('$') {
-            return;
-        }
-
-        // Find the containing function for this reference (needed for locals and labels)
-        let start_point = node.start_position();
-        let position = Position {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-        };
-
-        let is_defined = match context {
-            InstructionContext::Branch | InstructionContext::Block => {
-                // Check if label exists in containing function
-                if let Some(func) = find_containing_function(symbols, position.into()) {
-                    func.blocks.iter().any(|block| {
-                        format!("${}", block.label) == identifier_name
-                            || block.label == identifier_name
-                    })
-                } else {
-                    false
-                }
-            }
-            InstructionContext::Call => {
-                // Check if function exists
-                symbols.get_function_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Local => {
-                // Check if local or parameter exists in containing function
-                if let Some(func) = find_containing_function(symbols, position.into()) {
-                    func.parameters
-                        .iter()
-                        .any(|p| p.name.as_ref() == Some(&identifier_name.to_string()))
-                        || func
-                            .locals
-                            .iter()
-                            .any(|l| l.name.as_ref() == Some(&identifier_name.to_string()))
-                } else {
-                    false
-                }
-            }
-            InstructionContext::Global => {
-                // Check if global exists
-                symbols.get_global_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Table => {
-                // Check if table exists
-                symbols.get_table_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Memory => {
-                // Check if memory exists
-                symbols.get_memory_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Type => {
-                // Check if type exists
-                symbols.get_type_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Tag => {
-                // Check if tag exists
-                symbols.get_tag_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Data => {
-                // Check if data segment exists
-                symbols.get_data_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Elem => {
-                // Check if elem segment exists
-                symbols.get_elem_by_name(identifier_name).is_some()
-            }
-            InstructionContext::Function | InstructionContext::General => true, // Don't flag function definitions or unknowns
-        };
-
-        if !is_defined {
-            let diagnostic = create_undefined_reference_diagnostic(node, identifier_name, context);
-            diagnostics.push(diagnostic);
-        }
-        return;
-    }
-
-    // Don't recurse into nested expr nodes - they contain nested instructions
-    // that will be checked separately with their own context
-    if node.kind() == "expr" {
-        return;
-    }
-
-    // Recursively check children (but not nested expressions)
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        find_undefined_identifiers(&child, source, symbols, diagnostics, context);
-    }
-}
-
-/// Create a diagnostic for an undefined reference
-fn create_undefined_reference_diagnostic(
-    node: &Node,
-    identifier_name: &str,
-    context: &InstructionContext,
-) -> Diagnostic {
-    let range = node_to_lsp_range(node);
-
-    let message = match context {
-        InstructionContext::Branch | InstructionContext::Block => {
-            format!("Undefined label '{}'", identifier_name)
-        }
-        InstructionContext::Call => format!("Undefined function '{}'", identifier_name),
-        InstructionContext::Local => format!("Undefined local or parameter '{}'", identifier_name),
-        InstructionContext::Global => format!("Undefined global '{}'", identifier_name),
-        InstructionContext::Table => format!("Undefined table '{}'", identifier_name),
-        InstructionContext::Memory => format!("Undefined memory '{}'", identifier_name),
-        InstructionContext::Type => format!("Undefined type '{}'", identifier_name),
-        InstructionContext::Tag => format!("Undefined tag '{}'", identifier_name),
-        InstructionContext::Data => format!("Undefined data segment '{}'", identifier_name),
-        InstructionContext::Elem => format!("Undefined elem segment '{}'", identifier_name),
-        InstructionContext::Function | InstructionContext::General => {
-            format!("Undefined reference '{}'", identifier_name)
-        }
-    };
-
-    Diagnostic {
-        range,
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: None,
-        code_description: None,
-        source: Some("wat-lsp".to_string()),
-        message,
-        related_information: None,
-        tags: None,
-        data: None,
-    }
-}
-
-/// Check if an instruction is an atomic memory operation that requires shared memory
-fn is_atomic_memory_operation(instr: &str) -> bool {
-    // atomic.fence doesn't require shared memory
-    if instr == "atomic.fence" {
-        return false;
-    }
-
-    // All other atomic operations require shared memory
-    instr.contains(".atomic.") || instr.starts_with("memory.atomic.")
-}
-
-/// Check if an instruction has the correct number of parameters
-fn check_instruction_parameter_count(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut cursor = node.walk();
-    let children: Vec<_> = node.children(&mut cursor).collect();
-
-    if children.is_empty() {
-        return;
-    }
-
-    let first_child = &children[0];
-    let instr_kind = first_child.kind();
-
-    match instr_kind {
-        "op_index" | "op_index_opt" | "op_gc" | "op_exception" => {
-            // Instructions like local.get, struct.new, throw etc.
-            // op_gc and op_exception are new categories I added to grammar logic
-            // Assuming grammar structure wraps them. If not, text lookup works.
-            let instr_name = source[first_child.byte_range()].trim();
-            // Count 'index' nodes or 'ref_type' nodes as parameters
-            let param_count = children
-                .iter()
-                .skip(1)
-                .filter(|c| c.kind() == "index" || c.kind() == "ref_type") // Some ref instructions take types
-                .count();
-            validate_instruction_arity(instr_name, param_count, node, diagnostics);
-        }
-        "op_const" => {
-            // Constant instructions like i32.const, f64.const
-            let mut op_const_cursor = first_child.walk();
-            let op_const_children: Vec<_> = first_child.children(&mut op_const_cursor).collect();
-
-            if op_const_children.is_empty() {
-                return;
-            }
-
-            let instr_name = source[op_const_children[0].byte_range()].trim();
-            // Count int/float children as parameters
-            let param_count = op_const_children
-                .iter()
-                .skip(1)
-                .filter(|c| matches!(c.kind(), "int" | "float"))
-                .count();
-            validate_instruction_arity(instr_name, param_count, node, diagnostics);
-        }
-        "op_nullary" => {
-            // Instructions with no parameters
-            let instr_name = source[first_child.byte_range()].trim();
-            // These should have no parameters in linear format
-            let param_count = children
-                .iter()
-                .skip(1)
-                .filter(|c| matches!(c.kind(), "index" | "expr"))
-                .count();
-            validate_instruction_arity(instr_name, param_count, node, diagnostics);
-        }
-        // Fallback for new instruction types if not covered above but are plain instructions
-        k if k.starts_with("op_") => {
-            let instr_name = source[first_child.byte_range()].trim();
-            let param_count = children
-                .iter()
-                .skip(1)
-                .filter(|c| c.kind() == "index")
-                .count();
-            validate_instruction_arity(instr_name, param_count, node, diagnostics);
-        }
-        _ => {
-            // Other instruction types
-        }
-    }
-}
-
-/// Validate instruction arity and create diagnostic if incorrect
-fn validate_instruction_arity(
-    instr_name: &str,
-    param_count: usize,
-    node: &Node,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let arity_map = get_arity_map();
-
-    if let Some(arity) = arity_map.get(instr_name) {
-        if !arity.is_valid(param_count) {
-            let diagnostic = create_parameter_count_diagnostic(
-                node,
-                instr_name,
-                param_count,
-                &arity.expected_message(),
-            );
-            diagnostics.push(diagnostic);
-        }
-    }
-}
-
-/// Create a diagnostic for incorrect parameter count
-fn create_parameter_count_diagnostic(
-    node: &Node,
-    instr_name: &str,
-    actual_count: usize,
-    expected_message: &str,
-) -> Diagnostic {
-    let range = node_to_lsp_range(node);
-
-    let param_word = if actual_count == 1 {
-        "parameter"
-    } else {
-        "parameters"
-    };
-
-    let message = format!(
-        "Instruction '{}' expects {} parameter(s), but got {} {}",
-        instr_name, expected_message, actual_count, param_word
-    );
-
-    Diagnostic {
-        range,
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: None,
-        code_description: None,
-        source: Some("wat-lsp".to_string()),
-        message,
-        related_information: None,
-        tags: None,
-        data: None,
-    }
-}
-
-/// Get the memory referenced by an instruction
-/// Returns the memory at index 0 if no explicit memory index is specified
-fn get_memory_for_instruction<'a>(
-    node: &Node,
-    source: &str,
-    symbols: &'a SymbolTable,
-) -> Option<&'a crate::symbols::Memory> {
-    // Try to find an explicit memory index in the instruction
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "index" {
-            let index_text = &source[child.byte_range()];
-            // Check if it's a named memory reference
-            if index_text.starts_with('$') {
-                return symbols.get_memory_by_name(index_text);
-            }
-            // Check if it's a numeric index
-            if let Ok(idx) = index_text.parse::<usize>() {
-                return symbols.memories.get(idx);
-            }
-        }
-    }
-
-    // Default to memory 0
-    symbols.memories.first()
-}
-
-/// Check if an instruction is a memory load or store operation
-fn is_memory_load_store(instr: &str) -> bool {
-    // Load operations
-    if instr.ends_with(".load")
-        || instr.contains(".load8_")
-        || instr.contains(".load16_")
-        || instr.contains(".load32_")
-    {
-        return true;
-    }
-
-    // Store operations
-    if instr.ends_with(".store")
-        || instr.contains(".store8")
-        || instr.contains(".store16")
-        || instr.contains(".store32")
-    {
-        return true;
-    }
-
-    // SIMD load/store operations
-    if instr.starts_with("v128.load") || instr.starts_with("v128.store") {
-        return true;
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics_core::memory_checks::{
+        is_atomic_memory_operation, is_memory_load_store,
+    };
     use crate::parser::parse_document;
     use crate::tree_sitter_bindings::create_parser;
 
