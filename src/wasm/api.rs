@@ -157,6 +157,16 @@ impl WatLSP {
             for diag in subtype_diagnostics {
                 js_array.push(&core_diagnostic_to_js(&diag));
             }
+
+            // Add module-level structural validations
+            let module_diags = crate::diagnostics_core::module_checks::validate_module_structure(
+                &tree.root_node(),
+                &self.document,
+                symbols,
+            );
+            for diag in module_diags {
+                js_array.push(&core_diagnostic_to_js(&diag));
+            }
         }
 
         js_array.into()
@@ -1067,6 +1077,13 @@ fn walk_tree_for_diagnostics(
     diagnostics: &mut Vec<CoreDiagnostic>,
 ) {
     let kind = node.kind();
+
+    // Check block label mismatches
+    if matches!(&*kind, "block_block" | "block_loop" | "block_if") {
+        diagnostics.extend(
+            crate::diagnostics_core::module_checks::check_block_label_mismatch(&node, source),
+        );
+    }
 
     // Check for function body instruction lists — shared stack tracking
     if &*kind == "module_field_func" {

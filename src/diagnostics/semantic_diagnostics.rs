@@ -55,6 +55,14 @@ pub fn provide_semantic_diagnostics(
         diagnostics.push(diag.into());
     }
 
+    // Module-level structural validations
+    let module_diags = crate::diagnostics_core::module_checks::validate_module_structure(
+        &tree.root_node(),
+        source,
+        symbols,
+    );
+    diagnostics.extend(module_diags.into_iter().map(Into::into));
+
     diagnostics
 }
 
@@ -67,6 +75,13 @@ fn unified_tree_walk(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let kind = node.kind();
+
+    // Check block label mismatches
+    if matches!(kind, "block_block" | "block_loop" | "block_if") {
+        let core_diags =
+            crate::diagnostics_core::module_checks::check_block_label_mismatch(&node, source);
+        diagnostics.extend(core_diags.into_iter().map(Into::into));
+    }
 
     // Check for function body instruction lists - perform stack tracking and return type validation
     if kind == "module_field_func" {
