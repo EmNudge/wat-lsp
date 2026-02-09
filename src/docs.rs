@@ -8,29 +8,22 @@
 use std::collections::HashMap;
 
 mod generated {
-    // Include the auto-generated instruction documentation
-    // This brings in: use std::collections::HashMap; use std::sync::LazyLock;
-    // and INSTRUCTION_DOCS: LazyLock<HashMap<&'static str, &'static str>>
     include!(concat!(env!("OUT_DIR"), "/instruction_docs.rs"));
 }
 
 mod generated_annotations {
-    // Include the auto-generated annotation documentation
     include!(concat!(env!("OUT_DIR"), "/annotation_docs.rs"));
 }
 
-use generated::INSTRUCTION_DOCS;
-use generated_annotations::ANNOTATION_DOCS;
-
 /// Get documentation for a specific instruction
 pub fn get_instruction_doc(name: &str) -> Option<&'static str> {
-    INSTRUCTION_DOCS.get(name).copied()
+    generated::INSTRUCTION_DOCS.get(name).copied()
 }
 
 /// Get all instruction names (native-only: used by wat-docs binary)
 #[cfg(feature = "native")]
 pub fn instruction_names() -> Vec<&'static str> {
-    let mut names: Vec<_> = INSTRUCTION_DOCS.keys().copied().collect();
+    let mut names: Vec<_> = generated::INSTRUCTION_DOCS.keys().copied().collect();
     names.sort();
     names
 }
@@ -38,14 +31,14 @@ pub fn instruction_names() -> Vec<&'static str> {
 /// Get all instruction documentation as a reference to the underlying HashMap
 #[cfg(feature = "native")]
 pub fn all_instructions() -> &'static HashMap<&'static str, &'static str> {
-    &INSTRUCTION_DOCS
+    &generated::INSTRUCTION_DOCS
 }
 
 /// Search for instructions matching a pattern (case-insensitive substring match)
 #[cfg(feature = "native")]
 pub fn search_instructions(pattern: &str) -> Vec<(&'static str, &'static str)> {
     let pattern_lower = pattern.to_lowercase();
-    let mut results: Vec<_> = INSTRUCTION_DOCS
+    let mut results: Vec<_> = generated::INSTRUCTION_DOCS
         .iter()
         .filter(|(name, doc)| {
             name.to_lowercase().contains(&pattern_lower)
@@ -61,7 +54,7 @@ pub fn search_instructions(pattern: &str) -> Vec<(&'static str, &'static str)> {
 #[cfg(feature = "native")]
 pub fn search_instruction_names(pattern: &str) -> Vec<&'static str> {
     let pattern_lower = pattern.to_lowercase();
-    let mut results: Vec<_> = INSTRUCTION_DOCS
+    let mut results: Vec<_> = generated::INSTRUCTION_DOCS
         .keys()
         .filter(|name| name.to_lowercase().contains(&pattern_lower))
         .copied()
@@ -76,13 +69,16 @@ pub fn search_instruction_names(pattern: &str) -> Vec<&'static str> {
 
 /// Get documentation for a specific annotation (without @ prefix)
 pub fn get_annotation_doc(name: &str) -> Option<&'static str> {
-    ANNOTATION_DOCS.get(name).copied()
+    generated_annotations::ANNOTATION_DOCS.get(name).copied()
 }
 
 /// Get all annotation names (native-only: used by wat-docs binary)
 #[cfg(feature = "native")]
 pub fn annotation_names() -> Vec<&'static str> {
-    let mut names: Vec<_> = ANNOTATION_DOCS.keys().copied().collect();
+    let mut names: Vec<_> = generated_annotations::ANNOTATION_DOCS
+        .keys()
+        .copied()
+        .collect();
     names.sort();
     names
 }
@@ -90,7 +86,7 @@ pub fn annotation_names() -> Vec<&'static str> {
 /// Get all annotation documentation as a reference to the underlying HashMap
 #[cfg(feature = "native")]
 pub fn all_annotations() -> &'static HashMap<&'static str, &'static str> {
-    &ANNOTATION_DOCS
+    &generated_annotations::ANNOTATION_DOCS
 }
 
 #[cfg(test)]

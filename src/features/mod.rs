@@ -33,7 +33,11 @@ pub mod folding;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod hover;
 
-// References - find all references to a symbol
+// References - shared core logic for find-all-references
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod references_core;
+
+// References - native LSP wrapper
 #[cfg(feature = "native")]
 pub mod references;
 

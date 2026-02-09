@@ -18,6 +18,7 @@ export const usePlaygroundStore = defineStore('playground', () => {
     const consoleOutput = ref<{ message: string; type: string; timestamp: string }[]>([]);
     const diagnostics = ref<any[]>([]);
     const symbols = ref<any[]>([]);
+    const hoverInfo = ref<{ line: number; col: number; result: any } | null>(null);
 
     const wasmBytes = ref<Uint8Array | null>(null);
     const wasmModule = ref<WebAssembly.Module | null>(null);
@@ -175,6 +176,10 @@ export const usePlaygroundStore = defineStore('playground', () => {
         symbols.value = newSymbols;
     }
 
+    function setHoverInfo(info: { line: number; col: number; result: any } | null) {
+        hoverInfo.value = info;
+    }
+
     return {
         openFiles,
         activeFileId,
@@ -184,6 +189,7 @@ export const usePlaygroundStore = defineStore('playground', () => {
         consoleOutput,
         diagnostics,
         symbols,
+        hoverInfo,
         moduleImports,
         moduleExports,
         wasmBytes,
@@ -197,6 +203,7 @@ export const usePlaygroundStore = defineStore('playground', () => {
         closeFile,
         updateCode,
         compile,
-        setSymbols
+        setSymbols,
+        setHoverInfo
     };
 });
