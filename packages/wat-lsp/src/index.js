@@ -75,7 +75,7 @@ export async function createWatLSP(options = {}) {
 
   // Step 2: Initialize the WASM module
   const { default: initWasm, WatLSP } = await import('./wasm/wat_lsp_rust.js');
-  await initWasm(watLspWasmPath || assets.watLspWasm);
+  await initWasm({ module_or_path: watLspWasmPath || assets.watLspWasm });
 
   // Step 3: Create and initialize the LSP instance
   const lsp = new WatLSP();
