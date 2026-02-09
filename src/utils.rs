@@ -57,7 +57,13 @@ pub const BLOCK_KINDS_STATEMENT: &[&str] = &[
 ];
 
 /// All block-related node kinds (expression form)
-pub const BLOCK_KINDS_EXPR: &[&str] = &["expr1_block", "expr1_loop", "expr1_if", "expr1_try"];
+pub const BLOCK_KINDS_EXPR: &[&str] = &[
+    "expr1_block",
+    "expr1_loop",
+    "expr1_if",
+    "expr1_try",
+    "expr1_try_table",
+];
 
 /// All block-related node kinds (instruction form used in some contexts)
 pub const BLOCK_KINDS_INSTR: &[&str] = &["instr_block", "instr_loop"];
@@ -91,7 +97,7 @@ pub fn block_type_from_kind(kind: &str) -> &'static str {
         "block_loop" | "expr1_loop" | "instr_loop" => "loop",
         "block_if" | "expr1_if" => "if",
         "block_try" | "expr1_try" => "try",
-        "block_try_table" => "try_table",
+        "block_try_table" | "expr1_try_table" => "try_table",
         _ => "unknown",
     }
 }

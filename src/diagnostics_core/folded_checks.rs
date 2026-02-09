@@ -86,7 +86,11 @@ pub fn check_folded_operand_count(
                             instr_name, expected, operand_count
                         ),
                     ));
-                } else if operand_count > 0 && operand_count < expected && is_nested_in_expr(node) {
+                } else if operand_count > 0
+                    && operand_count < expected
+                    && is_nested_in_expr(node)
+                    && !has_unreachable_child(node, source)
+                {
                     diagnostics.push(Diagnostic::error(
                         node_to_range(node),
                         format!(
@@ -143,6 +147,7 @@ fn validate_dynamic_operands(
                             expected,
                             Some(&format!("fields of struct {}", type_display)),
                             diagnostics,
+                            source,
                         );
                     }
                 }
@@ -167,6 +172,7 @@ fn validate_dynamic_operands(
                         expected,
                         Some(&format!("params of function {}", func_display)),
                         diagnostics,
+                        source,
                     );
                 }
             }
@@ -190,6 +196,7 @@ fn validate_dynamic_operands(
                         expected,
                         Some(&format!("params of tag {}", tag_display)),
                         diagnostics,
+                        source,
                     );
                 }
             }
@@ -219,6 +226,7 @@ fn validate_dynamic_operands(
                                 type_display
                             )),
                             diagnostics,
+                            source,
                         );
                     }
                 }
@@ -236,6 +244,7 @@ fn emit_operand_diagnostic(
     expected: usize,
     context_msg: Option<&str>,
     diagnostics: &mut Vec<Diagnostic>,
+    source: &str,
 ) {
     if actual > expected {
         let msg = if let Some(ctx) = context_msg {
@@ -250,7 +259,11 @@ fn emit_operand_diagnostic(
             )
         };
         diagnostics.push(Diagnostic::error(node_to_range(node), msg));
-    } else if actual > 0 && actual < expected && is_nested_in_expr(node) {
+    } else if actual > 0
+        && actual < expected
+        && is_nested_in_expr(node)
+        && !has_unreachable_child(node, source)
+    {
         diagnostics.push(Diagnostic::error(
             node_to_range(node),
             format!(
@@ -286,4 +299,71 @@ fn extract_instruction_index(node: &Node, source: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Check if the instruction is in an unreachable context — either one of its
+/// child operands contains `unreachable`, or a preceding sibling expression
+/// in any ancestor scope is `unreachable`.
+fn has_unreachable_child(node: &Node, source: &str) -> bool {
+    // Check direct children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "expr" && contains_unreachable(&child, source) {
+            return true;
+        }
+    }
+    // Check if any preceding sibling in ancestor scopes is unreachable
+    is_preceded_by_unreachable(node, source)
+}
+
+/// Walk up the tree checking if any preceding sibling contains `unreachable`.
+fn is_preceded_by_unreachable(node: &Node, source: &str) -> bool {
+    let node_start = node.byte_range().start;
+    let mut current_opt = node.parent();
+    while let Some(parent) = current_opt {
+        let kind = parent.kind();
+        // Stop at function/module level
+        if kind == "module_field_func" || kind == "func" || kind == "module" {
+            break;
+        }
+        // Check preceding siblings for unreachable
+        let mut cursor = parent.walk();
+        for child in parent.children(&mut cursor) {
+            if child.byte_range().start >= node_start {
+                break;
+            }
+            if contains_unreachable(&child, source) {
+                return true;
+            }
+        }
+        current_opt = parent.parent();
+    }
+    false
+}
+
+/// Recursively check if a node contains a non-returning instruction
+/// (`unreachable`, `br`, `br_table`, `return`, `throw`).
+fn contains_unreachable(node: &Node, source: &str) -> bool {
+    let kind = node.kind();
+    if kind == "op_nullary" {
+        let text = &source[node.byte_range()];
+        return text == "unreachable" || text == "return";
+    }
+    if kind == "op_index" {
+        let text = &source[node.byte_range()];
+        // br, br_table, throw, return_call — unconditionally transfer control
+        // br_on_null, br_on_non_null — may push multiple values, suppress arity check
+        let first = text.split_whitespace().next().unwrap_or("");
+        return matches!(
+            first,
+            "br" | "br_table" | "return_call" | "br_on_null" | "br_on_non_null"
+        );
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if contains_unreachable(&child, source) {
+            return true;
+        }
+    }
+    false
 }

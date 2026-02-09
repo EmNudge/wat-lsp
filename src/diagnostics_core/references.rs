@@ -410,13 +410,61 @@ pub fn check_references(
         return find_first_index_identifier(node, source, symbols, context);
     }
 
-    // memory.init takes a data segment index, not a memory index
-    // Skip validation since we don't track data segments yet
-    if *context == InstructionContext::Memory && first_token == "memory.init" {
-        return vec![];
+    // Multi-index instructions: table.init takes (elem_idx, table_idx),
+    // memory.init takes (data_idx, memory_idx). The context from
+    // determine_instruction_context_at_node applies only to the first index.
+    if first_token == "table.init" || first_token == "memory.init" {
+        let second_context = if first_token == "table.init" {
+            InstructionContext::Table
+        } else {
+            InstructionContext::Memory
+        };
+        return check_multi_index_instruction(node, source, symbols, context, &second_context);
     }
 
     find_undefined_identifiers(node, source, symbols, context)
+}
+
+/// Check a multi-index instruction where the first and second index have different contexts.
+/// E.g. `table.init $elem $table` or `memory.init $data $memory`.
+fn check_multi_index_instruction(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    first_context: &InstructionContext,
+    second_context: &InstructionContext,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut index_count = 0;
+
+    // Walk the node tree to find index nodes. They may be nested several
+    // levels deep: expr1_plain → instr_plain → op_table_init → index
+    find_indices_recursive(node, &mut |index_node| {
+        let ctx = if index_count == 0 {
+            first_context
+        } else {
+            second_context
+        };
+        diagnostics.extend(find_undefined_identifiers(index_node, source, symbols, ctx));
+        index_count += 1;
+    });
+
+    diagnostics
+}
+
+/// Recursively find all `index` nodes within instruction wrapper nodes.
+/// Recurses into `instr_plain` and `op_*` nodes but stops at `expr` nodes
+/// (which are operand sub-expressions, not part of the instruction itself).
+fn find_indices_recursive(node: &Node, callback: &mut impl FnMut(&Node)) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind == "index" {
+            callback(&child);
+        } else if kind == "instr_plain" || kind.starts_with("op_") {
+            find_indices_recursive(&child, callback);
+        }
+    }
 }
 
 /// Create a diagnostic for an undefined reference
