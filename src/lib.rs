@@ -76,5 +76,6 @@ pub mod native;
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 pub mod wasm;
 
-// Shared test utilities (available for benchmarks and integration tests)
+// Shared test utilities (available for benchmarks and integration tests, not compiled into WASM)
+#[cfg(any(test, feature = "native"))]
 pub mod test_utils;

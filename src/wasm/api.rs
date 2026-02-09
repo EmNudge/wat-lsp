@@ -14,12 +14,10 @@ use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
 use crate::signature::call_info::{find_function_call, find_function_call_ast, CallInfo, CallType};
-use crate::symbol_lookup::find_symbol_definition_range;
 use crate::symbols::{SymbolTable, ValueType};
 use crate::ts_facade::{self, Language, Parser, Query, Tree};
 use crate::utils::{
-    format_function_signature, get_line_at_position, get_word_at_position, is_word_char,
-    node_at_position,
+    format_function_signature, get_line_at_position, get_word_at_position, node_at_position,
 };
 
 /// The highlights.scm query for syntax highlighting
@@ -146,11 +144,11 @@ impl WatLSP {
                 js_array.push(&core_diagnostic_to_js(&diag));
             }
 
-            // Add semantic diagnostics
+            // Add semantic diagnostics (now returns CoreDiagnostic directly)
             let semantic_diagnostics =
                 provide_wasm_semantic_diagnostics(tree, &self.document, symbols);
             for diag in semantic_diagnostics {
-                js_array.push(&diagnostic_to_js(&diag));
+                js_array.push(&core_diagnostic_to_js(&diag));
             }
 
             // Add subtype hierarchy diagnostics
@@ -258,22 +256,21 @@ impl WatLSP {
             None => return js_sys::Array::new().into(),
         };
 
-        let position = Position::new(line, col);
-
-        // Get word at position
-        let word = match get_word_at_position(&self.document, position) {
-            Some(w) => w,
+        let tree = match &self.tree {
+            Some(t) => t,
             None => return js_sys::Array::new().into(),
         };
 
-        let mut refs = Vec::new();
+        let position = Position::new(line, col);
 
-        // Find references for symbols
-        if word.starts_with('$') {
-            refs = find_symbol_references(&word, symbols, &self.document, include_declaration);
-        }
+        let refs = crate::features::references_core::provide_references_core(
+            &self.document,
+            symbols,
+            tree,
+            position,
+            include_declaration,
+        );
 
-        // Convert to JS array
         let js_array = js_sys::Array::new();
         for range in refs {
             js_array.push(&reference_to_js(&range));
@@ -308,30 +305,29 @@ impl WatLSP {
             return JsValue::NULL;
         }
 
-        // Check if this is a valid symbol that exists in the symbol table
-        let is_valid_symbol = symbols.get_function_by_name(&word).is_some()
-            || symbols.get_global_by_name(&word).is_some()
-            || symbols.get_table_by_name(&word).is_some()
-            || symbols.get_memory_by_name(&word).is_some()
-            || symbols.get_type_by_name(&word).is_some()
-            || symbols.get_tag_by_name(&word).is_some()
-            || symbols.get_data_by_name(&word).is_some()
-            || symbols.get_elem_by_name(&word).is_some()
-            || symbols
-                .find_function_containing_line(line)
-                .map(|f| {
-                    f.parameters
-                        .iter()
-                        .any(|p| p.name.as_deref() == Some(&word))
-                        || f.locals.iter().any(|l| l.name.as_deref() == Some(&word))
-                })
-                .unwrap_or(false)
-            || symbols
-                .find_function_containing_line(line)
-                .map(|f| f.blocks.iter().any(|b| b.label == word))
-                .unwrap_or(false);
+        // Use the shared core to check if this is a valid, identifiable symbol
+        use crate::features::references_core::{identify_symbol_at_position, ReferenceTarget};
+        let target = match identify_symbol_at_position(&self.document, symbols, tree, position) {
+            Some(t) => t,
+            None => return JsValue::NULL,
+        };
 
-        if !is_valid_symbol {
+        // Only named symbols can be renamed
+        let is_named = match &target {
+            ReferenceTarget::Function { name, .. } => name.is_some(),
+            ReferenceTarget::Global { name, .. } => name.is_some(),
+            ReferenceTarget::Local { name, .. } => name.is_some(),
+            ReferenceTarget::Parameter { name, .. } => name.is_some(),
+            ReferenceTarget::BlockLabel { .. } => true,
+            ReferenceTarget::Table { name, .. } => name.is_some(),
+            ReferenceTarget::Memory { name, .. } => name.is_some(),
+            ReferenceTarget::Type { name, .. } => name.is_some(),
+            ReferenceTarget::Tag { name, .. } => name.is_some(),
+            ReferenceTarget::Data { name, .. } => name.is_some(),
+            ReferenceTarget::Elem { name, .. } => name.is_some(),
+        };
+
+        if !is_named {
             return JsValue::NULL;
         }
 
@@ -364,6 +360,11 @@ impl WatLSP {
             None => return JsValue::NULL,
         };
 
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return JsValue::NULL,
+        };
+
         // Validation: New name MUST start with $
         if !new_name.starts_with('$') {
             let error = js_sys::Object::new();
@@ -389,8 +390,14 @@ impl WatLSP {
             return JsValue::NULL;
         }
 
-        // Find all references (including declaration)
-        let refs = find_symbol_references(&word, symbols, &self.document, true);
+        // Find all references (including declaration) using the shared core
+        let refs = crate::features::references_core::provide_references_core(
+            &self.document,
+            symbols,
+            tree,
+            position,
+            true, // include_declaration
+        );
 
         if refs.is_empty() {
             return JsValue::NULL;
@@ -1027,95 +1034,16 @@ fn reference_to_js(range: &Range) -> JsValue {
     obj.into()
 }
 
-fn find_symbol_references(
-    word: &str,
-    symbols: &SymbolTable,
-    document: &str,
-    include_declaration: bool,
-) -> Vec<Range> {
-    let mut refs = Vec::new();
-
-    // Simple text search for the symbol name
-    for (line_num, line) in document.lines().enumerate() {
-        let mut col = 0;
-        while let Some(pos) = line[col..].find(word) {
-            let abs_pos = col + pos;
-            let end_pos = abs_pos + word.len();
-
-            // Check that it's a complete word (not part of a longer identifier)
-            let before_ok =
-                abs_pos == 0 || !is_word_char(line.chars().nth(abs_pos - 1).unwrap_or(' '));
-            let after_ok =
-                end_pos >= line.len() || !is_word_char(line.chars().nth(end_pos).unwrap_or(' '));
-
-            if before_ok && after_ok {
-                refs.push(Range::from_coords(
-                    line_num as u32,
-                    abs_pos as u32,
-                    line_num as u32,
-                    end_pos as u32,
-                ));
-            }
-
-            col = abs_pos + 1;
-        }
-    }
-
-    // Remove declaration if not included
-    if !include_declaration && !refs.is_empty() {
-        if let Some(def_range) = find_symbol_definition_range(word, symbols, Position::new(0, 0)) {
-            refs.retain(|r| {
-                r.start.line != def_range.start.line
-                    || r.start.character != def_range.start.character
-            });
-        }
-    }
-
-    refs
-}
-
-/// Diagnostic information for syntax errors
-struct WasmDiagnostic {
-    line: u32,
-    character: u32,
-    end_line: u32,
-    end_character: u32,
-    message: String,
-    severity: u32, // 1 = error, 2 = warning, 3 = info, 4 = hint
-}
-
-impl From<CoreDiagnostic> for WasmDiagnostic {
-    fn from(diag: CoreDiagnostic) -> Self {
-        WasmDiagnostic {
-            line: diag.range.start.line,
-            character: diag.range.start.character,
-            end_line: diag.range.end.line,
-            end_character: diag.range.end.character,
-            message: diag.message,
-            severity: match diag.severity {
-                crate::core::types::DiagnosticSeverity::Error => 1,
-                crate::core::types::DiagnosticSeverity::Warning => 2,
-                crate::core::types::DiagnosticSeverity::Information => 3,
-                crate::core::types::DiagnosticSeverity::Hint => 4,
-            },
-        }
-    }
-}
-
-use crate::instruction_metadata::{
-    get_instruction_arity_map, infer_simd_instruction_arity, OperandMode,
-};
 use crate::ts_facade::Node;
-use crate::utils::{
-    determine_instruction_context_at_node, find_containing_function, InstructionContext, STRUCT_OPS,
-};
+use crate::utils::{determine_instruction_context_at_node, InstructionContext};
 
-/// Provide semantic diagnostics for undefined references (WASM version)
+/// Provide semantic diagnostics for undefined references (WASM version).
+/// All diagnostic logic now delegates to shared `diagnostics_core` modules.
 fn provide_wasm_semantic_diagnostics(
     tree: &crate::ts_facade::Tree,
     source: &str,
     symbols: &SymbolTable,
-) -> Vec<WasmDiagnostic> {
+) -> Vec<CoreDiagnostic> {
     let mut diagnostics = Vec::new();
     walk_tree_for_diagnostics(tree.root_node(), source, symbols, &mut diagnostics);
     diagnostics
@@ -1125,75 +1053,79 @@ fn walk_tree_for_diagnostics(
     node: Node,
     source: &str,
     symbols: &SymbolTable,
-    diagnostics: &mut Vec<WasmDiagnostic>,
+    diagnostics: &mut Vec<CoreDiagnostic>,
 ) {
     let kind = node.kind();
 
-    // Check for function body instruction lists - perform stack tracking for unfolded code
+    // Check for function body instruction lists — shared stack tracking
     if kind == "module_field_func" {
-        // Get the function's declared return types
         let func_line = node.start_position().row as u32;
         let expected_results: &[ValueType] = symbols
             .find_function_containing_line(func_line)
             .map(|f| f.results.as_slice())
             .unwrap_or(&[]);
 
-        // Find the instr_list child and track stack using shared core
         let mut cursor = node.walk();
         let mut found_instr_list = false;
         for child in node.children(&mut cursor) {
             if child.kind() == "instr_list" {
-                // Use shared core function and convert diagnostics
-                let core_diagnostics =
-                    core_track_stack_in_instr_list(&child, source, symbols, Some(expected_results));
-                for diag in core_diagnostics {
-                    diagnostics.push(diag.into());
-                }
+                diagnostics.extend(core_track_stack_in_instr_list(
+                    &child,
+                    source,
+                    symbols,
+                    Some(expected_results),
+                ));
                 found_instr_list = true;
                 break;
             }
         }
 
-        // If no instr_list but function expects return values, report error
         if !found_instr_list && !expected_results.is_empty() {
-            diagnostics.push(WasmDiagnostic {
-                line: node.start_position().row as u32,
-                character: node.start_position().column as u32,
-                end_line: node.end_position().row as u32,
-                end_character: node.end_position().column as u32,
-                message: format!(
+            diagnostics.push(CoreDiagnostic::error(
+                crate::utils::node_to_range(&node),
+                format!(
                     "Type mismatch: function body leaves 0 values on stack but signature requires {}",
                     expected_results.len()
                 ),
-                severity: 1,
-            });
+            ));
         }
-        // Continue recursing for other checks (references, etc.)
     }
 
-    // Special handling for catch clauses - they have tag and/or label references
+    // Special handling for catch clauses — shared core
     if kind == "catch_clause" {
-        check_catch_clause_references(&node, source, symbols, diagnostics);
+        diagnostics.extend(
+            crate::diagnostics_core::references::check_catch_clause_references(
+                &node, source, symbols,
+            ),
+        );
         return;
     }
 
-    // Special handling for legacy try catch clause
+    // Special handling for legacy try catch clause — shared core
     if kind == "try_catch_clause" {
-        check_try_catch_clause_references(&node, source, symbols, diagnostics);
-        // Continue recursing to check nested instructions
+        diagnostics.extend(
+            crate::diagnostics_core::references::check_try_catch_clause_references(
+                &node, source, symbols,
+            ),
+        );
     }
 
-    // Check folded expression operand count (expr1_plain nodes)
+    // Check folded expression operand count (expr1_plain nodes) — shared core
     if kind == "expr1_plain" {
-        check_folded_expr_operand_count(&node, source, symbols, diagnostics);
+        diagnostics.extend(
+            crate::diagnostics_core::folded_checks::check_folded_operand_count(
+                &node, source, symbols,
+            ),
+        );
     }
 
-    // Check for undefined references based on instruction context
+    // Check for undefined references based on instruction context — shared core
     let context = determine_instruction_context_at_node(&node, source);
     if context != InstructionContext::General {
-        check_undefined_references(&node, source, symbols, diagnostics, &context);
+        diagnostics.extend(crate::diagnostics_core::references::check_references(
+            &node, source, symbols, &context,
+        ));
 
-        // Only recurse into nested expr nodes
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "expr" {
@@ -1210,532 +1142,7 @@ fn walk_tree_for_diagnostics(
     }
 }
 
-fn check_undefined_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-    context: &InstructionContext,
-) {
-    let text = &source[node.byte_range()];
-    let first_token = text.split_whitespace().next().unwrap_or("");
-
-    // For struct.get/struct.set, only the first index is a type reference
-    // The second index is a field reference which we don't validate
-    if *context == InstructionContext::Type && STRUCT_OPS.contains(&first_token) {
-        // Only validate the first index child
-        find_first_index_identifier(node, source, symbols, diagnostics, context);
-        return;
-    }
-
-    find_undefined_identifiers(node, source, symbols, diagnostics, context);
-}
-
-/// Find and validate only the first index identifier in a node
-/// Used for instructions like struct.get where only the first index is a type
-fn find_first_index_identifier(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-    context: &InstructionContext,
-) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "index" {
-            // Found the first index, check its identifier
-            find_undefined_identifiers(&child, source, symbols, diagnostics, context);
-            return; // Only check the first one
-        }
-        // Recurse into instr_plain to find the index
-        if child.kind() == "instr_plain" {
-            find_first_index_identifier(&child, source, symbols, diagnostics, context);
-            return;
-        }
-    }
-}
-
-/// Check operand count in folded expressions (expr1_plain nodes)
-fn check_folded_expr_operand_count(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-) {
-    // Get children
-    let mut cursor = node.walk();
-    let children: Vec<_> = node.children(&mut cursor).collect();
-
-    // First child should be instr_plain
-    let first_child = match children.first() {
-        Some(c) if c.kind() == "instr_plain" => c,
-        _ => return,
-    };
-
-    // Get the instruction name from instr_plain
-    let mut instr_cursor = first_child.walk();
-    let instr_children: Vec<_> = first_child.children(&mut instr_cursor).collect();
-    if instr_children.is_empty() {
-        return;
-    }
-
-    let instr_kind = instr_children[0].kind();
-    let instr_name = match instr_kind.as_str() {
-        "op_const" => {
-            let mut const_cursor = instr_children[0].walk();
-            let const_children: Vec<_> = instr_children[0].children(&mut const_cursor).collect();
-            if const_children.is_empty() {
-                return;
-            }
-            source[const_children[0].byte_range()].trim().to_string()
-        }
-        _ => source[instr_children[0].byte_range()].trim().to_string(),
-    };
-
-    // Count expr children (these are the operands)
-    let operand_count = children
-        .iter()
-        .skip(1)
-        .filter(|c| c.kind() == "expr")
-        .count();
-
-    // Validate operand count using the arity map, with SIMD pattern fallback
-    let arity_map = get_instruction_arity_map();
-    let resolved = if let Some(arity) = arity_map.get(instr_name.as_str()) {
-        Some((arity.operand_mode, true))
-    } else {
-        infer_simd_instruction_arity(&instr_name).map(|(c, _)| (OperandMode::Fixed(c), false))
-    };
-    if let Some((operand_mode, check_dynamic)) = resolved {
-        match operand_mode {
-            OperandMode::Fixed(expected) => {
-                if operand_count > expected {
-                    // Error: too many operands
-                    let start_point = node.start_position();
-                    let end_point = node.end_position();
-                    diagnostics.push(WasmDiagnostic {
-                        line: start_point.row as u32,
-                        character: start_point.column as u32,
-                        end_line: end_point.row as u32,
-                        end_character: end_point.column as u32,
-                        message: format!(
-                            "Instruction '{}' expects at most {} operands, but got {}",
-                            instr_name, expected, operand_count
-                        ),
-                        severity: 1,
-                    });
-                } else if operand_count > 0 && operand_count < expected {
-                    // Check if we're in a nested context where stack values aren't available
-                    if is_nested_in_expr(node) {
-                        let start_point = node.start_position();
-                        let end_point = node.end_position();
-                        diagnostics.push(WasmDiagnostic {
-                            line: start_point.row as u32,
-                            character: start_point.column as u32,
-                            end_line: end_point.row as u32,
-                            end_character: end_point.column as u32,
-                            message: format!(
-                                "Instruction '{}' expects {} operands, but got {}",
-                                instr_name, expected, operand_count
-                            ),
-                            severity: 1,
-                        });
-                    }
-                }
-            }
-            OperandMode::Dynamic if check_dynamic => {
-                // Dynamic operand count - check based on instruction type
-                check_dynamic_operands(
-                    node,
-                    &instr_name,
-                    operand_count,
-                    symbols,
-                    source,
-                    diagnostics,
-                );
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Check if a node is nested inside another expr (meaning it can't use stack values)
-fn is_nested_in_expr(node: &Node) -> bool {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "expr" {
-            // Found parent expr, check if its parent is also expr
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "expr" || grandparent.kind().starts_with("expr1_") {
-                    return true;
-                }
-            }
-        }
-        current = parent.parent();
-    }
-    false
-}
-
-/// Check dynamic operand count for specific instructions
-fn check_dynamic_operands(
-    node: &Node,
-    instr_name: &str,
-    operand_count: usize,
-    symbols: &SymbolTable,
-    source: &str,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-) {
-    match instr_name {
-        "call" => {
-            // Get function reference and check param count
-            if let Some(func_name) = extract_instruction_index(node, source) {
-                if let Some(func) = symbols.get_function_by_name(&func_name) {
-                    let expected = func.parameters.len();
-                    validate_operand_count(node, instr_name, operand_count, expected, diagnostics);
-                } else if let Ok(idx) = func_name.parse::<usize>() {
-                    if let Some(func) = symbols.get_function_by_index(idx) {
-                        let expected = func.parameters.len();
-                        validate_operand_count(
-                            node,
-                            instr_name,
-                            operand_count,
-                            expected,
-                            diagnostics,
-                        );
-                    }
-                }
-            }
-        }
-        "throw" => {
-            // Get tag reference and check param count
-            if let Some(tag_name) = extract_instruction_index(node, source) {
-                if let Some(tag) = symbols.get_tag_by_name(&tag_name) {
-                    let expected = tag.params.len();
-                    validate_operand_count(node, instr_name, operand_count, expected, diagnostics);
-                } else if let Ok(idx) = tag_name.parse::<usize>() {
-                    if let Some(tag) = symbols.get_tag_by_index(idx) {
-                        let expected = tag.params.len();
-                        validate_operand_count(
-                            node,
-                            instr_name,
-                            operand_count,
-                            expected,
-                            diagnostics,
-                        );
-                    }
-                }
-            }
-        }
-        _ => {
-            // Skip other dynamic instructions for now
-        }
-    }
-}
-
-/// Helper to validate operand count and push diagnostic if invalid
-fn validate_operand_count(
-    node: &Node,
-    instr_name: &str,
-    actual: usize,
-    expected: usize,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-) {
-    if actual > expected {
-        let start_point = node.start_position();
-        let end_point = node.end_position();
-        diagnostics.push(WasmDiagnostic {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-            end_line: end_point.row as u32,
-            end_character: end_point.column as u32,
-            message: format!(
-                "Instruction '{}' expects at most {} operands, but got {}",
-                instr_name, expected, actual
-            ),
-            severity: 1,
-        });
-    } else if actual > 0 && actual < expected && is_nested_in_expr(node) {
-        let start_point = node.start_position();
-        let end_point = node.end_position();
-        diagnostics.push(WasmDiagnostic {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-            end_line: end_point.row as u32,
-            end_character: end_point.column as u32,
-            message: format!(
-                "Instruction '{}' expects {} operands, but got {}",
-                instr_name, expected, actual
-            ),
-            severity: 1,
-        });
-    }
-}
-
-/// Extract the type/function/tag index from an instruction node
-fn extract_instruction_index(node: &Node, source: &str) -> Option<String> {
-    // Navigate to find instr_plain > index/identifier
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "instr_plain" {
-            let mut instr_cursor = child.walk();
-            for instr_child in child.children(&mut instr_cursor) {
-                if instr_child.kind() == "index" || instr_child.kind() == "identifier" {
-                    return Some(source[instr_child.byte_range()].trim().to_string());
-                }
-                // Also check inside op_ nodes
-                if instr_child.kind().starts_with("op_") {
-                    let mut op_cursor = instr_child.walk();
-                    for op_child in instr_child.children(&mut op_cursor) {
-                        if op_child.kind() == "index" || op_child.kind() == "identifier" {
-                            return Some(source[op_child.byte_range()].trim().to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Check references in a catch_clause node (try_table syntax)
-/// For (catch $tag $label) and (catch_ref $tag $label): first index is tag, second is label
-/// For (catch_all $label) and (catch_all_ref $label): single index is label
-fn check_catch_clause_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-) {
-    let text = &source[node.byte_range()];
-
-    // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
-    let has_tag =
-        text.contains("catch_ref") || (text.contains("catch") && !text.contains("catch_all"));
-
-    // Collect all index children
-    let mut cursor = node.walk();
-    let indices: Vec<_> = node
-        .children(&mut cursor)
-        .filter(|c| c.kind() == "index")
-        .collect();
-
-    for (idx, index_node) in indices.iter().enumerate() {
-        // Find identifier within the index
-        let mut idx_cursor = index_node.walk();
-        for child in index_node.children(&mut idx_cursor) {
-            if child.kind() == "identifier" {
-                let identifier_name = &source[child.byte_range()];
-                if !identifier_name.starts_with('$') {
-                    continue;
-                }
-
-                let start_point = child.start_position();
-                let end_point = child.end_position();
-                let position = crate::core::types::Position::new(
-                    start_point.row as u32,
-                    start_point.column as u32,
-                );
-
-                // First index is tag (if has_tag), remaining are labels
-                let is_tag_reference = has_tag && idx == 0;
-
-                let is_defined = if is_tag_reference {
-                    symbols.get_tag_by_name(identifier_name).is_some()
-                } else {
-                    // Label reference - check block labels in containing function
-                    if let Some(func) = find_containing_function(symbols, position) {
-                        func.blocks.iter().any(|block| {
-                            format!("${}", block.label) == identifier_name
-                                || block.label == identifier_name
-                        })
-                    } else {
-                        false
-                    }
-                };
-
-                if !is_defined {
-                    let message = if is_tag_reference {
-                        format!("Undefined tag '{}'", identifier_name)
-                    } else {
-                        format!("Undefined label '{}'", identifier_name)
-                    };
-
-                    diagnostics.push(WasmDiagnostic {
-                        line: start_point.row as u32,
-                        character: start_point.column as u32,
-                        end_line: end_point.row as u32,
-                        end_character: end_point.column as u32,
-                        message,
-                        severity: 1,
-                    });
-                }
-            }
-        }
-    }
-}
-
-/// Check references in a try_catch_clause node (legacy try syntax)
-/// For (catch $tag instr*): the index is a tag reference
-fn check_try_catch_clause_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-) {
-    // Find the index child which contains the tag reference
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "index" {
-            // Find the identifier within the index
-            let mut idx_cursor = child.walk();
-            for idx_child in child.children(&mut idx_cursor) {
-                if idx_child.kind() == "identifier" {
-                    let identifier_name = &source[idx_child.byte_range()];
-                    if !identifier_name.starts_with('$') {
-                        continue;
-                    }
-
-                    let start_point = idx_child.start_position();
-                    let end_point = idx_child.end_position();
-
-                    // It's a tag reference
-                    if symbols.get_tag_by_name(identifier_name).is_none() {
-                        diagnostics.push(WasmDiagnostic {
-                            line: start_point.row as u32,
-                            character: start_point.column as u32,
-                            end_line: end_point.row as u32,
-                            end_character: end_point.column as u32,
-                            message: format!("Undefined tag '{}'", identifier_name),
-                            severity: 1,
-                        });
-                    }
-                }
-            }
-            // Only one index in try_catch_clause
-            break;
-        }
-    }
-}
-
-fn find_undefined_identifiers(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<WasmDiagnostic>,
-    context: &InstructionContext,
-) {
-    if node.kind() == "identifier" {
-        let identifier_name = &source[node.byte_range()];
-
-        // Only check identifiers that start with $
-        if !identifier_name.starts_with('$') {
-            return;
-        }
-
-        let start_point = node.start_position();
-        let end_point = node.end_position();
-        let position =
-            crate::core::types::Position::new(start_point.row as u32, start_point.column as u32);
-
-        let is_defined = match context {
-            InstructionContext::Branch | InstructionContext::Block => {
-                if let Some(func) = find_containing_function(symbols, position) {
-                    func.blocks.iter().any(|block| {
-                        format!("${}", block.label) == identifier_name
-                            || block.label == identifier_name
-                    })
-                } else {
-                    false
-                }
-            }
-            InstructionContext::Call => symbols.get_function_by_name(identifier_name).is_some(),
-            InstructionContext::Local => {
-                if let Some(func) = find_containing_function(symbols, position) {
-                    func.parameters
-                        .iter()
-                        .any(|p| p.name.as_ref() == Some(&identifier_name.to_string()))
-                        || func
-                            .locals
-                            .iter()
-                            .any(|l| l.name.as_ref() == Some(&identifier_name.to_string()))
-                } else {
-                    false
-                }
-            }
-            InstructionContext::Global => symbols.get_global_by_name(identifier_name).is_some(),
-            InstructionContext::Table => symbols.get_table_by_name(identifier_name).is_some(),
-            InstructionContext::Memory => symbols.get_memory_by_name(identifier_name).is_some(),
-            InstructionContext::Type => symbols.get_type_by_name(identifier_name).is_some(),
-            InstructionContext::Tag => symbols.get_tag_by_name(identifier_name).is_some(),
-            InstructionContext::Data => symbols.get_data_by_name(identifier_name).is_some(),
-            InstructionContext::Elem => symbols.get_elem_by_name(identifier_name).is_some(),
-            InstructionContext::Function | InstructionContext::General => true,
-        };
-
-        if !is_defined {
-            let message = match context {
-                InstructionContext::Branch | InstructionContext::Block => {
-                    format!("Undefined label '{}'", identifier_name)
-                }
-                InstructionContext::Call => format!("Undefined function '{}'", identifier_name),
-                InstructionContext::Local => {
-                    format!("Undefined local or parameter '{}'", identifier_name)
-                }
-                InstructionContext::Global => format!("Undefined global '{}'", identifier_name),
-                InstructionContext::Table => format!("Undefined table '{}'", identifier_name),
-                InstructionContext::Memory => format!("Undefined memory '{}'", identifier_name),
-                InstructionContext::Type => format!("Undefined type '{}'", identifier_name),
-                InstructionContext::Tag => format!("Undefined tag '{}'", identifier_name),
-                InstructionContext::Data => format!("Undefined data segment '{}'", identifier_name),
-                InstructionContext::Elem => format!("Undefined elem segment '{}'", identifier_name),
-                _ => format!("Undefined reference '{}'", identifier_name),
-            };
-
-            diagnostics.push(WasmDiagnostic {
-                line: start_point.row as u32,
-                character: start_point.column as u32,
-                end_line: end_point.row as u32,
-                end_character: end_point.column as u32,
-                message,
-                severity: 1, // Error
-            });
-        }
-        return;
-    }
-
-    // Don't recurse into nested expr nodes
-    if node.kind() == "expr" {
-        return;
-    }
-
-    // Recursively check children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        find_undefined_identifiers(&child, source, symbols, diagnostics, context);
-    }
-}
-
 // ============================================================================
-
-fn diagnostic_to_js(diag: &WasmDiagnostic) -> JsValue {
-    let obj = js_sys::Object::new();
-
-    let range = js_sys::Object::new();
-    let start = js_sys::Object::new();
-    js_sys::Reflect::set(&start, &"line".into(), &diag.line.into()).ok();
-    js_sys::Reflect::set(&start, &"character".into(), &diag.character.into()).ok();
-    let end = js_sys::Object::new();
-    js_sys::Reflect::set(&end, &"line".into(), &diag.end_line.into()).ok();
-    js_sys::Reflect::set(&end, &"character".into(), &diag.end_character.into()).ok();
-    js_sys::Reflect::set(&range, &"start".into(), &start).ok();
-    js_sys::Reflect::set(&range, &"end".into(), &end).ok();
-
-    js_sys::Reflect::set(&obj, &"range".into(), &range).ok();
-    js_sys::Reflect::set(&obj, &"message".into(), &diag.message.clone().into()).ok();
-    js_sys::Reflect::set(&obj, &"severity".into(), &diag.severity.into()).ok();
-
-    obj.into()
-}
 
 /// Convert a core::types::Diagnostic to a JavaScript object
 fn core_diagnostic_to_js(diag: &CoreDiagnostic) -> JsValue {

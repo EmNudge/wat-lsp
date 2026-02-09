@@ -637,5 +637,33 @@ fn format_annotation_hover(name: &str) -> HoverResult {
 }
 
 fn get_instruction_doc(word: &str) -> Option<String> {
-    crate::docs::get_instruction_doc(word).map(|s| s.to_string())
+    // Try full documentation first (native-only, returns None on WASM)
+    if let Some(doc) = crate::docs::get_instruction_doc(word) {
+        return Some(doc.to_string());
+    }
+
+    // Fallback: check the arity map to at least identify known instructions
+    let arity_map = crate::diagnostics_core::get_arity_map();
+    if let Some(arity) = arity_map.get(word) {
+        let operands = match arity.operand_mode {
+            crate::instruction_metadata::OperandMode::Fixed(n) => format!("{}", n),
+            crate::instruction_metadata::OperandMode::Dynamic => "dynamic".to_string(),
+        };
+        return Some(format!(
+            "**{}**\n\n{} → {} result(s)\n\nOperands: {}",
+            word, arity.param_description, arity.produces, operands
+        ));
+    }
+
+    // Also check SIMD instructions via pattern matching
+    if let Some((consumes, produces)) =
+        crate::instruction_metadata::infer_simd_instruction_arity(word)
+    {
+        return Some(format!(
+            "**{}** (SIMD)\n\n{} operand(s) → {} result(s)",
+            word, consumes, produces
+        ));
+    }
+
+    None
 }

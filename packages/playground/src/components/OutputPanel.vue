@@ -10,6 +10,7 @@ const tabs = [
   { id: 'outline', label: 'Outline' },
   { id: 'console', label: 'Console' },
   { id: 'hex', label: 'Hex View' },
+  { id: 'hover', label: 'Hover' },
 ];
 
 function formatHex(buffer: Uint8Array) {
@@ -98,6 +99,17 @@ const hexView = computed(() => {
 
       <div v-else-if="activeTab === 'hex'" class="hex-pane">
         <pre class="hex-dump">{{ hexView }}</pre>
+      </div>
+
+      <div v-else-if="activeTab === 'hover'" class="hover-pane">
+        <template v-if="store.hoverInfo">
+          <div class="hover-position">Line {{ store.hoverInfo.line }}, Col {{ store.hoverInfo.col }}</div>
+          <template v-if="store.hoverInfo.result">
+            <pre class="hover-content">{{ store.hoverInfo.result.contents?.value ?? 'No content' }}</pre>
+          </template>
+          <p v-else class="placeholder">No hover at this position</p>
+        </template>
+        <p v-else class="placeholder">Move cursor in editor to see hover info</p>
       </div>
     </div>
   </div>
@@ -226,5 +238,21 @@ const hexView = computed(() => {
 
 .section:first-child h3 {
   margin-top: 0;
+}
+
+.hover-pane {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.hover-position {
+  color: var(--fg-muted);
+  margin-bottom: 0.5rem;
+}
+
+.hover-content {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--fg-color);
 }
 </style>

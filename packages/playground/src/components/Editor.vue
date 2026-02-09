@@ -249,6 +249,19 @@ async function initMonaco() {
     }
   });
 
+  editor.onDidChangeCursorPosition((e) => {
+    if (!watLSP || !editor) return;
+    const model = editor.getModel();
+    if (!model) return;
+    watLSP.parse(model.getValue());
+    const result = watLSP.provideHover(e.position.lineNumber - 1, e.position.column - 1);
+    store.setHoverInfo({
+      line: e.position.lineNumber,
+      col: e.position.column,
+      result: result ?? null,
+    });
+  });
+
   editor.onDidChangeModelContent(() => {
     if (isUpdatingFromStore) return;
     const value = editor?.getValue() || '';
