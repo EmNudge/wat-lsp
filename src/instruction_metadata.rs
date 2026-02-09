@@ -781,13 +781,22 @@ pub fn infer_simd_instruction_arity(name: &str) -> Option<(usize, usize)> {
         return Some((1, 1));
     }
 
-    // Relaxed SIMD ternary ops: 3 v128 → v128
-    if name.contains(".relaxed_madd")
-        || name.contains(".relaxed_nmadd")
-        || name.contains(".relaxed_laneselect")
-        || name.contains(".relaxed_dot_i8x16_i7x16_add")
-    {
-        return Some((3, 1));
+    // ── Relaxed SIMD (explicit handling for all instructions) ───────
+    if name.contains(".relaxed_") {
+        // Ternary: 3 v128 → v128
+        if name.contains(".relaxed_madd")
+            || name.contains(".relaxed_nmadd")
+            || name.contains(".relaxed_laneselect")
+            || name.contains(".relaxed_dot_i8x16_i7x16_add")
+        {
+            return Some((3, 1));
+        }
+        // Unary: 1 v128 → v128
+        if name.contains(".relaxed_trunc") {
+            return Some((1, 1));
+        }
+        // Binary: 2 v128 → v128 (swizzle, min, max, q15mulr)
+        return Some((2, 1));
     }
 
     // Unary ops: 1 v128 → 1 v128
@@ -1210,24 +1219,58 @@ mod tests {
     }
 
     #[test]
-    fn test_simd_arity_relaxed_ops() {
-        // Relaxed SIMD ternary ops: 3 → 1
-        assert_eq!(
-            infer_simd_instruction_arity("f32x4.relaxed_madd"),
-            Some((3, 1))
-        );
-        assert_eq!(
-            infer_simd_instruction_arity("f64x2.relaxed_nmadd"),
-            Some((3, 1))
-        );
-        assert_eq!(
-            infer_simd_instruction_arity("i8x16.relaxed_laneselect"),
-            Some((3, 1))
-        );
-        assert_eq!(
-            infer_simd_instruction_arity("i32x4.relaxed_dot_i8x16_i7x16_add_s"),
-            Some((3, 1))
-        );
+    fn test_relaxed_simd_full_coverage() {
+        // Ternary: madd, nmadd, laneselect (3 operands → 1 result)
+        for instr in [
+            "f32x4.relaxed_madd",
+            "f32x4.relaxed_nmadd",
+            "f64x2.relaxed_madd",
+            "f64x2.relaxed_nmadd",
+            "i8x16.relaxed_laneselect",
+            "i16x8.relaxed_laneselect",
+            "i32x4.relaxed_laneselect",
+            "i64x2.relaxed_laneselect",
+            "i32x4.relaxed_dot_i8x16_i7x16_add_s",
+        ] {
+            let arity = infer_simd_instruction_arity(instr);
+            assert_eq!(
+                arity,
+                Some((3, 1)),
+                "{instr} should be ternary (3 operands → 1 result)"
+            );
+        }
+
+        // Binary: swizzle, min, max, trunc, q15mulr (2 operands → 1 result)
+        for instr in [
+            "i8x16.relaxed_swizzle",
+            "f32x4.relaxed_min",
+            "f32x4.relaxed_max",
+            "f64x2.relaxed_min",
+            "f64x2.relaxed_max",
+            "i16x8.relaxed_q15mulr_s",
+        ] {
+            let arity = infer_simd_instruction_arity(instr);
+            assert_eq!(
+                arity,
+                Some((2, 1)),
+                "{instr} should be binary (2 operands → 1 result)"
+            );
+        }
+
+        // Unary: trunc (1 operand → 1 result)
+        for instr in [
+            "i32x4.relaxed_trunc_f32x4_s",
+            "i32x4.relaxed_trunc_f32x4_u",
+            "i32x4.relaxed_trunc_f64x2_s_zero",
+            "i32x4.relaxed_trunc_f64x2_u_zero",
+        ] {
+            let arity = infer_simd_instruction_arity(instr);
+            assert_eq!(
+                arity,
+                Some((1, 1)),
+                "{instr} should be unary (1 operand → 1 result)"
+            );
+        }
     }
 
     #[test]

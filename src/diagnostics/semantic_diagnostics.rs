@@ -3552,6 +3552,32 @@ mod tests {
     }
 
     #[test]
+    fn test_relaxed_simd_stack_underflow() {
+        // f32x4.relaxed_madd needs 3 v128 operands, only 2 provided
+        let document = r#"(module
+  (func $bad_madd (param $a v128) (param $b v128) (result v128)
+    local.get $a
+    local.get $b
+    f32x4.relaxed_madd)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let underflow = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Stack underflow"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            underflow.len(),
+            1,
+            "relaxed_madd with 2 operands (needs 3) should produce stack underflow"
+        );
+    }
+
+    #[test]
     fn test_simd_i32x4_add_no_false_positive() {
         // Regression test: SIMD binary ops must consume 2 and produce 1 on the stack.
         // Previously i32x4.add was unknown to the arity map, so the stack tracker
