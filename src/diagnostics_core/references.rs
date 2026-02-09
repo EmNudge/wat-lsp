@@ -44,52 +44,16 @@ pub fn check_catch_clause_references(
         .collect();
 
     for (i, index_node) in indices.iter().enumerate() {
-        // Find the identifier within the index
-        let mut idx_cursor = index_node.walk();
-        for child in index_node.children(&mut idx_cursor) {
-            #[cfg(feature = "native")]
-            let kind = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let kind = child.kind();
-
-            if kind == "identifier" {
-                let identifier_name = &source[child.byte_range()];
-                if !identifier_name.starts_with('$') {
-                    continue;
-                }
-
-                let start_point = child.start_position();
-                let position = Position::new(start_point.row as u32, start_point.column as u32);
-
-                // First index is tag (if has_tag), remaining are labels
-                let is_tag_reference = has_tag && i == 0;
-
-                let is_defined = if is_tag_reference {
-                    symbols.get_tag_by_name(identifier_name).is_some()
-                } else {
-                    // Label reference - check block labels in containing function
-                    if let Some(func) = find_containing_function(symbols, position) {
-                        func.blocks.iter().any(|block| {
-                            format!("${}", block.label) == identifier_name
-                                || block.label == identifier_name
-                        })
-                    } else {
-                        false
-                    }
-                };
-
-                if !is_defined {
-                    let context = if is_tag_reference {
-                        InstructionContext::Tag
-                    } else {
-                        InstructionContext::Branch
-                    };
-                    let diagnostic =
-                        create_undefined_reference_diagnostic(&child, identifier_name, &context);
-                    diagnostics.push(diagnostic);
-                }
-            }
-        }
+        // First index is tag (if has_tag), remaining are labels
+        let is_tag_reference = has_tag && i == 0;
+        let context = if is_tag_reference {
+            InstructionContext::Tag
+        } else {
+            InstructionContext::Branch
+        };
+        diagnostics.extend(find_undefined_identifiers(
+            index_node, source, symbols, &context,
+        ));
     }
 
     diagnostics
@@ -102,9 +66,6 @@ pub fn check_try_catch_clause_references(
     source: &str,
     symbols: &SymbolTable,
 ) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
-    // Find the index child which contains the tag reference
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -113,37 +74,11 @@ pub fn check_try_catch_clause_references(
         let kind = child.kind();
 
         if kind == "index" {
-            // Find the identifier within the index
-            let mut idx_cursor = child.walk();
-            for idx_child in child.children(&mut idx_cursor) {
-                #[cfg(feature = "native")]
-                let idx_kind = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let idx_kind = idx_child.kind();
-
-                if idx_kind == "identifier" {
-                    let identifier_name = &source[idx_child.byte_range()];
-                    if !identifier_name.starts_with('$') {
-                        continue;
-                    }
-
-                    // Check if the tag is defined
-                    if symbols.get_tag_by_name(identifier_name).is_none() {
-                        let diagnostic = create_undefined_reference_diagnostic(
-                            &idx_child,
-                            identifier_name,
-                            &InstructionContext::Tag,
-                        );
-                        diagnostics.push(diagnostic);
-                    }
-                }
-            }
-            // Only one index in try_catch_clause
-            break;
+            return find_undefined_identifiers(&child, source, symbols, &InstructionContext::Tag);
         }
     }
 
-    diagnostics
+    vec![]
 }
 
 /// Check references in a try_delegate_clause node (legacy try syntax)
@@ -153,9 +88,6 @@ pub fn check_try_delegate_clause_references(
     source: &str,
     symbols: &SymbolTable,
 ) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
-    // Find the index child which contains the label reference
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -164,57 +96,21 @@ pub fn check_try_delegate_clause_references(
         let kind = child.kind();
 
         if kind == "index" {
-            // Find the identifier within the index
-            let mut idx_cursor = child.walk();
-            for idx_child in child.children(&mut idx_cursor) {
-                #[cfg(feature = "native")]
-                let idx_kind = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let idx_kind = idx_child.kind();
-
-                if idx_kind == "identifier" {
-                    let identifier_name = &source[idx_child.byte_range()];
-                    if !identifier_name.starts_with('$') {
-                        continue;
-                    }
-
-                    let start_point = idx_child.start_position();
-                    let position = Position::new(start_point.row as u32, start_point.column as u32);
-
-                    // Check if the label is defined
-                    let is_defined = if let Some(func) = find_containing_function(symbols, position)
-                    {
-                        func.blocks.iter().any(|block| {
-                            format!("${}", block.label) == identifier_name
-                                || block.label == identifier_name
-                        })
-                    } else {
-                        false
-                    };
-
-                    if !is_defined {
-                        let diagnostic = create_undefined_reference_diagnostic(
-                            &idx_child,
-                            identifier_name,
-                            &InstructionContext::Branch,
-                        );
-                        diagnostics.push(diagnostic);
-                    }
-                }
-            }
-            // Only one index in try_delegate_clause
-            break;
+            return find_undefined_identifiers(
+                &child,
+                source,
+                symbols,
+                &InstructionContext::Branch,
+            );
         }
     }
 
-    diagnostics
+    vec![]
 }
 
 /// Check the function reference in a module_field_start node.
 /// The start directive takes a single function index: (start $func) or (start 0)
 pub fn check_start_references(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -223,34 +119,11 @@ pub fn check_start_references(node: &Node, source: &str, symbols: &SymbolTable) 
         let kind = child.kind();
 
         if kind == "index" {
-            let mut idx_cursor = child.walk();
-            for idx_child in child.children(&mut idx_cursor) {
-                #[cfg(feature = "native")]
-                let idx_kind = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let idx_kind = idx_child.kind();
-
-                if idx_kind == "identifier" {
-                    let identifier_name = &source[idx_child.byte_range()];
-                    if !identifier_name.starts_with('$') {
-                        continue;
-                    }
-
-                    if symbols.get_function_by_name(identifier_name).is_none() {
-                        let diagnostic = create_undefined_reference_diagnostic(
-                            &idx_child,
-                            identifier_name,
-                            &InstructionContext::Call,
-                        );
-                        diagnostics.push(diagnostic);
-                    }
-                }
-            }
-            break;
+            return find_undefined_identifiers(&child, source, symbols, &InstructionContext::Call);
         }
     }
 
-    diagnostics
+    vec![]
 }
 
 /// Find and validate only the first index identifier in a node
@@ -374,6 +247,75 @@ pub fn find_undefined_identifiers(
         if !is_defined {
             let diagnostic = create_undefined_reference_diagnostic(node, identifier_name, context);
             diagnostics.push(diagnostic);
+        }
+        return diagnostics;
+    }
+
+    // Check numeric indices (nat nodes inside index parents)
+    if kind == "nat" {
+        // Only validate nat nodes that are inside an index node
+        let in_index = node
+            .parent()
+            .map(|p| {
+                let pk = p.kind();
+                #[cfg(feature = "native")]
+                {
+                    pk == "index"
+                }
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                {
+                    &*pk == "index"
+                }
+            })
+            .unwrap_or(false);
+
+        if in_index {
+            let nat_text = &source[node.byte_range()];
+            if let Ok(idx) = nat_text.parse::<usize>() {
+                let start_point = node.start_position();
+                let position = Position::new(start_point.row as u32, start_point.column as u32);
+
+                let is_valid = match context {
+                    InstructionContext::Call => idx < symbols.functions.len(),
+                    InstructionContext::Local => {
+                        if let Some(func) = find_containing_function(symbols, position) {
+                            idx < func.parameters.len() + func.locals.len()
+                        } else {
+                            true
+                        }
+                    }
+                    InstructionContext::Global => idx < symbols.globals.len(),
+                    InstructionContext::Table => idx < symbols.tables.len(),
+                    InstructionContext::Memory => idx < symbols.memories.len(),
+                    InstructionContext::Tag => idx < symbols.tags.len(),
+                    InstructionContext::Data => idx < symbols.data_segments.len(),
+                    InstructionContext::Elem => idx < symbols.elem_segments.len(),
+                    // Type indices can't be reliably validated because implicit types
+                    // (created by function signatures) aren't tracked in the symbol table.
+                    // Branch indices are depth-relative, not absolute — skip.
+                    InstructionContext::Type
+                    | InstructionContext::Branch
+                    | InstructionContext::Block
+                    | InstructionContext::Function
+                    | InstructionContext::General => true,
+                };
+
+                if !is_valid {
+                    let range = node_to_range(node);
+                    let message = match context {
+                        InstructionContext::Call => format!("unknown function {}", idx),
+                        InstructionContext::Local => format!("unknown local {}", idx),
+                        InstructionContext::Global => format!("unknown global {}", idx),
+                        InstructionContext::Table => format!("unknown table {}", idx),
+                        InstructionContext::Memory => format!("unknown memory {}", idx),
+                        InstructionContext::Tag => format!("unknown tag {}", idx),
+                        InstructionContext::Data => format!("unknown data segment {}", idx),
+                        InstructionContext::Elem => format!("unknown elem segment {}", idx),
+                        _ => unreachable!(),
+                    };
+                    diagnostics.push(Diagnostic::error(range, message));
+                }
+            }
         }
         return diagnostics;
     }

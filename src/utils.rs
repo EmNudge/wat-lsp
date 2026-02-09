@@ -246,6 +246,8 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
             || first_token == "return_call_ref"
         {
             return InstructionContext::Type;
+        } else if first_token == "ref.func" || first_token == "return_call" {
+            return InstructionContext::Call;
         } else if first_token.starts_with("br") {
             return InstructionContext::Branch;
         } else if first_token.starts_with("call") && first_token != "call_indirect" {

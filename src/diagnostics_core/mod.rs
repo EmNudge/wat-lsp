@@ -9,6 +9,7 @@ pub mod memory_checks;
 pub mod module_checks;
 pub mod references;
 mod semantic;
+pub mod simd_checks;
 mod stack;
 pub mod subtype;
 mod termination;
