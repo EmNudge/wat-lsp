@@ -8,3 +8,28 @@ hero:
     - text: Get Started
       link: /intro/what-is-wat/
 ---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <LinkCard
+    title="Intro"
+    description="Learn what WAT is and write your first module."
+    href="/intro/what-is-wat/"
+  />
+  <LinkCard
+    title="Guides"
+    description="Deep dives into the WAT language, control flow, stack, and more."
+    href="/language/types/"
+  />
+  <LinkCard
+    title="Reference"
+    description="Complete instruction reference for every WAT opcode."
+    href="/instructions/i32/"
+  />
+  <LinkCard
+    title="Playground"
+    description="Try WAT in the browser with a live editor."
+    href="/playground"
+  />
+</CardGrid>
