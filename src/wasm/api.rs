@@ -1110,6 +1110,19 @@ fn walk_tree_for_diagnostics(
         return;
     }
 
+    // Check module-level references (exports, elem/data segment refs) — shared core
+    {
+        let module_ref_diags = crate::diagnostics_core::references::check_module_level_references(
+            &node, source, symbols,
+        );
+        if !module_ref_diags.is_empty() {
+            diagnostics.extend(module_ref_diags);
+            if &*kind != "module_field_elem" {
+                return;
+            }
+        }
+    }
+
     // Special handling for catch clauses — shared core
     if &*kind == "catch_clause" {
         diagnostics.extend(

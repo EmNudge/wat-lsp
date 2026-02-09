@@ -140,6 +140,22 @@ fn unified_tree_walk(
         return;
     }
 
+    // Check module-level references (exports, elem/data segment refs)
+    {
+        let module_ref_diags = crate::diagnostics_core::references::check_module_level_references(
+            &node, source, symbols,
+        );
+        if !module_ref_diags.is_empty() {
+            diagnostics.extend(module_ref_diags.into_iter().map(Into::into));
+            // For leaf-ish nodes (export_desc_*, table_use, memory_use, elem_list),
+            // return early. For module_field_elem, continue recursing into children
+            // so that table_use, elem_list, offset, etc. get their own checks.
+            if kind != "module_field_elem" {
+                return;
+            }
+        }
+    }
+
     // Special handling for try_delegate_clause (legacy try): index is a label reference
     if kind == "try_delegate_clause" {
         let core_diags = crate::diagnostics_core::references::check_try_delegate_clause_references(
@@ -3093,6 +3109,238 @@ mod tests {
             !final_errors.is_empty(),
             "Expected 'cannot extend final' error, got: {:?}",
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_undefined_export_func() {
+        let document = r#"(module
+  (export "f" (func $missing))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined function"))
+            .collect();
+        assert_eq!(undefined_diags.len(), 1);
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_undefined_export_global() {
+        let document = r#"(module
+  (export "g" (global $missing))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined global"))
+            .collect();
+        assert_eq!(undefined_diags.len(), 1);
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_undefined_export_table() {
+        let document = r#"(module
+  (export "t" (table $missing))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined table"))
+            .collect();
+        assert_eq!(undefined_diags.len(), 1);
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_undefined_export_memory() {
+        let document = r#"(module
+  (export "m" (memory $missing))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined memory"))
+            .collect();
+        assert_eq!(undefined_diags.len(), 1);
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_undefined_export_tag() {
+        let document = r#"(module
+  (export "e" (tag $missing))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined tag"))
+            .collect();
+        assert_eq!(undefined_diags.len(), 1);
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_valid_exports() {
+        let document = r#"(module
+  (func $f (nop))
+  (global $g i32 (i32.const 0))
+  (table $t 1 funcref)
+  (memory $m 1)
+  (tag $e (param i32))
+  (export "f" (func $f))
+  (export "g" (global $g))
+  (export "t" (table $t))
+  (export "m" (memory $m))
+  (export "e" (tag $e))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined"))
+            .collect();
+        assert_eq!(
+            undefined_diags.len(),
+            0,
+            "Valid exports should not produce diagnostics, got: {:?}",
+            undefined_diags
+        );
+    }
+
+    #[test]
+    fn test_undefined_elem_func_refs() {
+        let document = r#"(module
+  (table 1 funcref)
+  (func $defined (nop))
+  (elem (i32.const 0) $defined $missing)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined function"))
+            .collect();
+        assert_eq!(
+            undefined_diags.len(),
+            1,
+            "Undefined elem func ref should produce one diagnostic, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_undefined_elem_table_use() {
+        let document = r#"(module
+  (table $t 1 funcref)
+  (func $f (nop))
+  (elem (table $missing) (i32.const 0) func $f)
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined table"))
+            .collect();
+        assert_eq!(
+            undefined_diags.len(),
+            1,
+            "Undefined table_use should produce one diagnostic, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_undefined_data_memory_use() {
+        let document = r#"(module
+  (memory $m 1)
+  (data (memory $missing) (i32.const 0) "hello")
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined memory"))
+            .collect();
+        assert_eq!(
+            undefined_diags.len(),
+            1,
+            "Undefined memory_use should produce one diagnostic, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        assert!(undefined_diags[0].message.contains("$missing"));
+    }
+
+    #[test]
+    fn test_valid_elem_and_data() {
+        let document = r#"(module
+  (table $t 2 funcref)
+  (memory $m 1)
+  (func $f (nop))
+  (func $g (nop))
+  (elem (table $t) (i32.const 0) func $f $g)
+  (data (memory $m) (i32.const 0) "hello")
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let undefined_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Undefined"))
+            .collect();
+        assert_eq!(
+            undefined_diags.len(),
+            0,
+            "Valid elem and data should not produce diagnostics, got: {:?}",
+            undefined_diags
         );
     }
 }
