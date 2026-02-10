@@ -1,0 +1,12 @@
+{
+  "description": "Rename operation across definition and call site",
+  "document": "(module\n  (func $add (param i32) (param i32) (result i32)\n    (i32.add (local.get 0) (local.get 1)))\n  (func $main (result i32)\n    (call $add (i32.const 1) (i32.const 2))))",
+  "tests": [
+    {
+      "feature": "rename",
+      "position": [1, 9],
+      "new_name": "$sum",
+      "expect": { "min_edit_count": 2, "new_text": "$sum" }
+    }
+  ]
+}

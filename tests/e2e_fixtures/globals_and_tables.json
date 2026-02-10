@@ -1,0 +1,24 @@
+{
+  "description": "Module with globals, tables, and memory — tests document symbols and hover",
+  "document": "(module\n  (global $g (mut i32) (i32.const 42))\n  (table $t 1 funcref)\n  (memory $m 1)\n  (func $get_global (result i32)\n    (global.get $g)))",
+  "tests": [
+    {
+      "feature": "diagnostics",
+      "expect": { "error_count": 0 }
+    },
+    {
+      "feature": "document_symbols",
+      "expect": { "min_count": 2 }
+    },
+    {
+      "feature": "hover",
+      "position": [5, 5],
+      "expect": { "contains": "global.get", "non_null": true }
+    },
+    {
+      "feature": "definition",
+      "position": [5, 17],
+      "expect": { "start_line": 1 }
+    }
+  ]
+}

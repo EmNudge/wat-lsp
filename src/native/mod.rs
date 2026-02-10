@@ -4,5 +4,7 @@
 //! including type conversions between core types and tower-lsp types.
 
 pub mod adapters;
+pub mod server;
 
 pub use adapters::*;
+pub use server::Backend;
