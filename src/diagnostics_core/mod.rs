@@ -11,15 +11,14 @@ pub mod module_checks;
 pub mod references;
 mod semantic;
 pub mod simd_checks;
-mod stack;
 pub mod subtype;
 mod termination;
 pub mod tree_sitter;
+pub mod type_check;
 
 pub use module_checks::{check_block_label_mismatch, validate_module_structure};
 pub use references::*;
 pub use semantic::*;
-pub use stack::*;
 pub use subtype::validate_subtype_hierarchy;
 pub use termination::*;
 pub use tree_sitter::provide_tree_sitter_diagnostics;

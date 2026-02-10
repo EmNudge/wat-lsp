@@ -3,7 +3,7 @@
   "diagnostics": [
     {
       "line": 4,
-      "message_contains": "Type mismatch",
+      "message_contains": "type mismatch",
       "message_contains_all": ["i32", "i64"],
       "severity": 1
     }
