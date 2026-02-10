@@ -4,9 +4,6 @@
 //! documentation that is generated at build time from `packages/docs/instructions.md`
 //! and `packages/docs/annotations.md`.
 
-#[cfg(feature = "native")]
-use std::collections::HashMap;
-
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/instruction_docs.rs"));
 }
@@ -15,22 +12,31 @@ mod generated_annotations {
     include!(concat!(env!("OUT_DIR"), "/annotation_docs.rs"));
 }
 
+/// Binary-search lookup in a sorted `(name, doc)` array.
+fn lookup(table: &'static [(&str, &str)], name: &str) -> Option<&'static str> {
+    table
+        .binary_search_by_key(&name, |(k, _)| k)
+        .ok()
+        .map(|i| table[i].1)
+}
+
 /// Get documentation for a specific instruction
 pub fn get_instruction_doc(name: &str) -> Option<&'static str> {
-    generated::INSTRUCTION_DOCS.get(name).copied()
+    lookup(&generated::INSTRUCTION_DOCS, name)
 }
 
 /// Get all instruction names (native-only: used by wat-docs binary)
 #[cfg(feature = "native")]
 pub fn instruction_names() -> Vec<&'static str> {
-    let mut names: Vec<_> = generated::INSTRUCTION_DOCS.keys().copied().collect();
-    names.sort();
-    names
+    generated::INSTRUCTION_DOCS
+        .iter()
+        .map(|(k, _)| *k)
+        .collect()
 }
 
-/// Get all instruction documentation as a reference to the underlying HashMap
+/// Get all instruction documentation (native-only)
 #[cfg(feature = "native")]
-pub fn all_instructions() -> &'static HashMap<&'static str, &'static str> {
+pub fn all_instructions() -> &'static [(&'static str, &'static str)] {
     &generated::INSTRUCTION_DOCS
 }
 
@@ -38,29 +44,25 @@ pub fn all_instructions() -> &'static HashMap<&'static str, &'static str> {
 #[cfg(feature = "native")]
 pub fn search_instructions(pattern: &str) -> Vec<(&'static str, &'static str)> {
     let pattern_lower = pattern.to_lowercase();
-    let mut results: Vec<_> = generated::INSTRUCTION_DOCS
+    generated::INSTRUCTION_DOCS
         .iter()
         .filter(|(name, doc)| {
             name.to_lowercase().contains(&pattern_lower)
                 || doc.to_lowercase().contains(&pattern_lower)
         })
-        .map(|(k, v)| (*k, *v))
-        .collect();
-    results.sort_by(|a, b| a.0.cmp(b.0));
-    results
+        .copied()
+        .collect()
 }
 
 /// Search for instructions where the name matches a pattern
 #[cfg(feature = "native")]
 pub fn search_instruction_names(pattern: &str) -> Vec<&'static str> {
     let pattern_lower = pattern.to_lowercase();
-    let mut results: Vec<_> = generated::INSTRUCTION_DOCS
-        .keys()
-        .filter(|name| name.to_lowercase().contains(&pattern_lower))
-        .copied()
-        .collect();
-    results.sort();
-    results
+    generated::INSTRUCTION_DOCS
+        .iter()
+        .filter(|(name, _)| name.to_lowercase().contains(&pattern_lower))
+        .map(|(k, _)| *k)
+        .collect()
 }
 
 // ============================================================================
@@ -69,23 +71,21 @@ pub fn search_instruction_names(pattern: &str) -> Vec<&'static str> {
 
 /// Get documentation for a specific annotation (without @ prefix)
 pub fn get_annotation_doc(name: &str) -> Option<&'static str> {
-    generated_annotations::ANNOTATION_DOCS.get(name).copied()
+    lookup(&generated_annotations::ANNOTATION_DOCS, name)
 }
 
 /// Get all annotation names (native-only: used by wat-docs binary)
 #[cfg(feature = "native")]
 pub fn annotation_names() -> Vec<&'static str> {
-    let mut names: Vec<_> = generated_annotations::ANNOTATION_DOCS
-        .keys()
-        .copied()
-        .collect();
-    names.sort();
-    names
+    generated_annotations::ANNOTATION_DOCS
+        .iter()
+        .map(|(k, _)| *k)
+        .collect()
 }
 
-/// Get all annotation documentation as a reference to the underlying HashMap
+/// Get all annotation documentation (native-only)
 #[cfg(feature = "native")]
-pub fn all_annotations() -> &'static HashMap<&'static str, &'static str> {
+pub fn all_annotations() -> &'static [(&'static str, &'static str)] {
     &generated_annotations::ANNOTATION_DOCS
 }
 
