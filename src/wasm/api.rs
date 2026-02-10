@@ -9,12 +9,12 @@ use crate::core::types::{
     CompletionItem, CompletionItemKind, Diagnostic as CoreDiagnostic, HoverResult,
     InsertTextFormat, Position, Range,
 };
-use crate::diagnostics_core::track_stack_in_instr_list as core_track_stack_in_instr_list;
+use crate::diagnostics_core::tree_walk::{walk_tree_for_diagnostics, DiagnosticConfig};
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
 use crate::signature::call_info::{find_function_call, find_function_call_ast, CallInfo, CallType};
-use crate::symbols::{SymbolTable, ValueType};
+use crate::symbols::SymbolTable;
 use crate::ts_facade::{self, Language, Parser, Query, Tree};
 use crate::utils::{
     format_function_signature, get_line_at_position, get_word_at_position, node_at_position,
@@ -135,36 +135,37 @@ impl WatLSP {
     pub fn provide_diagnostics(&self) -> JsValue {
         let js_array = js_sys::Array::new();
 
-        // Add tree-sitter based syntax diagnostics and semantic diagnostics
         if let (Some(tree), Some(symbols)) = (&self.tree, &self.symbols) {
-            // Add syntax errors from tree-sitter ERROR nodes (shared implementation)
+            // Syntax errors from tree-sitter ERROR nodes
             let syntax_diagnostics =
                 crate::diagnostics_core::provide_tree_sitter_diagnostics(tree, &self.document);
             for diag in syntax_diagnostics {
                 js_array.push(&core_diagnostic_to_js(&diag));
             }
 
-            // Add semantic diagnostics (now returns CoreDiagnostic directly)
-            let semantic_diagnostics =
-                provide_wasm_semantic_diagnostics(tree, &self.document, symbols);
-            for diag in semantic_diagnostics {
-                js_array.push(&core_diagnostic_to_js(&diag));
-            }
-
-            // Add subtype hierarchy diagnostics
-            let subtype_diagnostics =
-                crate::diagnostics_core::subtype::validate_subtype_hierarchy(symbols);
-            for diag in subtype_diagnostics {
-                js_array.push(&core_diagnostic_to_js(&diag));
-            }
-
-            // Add module-level structural validations
-            let module_diags = crate::diagnostics_core::module_checks::validate_module_structure(
-                &tree.root_node(),
+            // Semantic diagnostics via shared tree walk
+            let config = DiagnosticConfig::from_symbols(symbols);
+            let mut diagnostics = Vec::new();
+            walk_tree_for_diagnostics(
+                tree.root_node(),
                 &self.document,
                 symbols,
+                &config,
+                &mut diagnostics,
             );
-            for diag in module_diags {
+
+            // Subtype hierarchy + module-level structural validations
+            diagnostics
+                .extend(crate::diagnostics_core::subtype::validate_subtype_hierarchy(symbols));
+            diagnostics.extend(
+                crate::diagnostics_core::module_checks::validate_module_structure(
+                    &tree.root_node(),
+                    &self.document,
+                    symbols,
+                ),
+            );
+
+            for diag in diagnostics {
                 js_array.push(&core_diagnostic_to_js(&diag));
             }
         }
@@ -1042,236 +1043,6 @@ fn reference_to_js(range: &Range) -> JsValue {
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(&obj, &"range".into(), &range_to_js(range)).ok();
     obj.into()
-}
-
-use crate::ts_facade::Node;
-use crate::utils::{determine_instruction_context_at_node, InstructionContext};
-
-/// Pre-computed configuration for diagnostic checks
-struct DiagnosticConfig {
-    check_atomics: bool,
-    check_memory64: bool,
-}
-
-/// Provide semantic diagnostics for undefined references (WASM version).
-/// All diagnostic logic delegates to shared `diagnostics_core` modules.
-fn provide_wasm_semantic_diagnostics(
-    tree: &crate::ts_facade::Tree,
-    source: &str,
-    symbols: &SymbolTable,
-) -> Vec<CoreDiagnostic> {
-    let config = DiagnosticConfig {
-        check_atomics: !symbols.memories.is_empty() && !symbols.memories.iter().any(|m| m.shared),
-        check_memory64: symbols.memories.iter().any(|m| m.is_memory64),
-    };
-    let mut diagnostics = Vec::new();
-    walk_tree_for_diagnostics(tree.root_node(), source, symbols, &config, &mut diagnostics);
-    diagnostics
-}
-
-fn walk_tree_for_diagnostics(
-    node: Node,
-    source: &str,
-    symbols: &SymbolTable,
-    config: &DiagnosticConfig,
-    diagnostics: &mut Vec<CoreDiagnostic>,
-) {
-    let kind = node.kind();
-
-    // Check block label mismatches
-    if matches!(&*kind, "block_block" | "block_loop" | "block_if") {
-        diagnostics.extend(
-            crate::diagnostics_core::module_checks::check_block_label_mismatch(&node, source),
-        );
-    }
-
-    // Check for function body instruction lists — shared stack tracking
-    if &*kind == "module_field_func" {
-        let func_line = node.start_position().row as u32;
-        let expected_results: &[ValueType] = symbols
-            .find_function_containing_line(func_line)
-            .map(|f| f.results.as_slice())
-            .unwrap_or(&[]);
-
-        let mut cursor = node.walk();
-        let mut found_instr_list = false;
-        for child in node.children(&mut cursor) {
-            if child.kind() == "instr_list" {
-                diagnostics.extend(core_track_stack_in_instr_list(
-                    &child,
-                    source,
-                    symbols,
-                    Some(expected_results),
-                ));
-                found_instr_list = true;
-                break;
-            }
-        }
-
-        if !found_instr_list && !expected_results.is_empty() {
-            diagnostics.push(CoreDiagnostic::error(
-                crate::utils::node_to_range(&node),
-                format!(
-                    "Type mismatch: function body leaves 0 values on stack but signature requires {}",
-                    expected_results.len()
-                ),
-            ));
-        }
-    }
-
-    // Special handling for start directive — shared core
-    if &*kind == "module_field_start" {
-        diagnostics.extend(crate::diagnostics_core::references::check_start_references(
-            &node, source, symbols,
-        ));
-        return;
-    }
-
-    // Check module-level references (exports, elem/data segment refs) — shared core
-    {
-        let module_ref_diags = crate::diagnostics_core::references::check_module_level_references(
-            &node, source, symbols,
-        );
-        if !module_ref_diags.is_empty() {
-            diagnostics.extend(module_ref_diags);
-            if &*kind != "module_field_elem" {
-                return;
-            }
-        }
-    }
-
-    // Special handling for catch clauses — shared core
-    if &*kind == "catch_clause" {
-        diagnostics.extend(
-            crate::diagnostics_core::references::check_catch_clause_references(
-                &node, source, symbols,
-            ),
-        );
-        return;
-    }
-
-    // Special handling for legacy try catch clause — shared core
-    if &*kind == "try_catch_clause" {
-        diagnostics.extend(
-            crate::diagnostics_core::references::check_try_catch_clause_references(
-                &node, source, symbols,
-            ),
-        );
-    }
-
-    // Check folded expression operand count (expr1_plain nodes) — shared core
-    if &*kind == "expr1_plain" {
-        diagnostics.extend(
-            crate::diagnostics_core::folded_checks::check_folded_operand_count(
-                &node, source, symbols,
-            ),
-        );
-
-        // Also check atomic and memory64 for folded expressions
-        let text = &source[node.byte_range()];
-        let first_token = text.split_whitespace().next().unwrap_or("");
-
-        if config.check_atomics {
-            diagnostics.extend(
-                crate::diagnostics_core::memory_checks::check_atomic_operation(&node, first_token),
-            );
-        }
-        if config.check_memory64 {
-            diagnostics.extend(
-                crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
-                    &node,
-                    source,
-                    symbols,
-                    first_token,
-                ),
-            );
-        }
-    }
-
-    // Check SIMD lane indices (must be before context check since v128.load*_lane
-    // matches Memory context and would early-return before we check lane bounds)
-    // Also check alignment constraints on load/store instructions
-    if &*kind == "instr_plain" {
-        diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
-            &node, source,
-        ));
-        diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
-            &node, source,
-        ));
-    } else if &*kind == "expr1_plain" {
-        // In folded form, instr_plain is a child that won't be visited separately
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "instr_plain" {
-                diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
-                    &child, source,
-                ));
-                diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
-                    &child, source,
-                ));
-                break;
-            }
-        }
-    }
-
-    // Check for undefined references based on instruction context — shared core
-    let context = determine_instruction_context_at_node(&node, source);
-    if context != InstructionContext::General {
-        diagnostics.extend(crate::diagnostics_core::references::check_references(
-            &node, source, symbols, &context,
-        ));
-
-        // For instr_plain, also check atomic, memory64, and arity (linear format)
-        if &*kind == "instr_plain" {
-            let text = &source[node.byte_range()];
-            let first_token = text.split_whitespace().next().unwrap_or("");
-
-            if config.check_atomics {
-                diagnostics.extend(
-                    crate::diagnostics_core::memory_checks::check_atomic_operation(
-                        &node,
-                        first_token,
-                    ),
-                );
-            }
-
-            let parent_is_expr1 = node
-                .parent()
-                .map(|p| p.kind() == "expr1_plain")
-                .unwrap_or(false);
-            if !parent_is_expr1 {
-                if config.check_memory64 {
-                    diagnostics.extend(
-                        crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
-                            &node,
-                            source,
-                            symbols,
-                            first_token,
-                        ),
-                    );
-                }
-                diagnostics.extend(
-                    crate::diagnostics_core::arity::check_instruction_parameter_count(
-                        &node, source,
-                    ),
-                );
-            }
-        }
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "expr" {
-                walk_tree_for_diagnostics(child, source, symbols, config, diagnostics);
-            }
-        }
-        return;
-    }
-
-    // Recursively check children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_tree_for_diagnostics(child, source, symbols, config, diagnostics);
-    }
 }
 
 // ============================================================================

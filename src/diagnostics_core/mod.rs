@@ -14,6 +14,7 @@ pub mod simd_checks;
 pub mod subtype;
 mod termination;
 pub mod tree_sitter;
+pub mod tree_walk;
 pub mod type_check;
 
 pub use module_checks::{check_block_label_mismatch, validate_module_structure};

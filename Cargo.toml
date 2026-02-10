@@ -50,6 +50,7 @@ native = [
     "dep:wast",
     "dep:regex",
     "dep:serde_json",
+    "dep:serde",
 ]
 wasm = [
     "dep:wasm-bindgen",
@@ -62,8 +63,8 @@ wasm = [
 ]
 
 [dependencies]
-# Core dependencies (always included)
-serde = { version = "1.0", features = ["derive"] }
+# Native-only serialization (not needed by WASM — uses js_sys for JS conversion)
+serde = { version = "1.0", features = ["derive"], optional = true }
 
 # Native-only core dependencies
 serde_json = { version = "1.0", optional = true }
