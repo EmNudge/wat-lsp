@@ -30,6 +30,7 @@
     "build:assets": "node scripts/copy-assets.js",
     "build": "pnpm run build:wasm && pnpm run build:wrapper && pnpm run build:assets",
     "clean": "rm -rf dist",
+    "test": "vitest run",
     "prepublishOnly": "pnpm run clean && pnpm run build"
   },
   "repository": {
@@ -53,6 +54,7 @@
   },
   "homepage": "https://github.com/EmNudge/wat-lsp#readme",
   "devDependencies": {
+    "vitest": "^3.0.0",
     "web-tree-sitter": "^0.25.3"
   },
   "peerDependencies": {

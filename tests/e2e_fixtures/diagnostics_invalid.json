@@ -1,0 +1,10 @@
+{
+  "description": "Invalid documents that should produce diagnostics",
+  "document": "(module\n  (func\n    (i32.add)))",
+  "tests": [
+    {
+      "feature": "diagnostics",
+      "expect": { "min_error_count": 1 }
+    }
+  ]
+}

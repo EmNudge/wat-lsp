@@ -91,6 +91,10 @@ cc = "1.0"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tower = "0.4"
+serde_json = "1.0"
+futures = "0.3"
 
 [[bench]]
 name = "lsp_features"

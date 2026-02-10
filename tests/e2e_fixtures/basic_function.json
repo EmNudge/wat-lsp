@@ -1,0 +1,40 @@
+{
+  "description": "Basic function with hover, definition, references, and diagnostics",
+  "document": "(module\n  (func $add (param $a i32) (param $b i32) (result i32)\n    (i32.add (local.get $a) (local.get $b)))\n  (func $main (result i32)\n    (call $add (i32.const 1) (i32.const 2))))",
+  "tests": [
+    {
+      "feature": "diagnostics",
+      "expect": { "error_count": 0 }
+    },
+    {
+      "feature": "hover",
+      "position": [2, 5],
+      "expect": { "contains": "i32.add", "non_null": true }
+    },
+    {
+      "feature": "definition",
+      "position": [4, 11],
+      "expect": { "start_line": 1 }
+    },
+    {
+      "feature": "references",
+      "position": [1, 9],
+      "include_declaration": true,
+      "expect": { "min_count": 2 }
+    },
+    {
+      "feature": "document_symbols",
+      "expect": { "min_count": 2, "contains_name": "$add" }
+    },
+    {
+      "feature": "completion",
+      "document_override": "(module\n  (func\n    (i32.",
+      "position": [2, 9],
+      "expect": { "non_empty": true, "contains_label": "add" }
+    },
+    {
+      "feature": "folding_ranges",
+      "expect": { "non_empty": true }
+    }
+  ]
+}

@@ -37,7 +37,7 @@ jobs:
               - 'packages/docs/annotations.md'
               - 'packages/playground/examples/**'
               - 'grammars/tree-sitter-wat/**'
-              - 'tests/diagnostic_corpus/**'
+              - 'tests/**'
             packages:
               - 'packages/**'
               - 'src/**'
@@ -477,6 +477,59 @@ jobs:
             exit 1
           fi
           echo "All examples validated correctly (WASM)"
+
+  test-wasm-e2e:
+    name: Test WASM E2E
+    needs: [changes, build-npm-package]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      (needs.changes.outputs.rust == 'true' || needs.changes.outputs.packages == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - name: Clean package directory
+        run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
+
+      - name: Restore NPM package from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
+
+      - name: Download NPM package artifact
+        if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
+
+      - name: Verify package structure
+        run: |
+          if [ ! -d "packages/wat-lsp/dist/wasm" ]; then
+            echo "ERROR: NPM package not available!"
+            exit 1
+          fi
+          ls -la packages/wat-lsp/dist/wasm/
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run WASM E2E tests
+        run: pnpm --filter @emnudge/wat-lsp test
 
   playground:
     name: Playground
