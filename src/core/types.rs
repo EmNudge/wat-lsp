@@ -3,13 +3,15 @@
 //! These types have no dependencies on tower-lsp or wasm-bindgen,
 //! allowing them to be used in both native and WASM builds.
 
+#[cfg(feature = "native")]
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "native")]
 use tower_lsp::lsp_types as lsp;
 
 /// Completion item kind (matches LSP CompletionItemKind values)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum CompletionItemKind {
     Text = 1,
@@ -40,7 +42,8 @@ pub enum CompletionItemKind {
 }
 
 /// Insert text format for completion items
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum InsertTextFormat {
     PlainText = 1,
@@ -48,7 +51,8 @@ pub enum InsertTextFormat {
 }
 
 /// A completion item for code suggestions
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 pub struct CompletionItem {
     /// The label shown in the completion list
     pub label: String,
@@ -99,7 +103,8 @@ impl CompletionItem {
 }
 
 /// A position in a text document (0-indexed line and character)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 pub struct Position {
     pub line: u32,
     pub character: u32,
@@ -112,7 +117,8 @@ impl Position {
 }
 
 /// A range in a text document
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 pub struct Range {
     pub start: Position,
     pub end: Position,
@@ -133,7 +139,8 @@ impl Range {
 }
 
 /// Hover result containing markdown content
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 pub struct HoverResult {
     /// Markdown-formatted content to display
     pub contents: String,
@@ -164,7 +171,8 @@ pub type DefinitionResult = Option<Range>;
 pub type ReferencesResult = Vec<Range>;
 
 /// Diagnostic severity (matches LSP DiagnosticSeverity values)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum DiagnosticSeverity {
     Error = 1,
@@ -174,7 +182,8 @@ pub enum DiagnosticSeverity {
 }
 
 /// A diagnostic message (error, warning, etc.)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 pub struct Diagnostic {
     /// The range where the diagnostic applies
     pub range: Range,
