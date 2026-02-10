@@ -6,7 +6,7 @@ const PREC = {
 
 const pattern_dec_nat = /[0-9]+(_?[0-9]+)*/;
 const pattern_hex_nat = /[0-9A-Fa-f]+(_?[0-9A-Fa-f]+)*/;
-const pattern_identifier = /[0-9A-Za-z!#$%&'*+-./:<=>?@\\^_'|~]+/;
+const pattern_identifier = /[0-9A-Za-z!#$%&'*+\-./:<=>?@\\^_`|~]+/;
 const pattern_sign = /[+-]/;
 
 const imm = rule => token.immediate(rule);
@@ -28,7 +28,7 @@ module.exports = grammar({
     align_offset_value: $ => imm(/[0-9]+(_?[0-9]+)*|0x[0-9A-Fa-f]+(_?[0-9A-Fa-f]+)*/),
 
     // proposal: annotations
-    annotation: $ => seq("(@", $.identifier_pattern, repeat($.annotation_part), ")"),
+    annotation: $ => seq("(@", choice($.identifier_pattern, $.string), repeat($.annotation_part), ")"),
 
     // proposal: annotations
     annotation_parens: $ => seq("(", repeat($.annotation_part), ")"),
@@ -222,7 +222,10 @@ module.exports = grammar({
 
     hex_nat: $ => token(seq("0x", imm(pattern_hex_nat))),
 
-    identifier: $ => token(seq("$", imm(pattern_identifier))),
+    identifier: $ => token(choice(
+      seq("$", imm(pattern_identifier)),
+      seq("$", imm('"'), imm(/([^"\\]|\\.)*"/)),
+    )),
 
     identifier_pattern: $ => imm(pattern_identifier),
 
@@ -302,10 +305,10 @@ module.exports = grammar({
 
     _instruction_simd: $ =>
       choice(
-        seq($.op_simd_offset_opt_align_opt, optional($.offset_value), optional($.align_value)),
+        seq($.op_simd_offset_opt_align_opt, optional($.index), optional($.offset_value), optional($.align_value)),
         $.op_simd_const,
         $.op_simd_lane,
-        seq($.op_simd_lane_memarg, optional($.offset_value), optional($.align_value), $.int),
+        seq($.op_simd_lane_memarg, optional($.index), optional($.offset_value), optional($.align_value), $.int),
       ),
 
     _instruction_relaxed_simd: $ =>
@@ -371,6 +374,8 @@ module.exports = grammar({
         "ref.i31",
         "i31.get_s",
         "i31.get_u",
+        "any.convert_extern",
+        "extern.convert_any",
         seq("br_on_cast", $.index, $._heap_type_or_ref, $._heap_type_or_ref),
         seq("br_on_cast_fail", $.index, $._heap_type_or_ref, $._heap_type_or_ref),
         // typed function references
@@ -480,6 +485,7 @@ module.exports = grammar({
                       "[gl][et]_[su]",
                       "mul",
                       "n(arrow_i16x8_[su]|e)",
+                      "popcnt",
                       "s(hl|ub|wizzle)",
                     ].join("|"),
                   ),
@@ -493,9 +499,12 @@ module.exports = grammar({
                       "((add|sub)_sat|avgr|m(ax|in)|shr)_[su]",
                       "add",
                       "eq",
+                      "ext(end|mul)_(high|low)_i8x16_[su]",
+                      "extadd_pairwise_i8x16_[su]",
                       "[gl][et]_[su]",
                       "mul",
                       "n(arrow_i32x4_[su]|e)",
+                      "q15mulr_sat_s",
                       "s(hl|ub)",
                       "widen_(high|low)_i8x16_[su]",
                     ].join("|"),
@@ -509,18 +518,21 @@ module.exports = grammar({
                     [
                       "((add|sub)_sat|avgr|m(ax|in)|shr)_[su]",
                       "add",
+                      "dot_i16x8_s",
                       "eq",
+                      "ext(end|mul)_(high|low)_i16x8_[su]",
+                      "extadd_pairwise_i16x8_[su]",
                       "[gl][et]_[su]",
                       "mul",
                       "ne",
                       "s(hl|ub)",
-                      "trunc_sat_f32x4_[su]",
+                      "trunc_sat_f(32x4_[su]|64x2_[su]_zero)",
                       "widen_(high|low)_i16x8_[su]",
                     ].join("|"),
                   ),
                 ),
               ),
-              seq(imm("64x2."), imm(new RegExp(["add", "mul", "s(h(l|r_[su])|ub)"].join("|")))),
+              seq(imm("64x2."), imm(new RegExp(["add", "eq", "ext(end|mul)_(high|low)_i32x4_[su]", "[gl][et]_s", "mul", "ne", "s(h(l|r_[su])|ub)"].join("|")))),
               seq(
                 imm("32."),
                 choice(
@@ -650,6 +662,8 @@ module.exports = grammar({
       token(
         choice(
           /f(32x4|64x2)\.(abs|ceil|floor|nearest|neg|splat|trunc)/,
+          "f32x4.demote_f64x2_zero",
+          /f64x2\.(convert_low_i32x4_[su]|promote_low_f32x4)/,
           seq(
             "i",
             imm(
@@ -657,7 +671,7 @@ module.exports = grammar({
                 /8x16\.(neg|splat|a(bs|ll_true|ny_true)|bitmask)/,
                 /16x8\.(neg|splat|a(bs|ll_true|ny_true)|bitmask|load8x8_[su])/,
                 /32x4\.(neg|splat|a(bs|ll_true|ny_true)|bitmask|load16x4_[su])/,
-                /64x2\.(neg|splat|load32x2_[su])/,
+                /64x2\.(neg|splat|a(bs|ll_true)|bitmask|load32x2_[su])/,
               ),
             ),
           ),
@@ -896,7 +910,12 @@ module.exports = grammar({
     ref_kind: $ => choice("extern", "func", "struct", "array", "i31", "any", "eq", "null", "none", "noextern", "nofunc", "exn", "noexn"),
 
     // Helper for instructions that take either a heap type or (ref ...) form
-    _heap_type_or_ref: $ => choice($.ref_kind, $.index, $.ref_type_ref),
+    // Includes abbreviated ref types (anyref, funcref, etc.) for instruction operands
+    _heap_type_or_ref: $ => choice(
+      $.ref_kind, $.index, $.ref_type_ref,
+      "anyref", "funcref", "externref", "i31ref", "structref", "arrayref",
+      "eqref", "nullref", "nullfuncref", "nullexternref", "exnref", "nullexnref",
+    ),
 
     // proposal: reference-types
     ref_type: $ => choice($.ref_type_externref, $.ref_type_funcref, $.ref_type_ref, "anyref", "eqref", "i31ref", "structref", "arrayref", "nullref", "nullfuncref", "nullexternref", "exnref", "nullexnref"),
