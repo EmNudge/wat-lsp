@@ -74,6 +74,26 @@ pub enum ReferenceTarget {
     },
 }
 
+impl ReferenceTarget {
+    /// Returns true if this symbol has a name (i.e. can be renamed).
+    /// Block labels are always considered named.
+    pub fn has_name(&self) -> bool {
+        match self {
+            ReferenceTarget::Function { name, .. }
+            | ReferenceTarget::Global { name, .. }
+            | ReferenceTarget::Local { name, .. }
+            | ReferenceTarget::Parameter { name, .. }
+            | ReferenceTarget::Table { name, .. }
+            | ReferenceTarget::Memory { name, .. }
+            | ReferenceTarget::Type { name, .. }
+            | ReferenceTarget::Tag { name, .. }
+            | ReferenceTarget::Data { name, .. }
+            | ReferenceTarget::Elem { name, .. } => name.is_some(),
+            ReferenceTarget::BlockLabel { .. } => true,
+        }
+    }
+}
+
 /// Block information for tracking nesting depth
 #[derive(Debug, Clone)]
 struct BlockInfo {

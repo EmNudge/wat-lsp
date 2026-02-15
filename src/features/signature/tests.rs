@@ -1,6 +1,7 @@
 use super::call_info::{extract_name_from_call, find_function_call, CallInfo};
 use super::*;
 use crate::features::test_utils::{create_signature_test_symbols, create_test_tree};
+use crate::utils::format_function_signature;
 
 // Alias for backwards compatibility with existing tests
 fn create_test_symbols() -> SymbolTable {

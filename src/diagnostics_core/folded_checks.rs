@@ -13,7 +13,7 @@ use crate::symbols::{SymbolTable, TypeKind};
 use crate::utils::node_to_range;
 
 use super::references::is_nested_in_expr;
-use super::semantic::get_arity_map;
+use crate::instruction_metadata::lookup_instruction_arity;
 
 #[cfg(feature = "native")]
 use tree_sitter::Node;
@@ -68,8 +68,7 @@ pub fn check_folded_operand_count(
         .count();
 
     // Resolve arity: try explicit map first, then SIMD pattern fallback
-    let arity_map = get_arity_map();
-    let resolved = if let Some(arity) = arity_map.get(instr_name.as_str()) {
+    let resolved = if let Some(arity) = lookup_instruction_arity(instr_name.as_str()) {
         Some((arity.operand_mode, true))
     } else {
         infer_simd_instruction_arity(&instr_name).map(|(c, _)| (OperandMode::Fixed(c), false))

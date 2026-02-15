@@ -13,12 +13,13 @@ use crate::diagnostics_core::tree_walk::{walk_tree_for_diagnostics, DiagnosticCo
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
-use crate::signature::call_info::{find_function_call, find_function_call_ast, CallInfo, CallType};
+use crate::signature::call_info::{find_function_call, find_function_call_ast, CallType};
+use crate::signature::signature_core::{
+    provide_call_ref_signature_core, provide_direct_call_signature_core,
+};
 use crate::symbols::SymbolTable;
 use crate::ts_facade::{self, Language, Parser, Query, Tree};
-use crate::utils::{
-    format_function_signature, get_line_at_position, get_word_at_position, node_at_position,
-};
+use crate::utils::{get_line_at_position, get_word_at_position, node_at_position};
 
 /// The highlights.scm query for syntax highlighting
 const HIGHLIGHTS_QUERY: &str =
@@ -317,28 +318,13 @@ impl WatLSP {
         }
 
         // Use the shared core to check if this is a valid, identifiable symbol
-        use crate::features::references_core::{identify_symbol_at_position, ReferenceTarget};
+        use crate::features::references_core::identify_symbol_at_position;
         let target = match identify_symbol_at_position(&self.document, symbols, tree, position) {
             Some(t) => t,
             None => return JsValue::NULL,
         };
 
-        // Only named symbols can be renamed
-        let is_named = match &target {
-            ReferenceTarget::Function { name, .. } => name.is_some(),
-            ReferenceTarget::Global { name, .. } => name.is_some(),
-            ReferenceTarget::Local { name, .. } => name.is_some(),
-            ReferenceTarget::Parameter { name, .. } => name.is_some(),
-            ReferenceTarget::BlockLabel { .. } => true,
-            ReferenceTarget::Table { name, .. } => name.is_some(),
-            ReferenceTarget::Memory { name, .. } => name.is_some(),
-            ReferenceTarget::Type { name, .. } => name.is_some(),
-            ReferenceTarget::Tag { name, .. } => name.is_some(),
-            ReferenceTarget::Data { name, .. } => name.is_some(),
-            ReferenceTarget::Elem { name, .. } => name.is_some(),
-        };
-
-        if !is_named {
+        if !target.has_name() {
             return JsValue::NULL;
         }
 
@@ -714,182 +700,63 @@ impl WatLSP {
             None => return JsValue::NULL,
         };
 
-        match call_info.call_type {
-            CallType::Direct => provide_direct_call_signature_js(symbols, &call_info),
+        let info = match call_info.call_type {
+            CallType::Direct => provide_direct_call_signature_core(symbols, &call_info),
             CallType::CallRef | CallType::ReturnCallRef => {
-                provide_call_ref_signature_js(symbols, &call_info)
+                provide_call_ref_signature_core(symbols, &call_info)
             }
-        }
-    }
-}
-
-// ============================================================================
-// Signature Help helpers (shared call_info module provides CallType, CallInfo,
-// find_function_call_ast, find_function_call, extract_name_from_call)
-// ============================================================================
-
-/// Provide signature help for direct function calls (call $func)
-fn provide_direct_call_signature_js(symbols: &SymbolTable, call_info: &CallInfo) -> JsValue {
-    // Look up the function in the symbol table
-    let func = if call_info.name.starts_with('$') {
-        symbols.get_function_by_name(&call_info.name)
-    } else if let Ok(index) = call_info.name.parse::<usize>() {
-        symbols.get_function_by_index(index)
-    } else {
-        None
-    };
-
-    let func = match func {
-        Some(f) => f,
-        None => return JsValue::NULL,
-    };
-
-    // Build signature information
-    let label = format_function_signature(func);
-
-    let parameters = js_sys::Array::new();
-    for param in &func.parameters {
-        let param_label = if let Some(ref name) = param.name {
-            format!("({} {})", name, param.param_type)
-        } else {
-            format!("(param {})", param.param_type)
         };
 
-        let param_obj = js_sys::Object::new();
-        js_sys::Reflect::set(&param_obj, &"label".into(), &param_label.into()).ok();
-        parameters.push(&param_obj);
+        match info {
+            Some(help) => signature_help_to_js(help),
+            None => JsValue::NULL,
+        }
     }
-
-    // Determine which parameter we're currently on based on comma count
-    let active_parameter = call_info.arg_text.matches(',').count() as u32;
-    let clamped_active = active_parameter.min(func.parameters.len() as u32);
-
-    // Build signature object
-    let sig_obj = js_sys::Object::new();
-    js_sys::Reflect::set(&sig_obj, &"label".into(), &label.into()).ok();
-    js_sys::Reflect::set(&sig_obj, &"parameters".into(), &parameters).ok();
-    js_sys::Reflect::set(&sig_obj, &"activeParameter".into(), &clamped_active.into()).ok();
-
-    // Add documentation if function has doc comment
-    if let Some(ref doc) = func.doc_comment {
-        js_sys::Reflect::set(&sig_obj, &"documentation".into(), &doc.clone().into()).ok();
-    }
-
-    let signatures = js_sys::Array::new();
-    signatures.push(&sig_obj);
-
-    // Build result object
-    let result = js_sys::Object::new();
-    js_sys::Reflect::set(&result, &"signatures".into(), &signatures).ok();
-    js_sys::Reflect::set(&result, &"activeSignature".into(), &0u32.into()).ok();
-    js_sys::Reflect::set(&result, &"activeParameter".into(), &clamped_active.into()).ok();
-
-    result.into()
 }
 
-/// Provide signature help for indirect calls via typed function references (call_ref $type)
-fn provide_call_ref_signature_js(symbols: &SymbolTable, call_info: &CallInfo) -> JsValue {
-    use crate::symbols::TypeKind;
+// ============================================================================
+// Signature Help JS conversion (core logic is in signature::signature_core)
+// ============================================================================
 
-    // Look up the type in the symbol table
-    let type_def = if call_info.name.starts_with('$') {
-        symbols.get_type_by_name(&call_info.name)
-    } else if let Ok(index) = call_info.name.parse::<usize>() {
-        symbols.get_type_by_index(index)
-    } else {
-        None
-    };
+fn signature_help_to_js(info: crate::signature::signature_core::SignatureHelpInfo) -> JsValue {
+    let sig = info.signature;
 
-    let type_def = match type_def {
-        Some(t) => t,
-        None => return JsValue::NULL,
-    };
-
-    // The type must be a function type
-    let (params, results) = match &type_def.kind {
-        TypeKind::Func { params, results } => (params, results),
-        _ => return JsValue::NULL, // Not a function type
-    };
-
-    // Build signature label
-    let call_kind = match call_info.call_type {
-        CallType::CallRef => "call_ref",
-        CallType::ReturnCallRef => "return_call_ref",
-        _ => "call_ref",
-    };
-    let type_index_str = type_def.index.to_string();
-    let type_name = type_def.name.as_deref().unwrap_or(&type_index_str);
-    let params_str = params
-        .iter()
-        .map(|p| p.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let results_str = results
-        .iter()
-        .map(|r| r.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let label = format!(
-        "({} {}) (param {}) (result {}) + funcref",
-        call_kind,
-        type_name,
-        if params_str.is_empty() {
-            "none"
-        } else {
-            &params_str
-        },
-        if results_str.is_empty() {
-            "none"
-        } else {
-            &results_str
-        }
-    );
-
-    // Build parameter information
     let parameters = js_sys::Array::new();
-    for (i, param_type) in params.iter().enumerate() {
+    for param in &sig.parameters {
         let param_obj = js_sys::Object::new();
-        let param_label = format!("(param{} {})", i, param_type);
-        js_sys::Reflect::set(&param_obj, &"label".into(), &param_label.into()).ok();
+        js_sys::Reflect::set(&param_obj, &"label".into(), &param.label.clone().into()).ok();
+        if let Some(ref doc) = param.documentation {
+            js_sys::Reflect::set(&param_obj, &"documentation".into(), &doc.clone().into()).ok();
+        }
         parameters.push(&param_obj);
     }
 
-    // The last argument is always the funcref
-    let funcref_param = js_sys::Object::new();
-    js_sys::Reflect::set(&funcref_param, &"label".into(), &"(funcref)".into()).ok();
+    let sig_obj = js_sys::Object::new();
+    js_sys::Reflect::set(&sig_obj, &"label".into(), &sig.label.into()).ok();
+    js_sys::Reflect::set(&sig_obj, &"parameters".into(), &parameters).ok();
     js_sys::Reflect::set(
-        &funcref_param,
-        &"documentation".into(),
-        &"Function reference to call".into(),
+        &sig_obj,
+        &"activeParameter".into(),
+        &sig.active_parameter.into(),
     )
     .ok();
-    parameters.push(&funcref_param);
 
-    // Determine which parameter we're currently on
-    let active_parameter = call_info.arg_text.matches(',').count() as u32;
-    let param_count = (params.len() + 1) as u32; // +1 for funcref
-    let clamped_active = active_parameter.min(param_count);
-
-    // Build signature object
-    let sig_obj = js_sys::Object::new();
-    js_sys::Reflect::set(&sig_obj, &"label".into(), &label.into()).ok();
-    js_sys::Reflect::set(&sig_obj, &"parameters".into(), &parameters).ok();
-    js_sys::Reflect::set(&sig_obj, &"activeParameter".into(), &clamped_active.into()).ok();
-
-    let doc = format!(
-        "Indirect call via typed function reference. The last argument must be a function reference of type {}.",
-        type_name
-    );
-    js_sys::Reflect::set(&sig_obj, &"documentation".into(), &doc.into()).ok();
+    if let Some(doc) = sig.documentation {
+        js_sys::Reflect::set(&sig_obj, &"documentation".into(), &doc.into()).ok();
+    }
 
     let signatures = js_sys::Array::new();
     signatures.push(&sig_obj);
 
-    // Build result object
     let result = js_sys::Object::new();
     js_sys::Reflect::set(&result, &"signatures".into(), &signatures).ok();
     js_sys::Reflect::set(&result, &"activeSignature".into(), &0u32.into()).ok();
-    js_sys::Reflect::set(&result, &"activeParameter".into(), &clamped_active.into()).ok();
+    js_sys::Reflect::set(
+        &result,
+        &"activeParameter".into(),
+        &sig.active_parameter.into(),
+    )
+    .ok();
 
     result.into()
 }
