@@ -2,8 +2,14 @@
 //!
 //! This module is shared between native and WASM builds to provide
 //! instruction arity information for stack underflow detection.
+//!
+//! Uses a sorted array with binary search for O(log n) lookups,
+//! matching the pattern used by `docs.rs`. Eliminates HashMap
+//! overhead and runtime allocation in WASM builds.
 
+#[cfg(test)]
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OperandMode {
@@ -12,7 +18,7 @@ pub enum OperandMode {
 }
 
 /// Represents the expected parameter count for a WAT instruction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct InstructionArity {
     pub min_params: usize,
     pub max_params: usize,
@@ -174,555 +180,526 @@ impl InstructionArity {
     }
 }
 
-/// Returns a map of instruction names to their expected parameter counts
+// ============================================================================
+// Sorted arity table — single OnceLock, binary-search lookup
+// ============================================================================
+
+static ARITY_TABLE: OnceLock<Vec<(&'static str, InstructionArity)>> = OnceLock::new();
+
+fn init_arity_table() -> Vec<(&'static str, InstructionArity)> {
+    let mut entries: Vec<(&'static str, InstructionArity)> = vec![
+        // Local variable instructions
+        ("local.get", InstructionArity::index("index")),
+        ("local.set", InstructionArity::index_set("index")),
+        ("local.tee", InstructionArity::index_tee("index")),
+        // Global variable instructions
+        ("global.get", InstructionArity::index("index")),
+        ("global.set", InstructionArity::index_set("index")),
+        // Control flow
+        ("br", InstructionArity::dynamic(1, 1, "label index", 0)),
+        ("br_if", InstructionArity::dynamic(1, 1, "label index", 0)),
+        (
+            "br_table",
+            InstructionArity::dynamic(1, usize::MAX, "label indices", 0),
+        ),
+        ("call", InstructionArity::dynamic(1, 1, "function index", 0)),
+        (
+            "return_call",
+            InstructionArity::dynamic(1, 1, "function index", 0),
+        ),
+        (
+            "call_indirect",
+            InstructionArity::dynamic(1, 1, "type index", 0),
+        ),
+        (
+            "return_call_indirect",
+            InstructionArity::dynamic(1, 1, "type index", 0),
+        ),
+        ("return", InstructionArity::dynamic(0, 0, "", 0)),
+        ("unreachable", InstructionArity::nullary()),
+        ("nop", InstructionArity::nullary()),
+        // Constants
+        ("i32.const", InstructionArity::constant("literal value")),
+        ("i64.const", InstructionArity::constant("literal value")),
+        ("f32.const", InstructionArity::constant("literal value")),
+        ("f64.const", InstructionArity::constant("literal value")),
+        // Stack manipulation
+        ("drop", InstructionArity::drop_op()),
+        ("select", InstructionArity::exact(0, "", 3, 1)),
+        // i32 arithmetic (binary)
+        ("i32.add", InstructionArity::binary_op()),
+        ("i32.sub", InstructionArity::binary_op()),
+        ("i32.mul", InstructionArity::binary_op()),
+        ("i32.div_s", InstructionArity::binary_op()),
+        ("i32.div_u", InstructionArity::binary_op()),
+        ("i32.rem_s", InstructionArity::binary_op()),
+        ("i32.rem_u", InstructionArity::binary_op()),
+        ("i32.and", InstructionArity::binary_op()),
+        ("i32.or", InstructionArity::binary_op()),
+        ("i32.xor", InstructionArity::binary_op()),
+        ("i32.shl", InstructionArity::binary_op()),
+        ("i32.shr_s", InstructionArity::binary_op()),
+        ("i32.shr_u", InstructionArity::binary_op()),
+        ("i32.rotl", InstructionArity::binary_op()),
+        ("i32.rotr", InstructionArity::binary_op()),
+        // i32 comparison (binary)
+        ("i32.eq", InstructionArity::binary_op()),
+        ("i32.ne", InstructionArity::binary_op()),
+        ("i32.lt_s", InstructionArity::binary_op()),
+        ("i32.lt_u", InstructionArity::binary_op()),
+        ("i32.le_s", InstructionArity::binary_op()),
+        ("i32.le_u", InstructionArity::binary_op()),
+        ("i32.gt_s", InstructionArity::binary_op()),
+        ("i32.gt_u", InstructionArity::binary_op()),
+        ("i32.ge_s", InstructionArity::binary_op()),
+        ("i32.ge_u", InstructionArity::binary_op()),
+        // i32 unary
+        ("i32.clz", InstructionArity::unary_op()),
+        ("i32.ctz", InstructionArity::unary_op()),
+        ("i32.popcnt", InstructionArity::unary_op()),
+        ("i32.eqz", InstructionArity::unary_op()),
+        // i64 arithmetic (binary)
+        ("i64.add", InstructionArity::binary_op()),
+        ("i64.sub", InstructionArity::binary_op()),
+        ("i64.mul", InstructionArity::binary_op()),
+        ("i64.div_s", InstructionArity::binary_op()),
+        ("i64.div_u", InstructionArity::binary_op()),
+        ("i64.rem_s", InstructionArity::binary_op()),
+        ("i64.rem_u", InstructionArity::binary_op()),
+        ("i64.and", InstructionArity::binary_op()),
+        ("i64.or", InstructionArity::binary_op()),
+        ("i64.xor", InstructionArity::binary_op()),
+        ("i64.shl", InstructionArity::binary_op()),
+        ("i64.shr_s", InstructionArity::binary_op()),
+        ("i64.shr_u", InstructionArity::binary_op()),
+        ("i64.rotl", InstructionArity::binary_op()),
+        ("i64.rotr", InstructionArity::binary_op()),
+        // i64 comparison (binary)
+        ("i64.eq", InstructionArity::binary_op()),
+        ("i64.ne", InstructionArity::binary_op()),
+        ("i64.lt_s", InstructionArity::binary_op()),
+        ("i64.lt_u", InstructionArity::binary_op()),
+        ("i64.le_s", InstructionArity::binary_op()),
+        ("i64.le_u", InstructionArity::binary_op()),
+        ("i64.gt_s", InstructionArity::binary_op()),
+        ("i64.gt_u", InstructionArity::binary_op()),
+        ("i64.ge_s", InstructionArity::binary_op()),
+        ("i64.ge_u", InstructionArity::binary_op()),
+        // i64 unary
+        ("i64.clz", InstructionArity::unary_op()),
+        ("i64.ctz", InstructionArity::unary_op()),
+        ("i64.popcnt", InstructionArity::unary_op()),
+        ("i64.eqz", InstructionArity::unary_op()),
+        // f32 arithmetic (binary)
+        ("f32.add", InstructionArity::binary_op()),
+        ("f32.sub", InstructionArity::binary_op()),
+        ("f32.mul", InstructionArity::binary_op()),
+        ("f32.div", InstructionArity::binary_op()),
+        ("f32.min", InstructionArity::binary_op()),
+        ("f32.max", InstructionArity::binary_op()),
+        ("f32.copysign", InstructionArity::binary_op()),
+        // f32 comparison (binary)
+        ("f32.eq", InstructionArity::binary_op()),
+        ("f32.ne", InstructionArity::binary_op()),
+        ("f32.lt", InstructionArity::binary_op()),
+        ("f32.le", InstructionArity::binary_op()),
+        ("f32.gt", InstructionArity::binary_op()),
+        ("f32.ge", InstructionArity::binary_op()),
+        // f32 unary
+        ("f32.abs", InstructionArity::unary_op()),
+        ("f32.neg", InstructionArity::unary_op()),
+        ("f32.ceil", InstructionArity::unary_op()),
+        ("f32.floor", InstructionArity::unary_op()),
+        ("f32.trunc", InstructionArity::unary_op()),
+        ("f32.nearest", InstructionArity::unary_op()),
+        ("f32.sqrt", InstructionArity::unary_op()),
+        // f64 arithmetic (binary)
+        ("f64.add", InstructionArity::binary_op()),
+        ("f64.sub", InstructionArity::binary_op()),
+        ("f64.mul", InstructionArity::binary_op()),
+        ("f64.div", InstructionArity::binary_op()),
+        ("f64.min", InstructionArity::binary_op()),
+        ("f64.max", InstructionArity::binary_op()),
+        ("f64.copysign", InstructionArity::binary_op()),
+        // f64 comparison (binary)
+        ("f64.eq", InstructionArity::binary_op()),
+        ("f64.ne", InstructionArity::binary_op()),
+        ("f64.lt", InstructionArity::binary_op()),
+        ("f64.le", InstructionArity::binary_op()),
+        ("f64.gt", InstructionArity::binary_op()),
+        ("f64.ge", InstructionArity::binary_op()),
+        // f64 unary
+        ("f64.abs", InstructionArity::unary_op()),
+        ("f64.neg", InstructionArity::unary_op()),
+        ("f64.ceil", InstructionArity::unary_op()),
+        ("f64.floor", InstructionArity::unary_op()),
+        ("f64.trunc", InstructionArity::unary_op()),
+        ("f64.nearest", InstructionArity::unary_op()),
+        ("f64.sqrt", InstructionArity::unary_op()),
+        // Conversion operations (unary)
+        ("i32.wrap_i64", InstructionArity::unary_op()),
+        ("i64.extend_i32_s", InstructionArity::unary_op()),
+        ("i64.extend_i32_u", InstructionArity::unary_op()),
+        ("i32.trunc_f32_s", InstructionArity::unary_op()),
+        ("i32.trunc_f32_u", InstructionArity::unary_op()),
+        ("i32.trunc_f64_s", InstructionArity::unary_op()),
+        ("i32.trunc_f64_u", InstructionArity::unary_op()),
+        ("i64.trunc_f32_s", InstructionArity::unary_op()),
+        ("i64.trunc_f32_u", InstructionArity::unary_op()),
+        ("i64.trunc_f64_s", InstructionArity::unary_op()),
+        ("i64.trunc_f64_u", InstructionArity::unary_op()),
+        ("f32.convert_i32_s", InstructionArity::unary_op()),
+        ("f32.convert_i32_u", InstructionArity::unary_op()),
+        ("f32.convert_i64_s", InstructionArity::unary_op()),
+        ("f32.convert_i64_u", InstructionArity::unary_op()),
+        ("f32.demote_f64", InstructionArity::unary_op()),
+        ("f64.convert_i32_s", InstructionArity::unary_op()),
+        ("f64.convert_i32_u", InstructionArity::unary_op()),
+        ("f64.convert_i64_s", InstructionArity::unary_op()),
+        ("f64.convert_i64_u", InstructionArity::unary_op()),
+        ("f64.promote_f32", InstructionArity::unary_op()),
+        ("i32.reinterpret_f32", InstructionArity::unary_op()),
+        ("i64.reinterpret_f64", InstructionArity::unary_op()),
+        ("f32.reinterpret_i32", InstructionArity::unary_op()),
+        ("f64.reinterpret_i64", InstructionArity::unary_op()),
+        // Memory load (optional memory index, consume address)
+        ("i32.load", InstructionArity::mem_load()),
+        ("i64.load", InstructionArity::mem_load()),
+        ("f32.load", InstructionArity::mem_load()),
+        ("f64.load", InstructionArity::mem_load()),
+        ("i32.load8_s", InstructionArity::mem_load()),
+        ("i32.load8_u", InstructionArity::mem_load()),
+        ("i32.load16_s", InstructionArity::mem_load()),
+        ("i32.load16_u", InstructionArity::mem_load()),
+        ("i64.load8_s", InstructionArity::mem_load()),
+        ("i64.load8_u", InstructionArity::mem_load()),
+        ("i64.load16_s", InstructionArity::mem_load()),
+        ("i64.load16_u", InstructionArity::mem_load()),
+        ("i64.load32_s", InstructionArity::mem_load()),
+        ("i64.load32_u", InstructionArity::mem_load()),
+        // Memory store (optional memory index, consume address + value)
+        ("i32.store", InstructionArity::mem_store()),
+        ("i64.store", InstructionArity::mem_store()),
+        ("f32.store", InstructionArity::mem_store()),
+        ("f64.store", InstructionArity::mem_store()),
+        ("i32.store8", InstructionArity::mem_store()),
+        ("i32.store16", InstructionArity::mem_store()),
+        ("i64.store8", InstructionArity::mem_store()),
+        ("i64.store16", InstructionArity::mem_store()),
+        ("i64.store32", InstructionArity::mem_store()),
+        // Memory management (optional memory index)
+        (
+            "memory.size",
+            InstructionArity {
+                min_params: 0,
+                max_params: 1,
+                param_description: "optional memory index",
+                operand_mode: OperandMode::Fixed(0),
+                produces: 1,
+            },
+        ),
+        (
+            "memory.grow",
+            InstructionArity {
+                min_params: 0,
+                max_params: 1,
+                param_description: "optional memory index",
+                operand_mode: OperandMode::Fixed(1),
+                produces: 1,
+            },
+        ),
+        // WasmGC — Structs
+        (
+            "struct.new",
+            InstructionArity::dynamic(1, 1, "type index", 1),
+        ),
+        (
+            "struct.new_default",
+            InstructionArity::exact(1, "type index", 0, 1),
+        ),
+        (
+            "struct.get",
+            InstructionArity::exact(2, "type and field index", 1, 1),
+        ),
+        (
+            "struct.get_s",
+            InstructionArity::exact(2, "type and field index", 1, 1),
+        ),
+        (
+            "struct.get_u",
+            InstructionArity::exact(2, "type and field index", 1, 1),
+        ),
+        (
+            "struct.set",
+            InstructionArity::exact(2, "type and field index", 2, 0),
+        ),
+        // WasmGC — Arrays
+        ("array.new", InstructionArity::exact(1, "type index", 2, 1)),
+        (
+            "array.new_default",
+            InstructionArity::exact(1, "type index", 1, 1),
+        ),
+        (
+            "array.new_fixed",
+            InstructionArity::dynamic(2, 2, "type index and length", 1),
+        ),
+        (
+            "array.new_data",
+            InstructionArity::exact(2, "type and data index", 2, 1),
+        ),
+        (
+            "array.new_elem",
+            InstructionArity::exact(2, "type and elem index", 2, 1),
+        ),
+        ("array.get", InstructionArity::exact(1, "type index", 2, 1)),
+        (
+            "array.get_s",
+            InstructionArity::exact(1, "type index", 2, 1),
+        ),
+        (
+            "array.get_u",
+            InstructionArity::exact(1, "type index", 2, 1),
+        ),
+        ("array.set", InstructionArity::exact(1, "type index", 3, 0)),
+        ("array.len", InstructionArity::unary_op()),
+        ("array.fill", InstructionArity::exact(1, "type index", 4, 0)),
+        (
+            "array.copy",
+            InstructionArity::exact(2, "dest and src type index", 5, 0),
+        ),
+        (
+            "array.init_data",
+            InstructionArity::exact(2, "type and data index", 4, 0),
+        ),
+        (
+            "array.init_elem",
+            InstructionArity::exact(2, "type and elem index", 4, 0),
+        ),
+        // WasmGC — I31
+        ("ref.i31", InstructionArity::unary_op()),
+        ("i31.get_s", InstructionArity::unary_op()),
+        ("i31.get_u", InstructionArity::unary_op()),
+        // WasmGC — Casts
+        ("ref.test", InstructionArity::exact(1, "type index", 1, 1)),
+        ("ref.cast", InstructionArity::exact(1, "type index", 1, 1)),
+        (
+            "ref.cast_null",
+            InstructionArity::exact(1, "type index", 1, 1),
+        ),
+        (
+            "br_on_cast",
+            InstructionArity::exact(2, "label and type index", 1, 0),
+        ),
+        (
+            "br_on_cast_fail",
+            InstructionArity::exact(2, "label and type index", 1, 0),
+        ),
+        // Exceptions
+        ("throw", InstructionArity::dynamic(1, 1, "tag index", 0)),
+        ("throw_ref", InstructionArity::exact(0, "", 1, 0)),
+        ("rethrow", InstructionArity::exact(1, "label index", 0, 0)),
+        // Typed function references
+        ("call_ref", InstructionArity::dynamic(1, 1, "type index", 0)),
+        (
+            "return_call_ref",
+            InstructionArity::dynamic(1, 1, "type index", 0),
+        ),
+        // Null-checking branches
+        (
+            "br_on_null",
+            InstructionArity::dynamic(1, 1, "label index", 1),
+        ),
+        (
+            "br_on_non_null",
+            InstructionArity::dynamic(1, 1, "label index", 0),
+        ),
+        // Reference equality
+        ("ref.eq", InstructionArity::binary_op()),
+        // Reference conversions
+        ("any.convert_extern", InstructionArity::unary_op()),
+        ("extern.convert_any", InstructionArity::unary_op()),
+        // Bulk memory (optional memory indices)
+        (
+            "memory.copy",
+            InstructionArity {
+                min_params: 0,
+                max_params: 2,
+                param_description: "optional dest and src memory indices",
+                operand_mode: OperandMode::Fixed(3),
+                produces: 0,
+            },
+        ),
+        (
+            "memory.fill",
+            InstructionArity {
+                min_params: 0,
+                max_params: 1,
+                param_description: "optional memory index",
+                operand_mode: OperandMode::Fixed(3),
+                produces: 0,
+            },
+        ),
+        (
+            "memory.init",
+            InstructionArity {
+                min_params: 1,
+                max_params: 2,
+                param_description: "data index and optional memory index",
+                operand_mode: OperandMode::Fixed(3),
+                produces: 0,
+            },
+        ),
+        ("data.drop", InstructionArity::exact(1, "data index", 0, 0)),
+        // Table operations
+        ("table.get", InstructionArity::exact(1, "table index", 1, 1)),
+        ("table.set", InstructionArity::exact(1, "table index", 2, 0)),
+        (
+            "table.size",
+            InstructionArity::exact(1, "table index", 0, 1),
+        ),
+        (
+            "table.grow",
+            InstructionArity::exact(1, "table index", 2, 1),
+        ),
+        (
+            "table.fill",
+            InstructionArity::exact(1, "table index", 3, 0),
+        ),
+        (
+            "table.copy",
+            InstructionArity::exact(2, "dest and src table index", 3, 0),
+        ),
+        (
+            "table.init",
+            InstructionArity::exact(2, "table and elem index", 3, 0),
+        ),
+        ("elem.drop", InstructionArity::exact(1, "elem index", 0, 0)),
+        // Reference operations
+        ("ref.null", InstructionArity::exact(1, "type", 0, 1)),
+        (
+            "ref.func",
+            InstructionArity::exact(1, "function index", 0, 1),
+        ),
+        ("ref.is_null", InstructionArity::unary_op()),
+        ("ref.as_non_null", InstructionArity::unary_op()),
+        // Saturating truncation
+        ("i32.trunc_sat_f32_s", InstructionArity::unary_op()),
+        ("i32.trunc_sat_f32_u", InstructionArity::unary_op()),
+        ("i32.trunc_sat_f64_s", InstructionArity::unary_op()),
+        ("i32.trunc_sat_f64_u", InstructionArity::unary_op()),
+        ("i64.trunc_sat_f32_s", InstructionArity::unary_op()),
+        ("i64.trunc_sat_f32_u", InstructionArity::unary_op()),
+        ("i64.trunc_sat_f64_s", InstructionArity::unary_op()),
+        ("i64.trunc_sat_f64_u", InstructionArity::unary_op()),
+        // Sign extension
+        ("i32.extend8_s", InstructionArity::unary_op()),
+        ("i32.extend16_s", InstructionArity::unary_op()),
+        ("i64.extend8_s", InstructionArity::unary_op()),
+        ("i64.extend16_s", InstructionArity::unary_op()),
+        ("i64.extend32_s", InstructionArity::unary_op()),
+        // Atomic operations
+        ("atomic.fence", InstructionArity::nullary()),
+        // Atomic loads
+        ("i32.atomic.load", InstructionArity::mem_load()),
+        ("i64.atomic.load", InstructionArity::mem_load()),
+        ("i32.atomic.load8_u", InstructionArity::mem_load()),
+        ("i32.atomic.load16_u", InstructionArity::mem_load()),
+        ("i64.atomic.load8_u", InstructionArity::mem_load()),
+        ("i64.atomic.load16_u", InstructionArity::mem_load()),
+        ("i64.atomic.load32_u", InstructionArity::mem_load()),
+        // Atomic stores
+        ("i32.atomic.store", InstructionArity::mem_store()),
+        ("i64.atomic.store", InstructionArity::mem_store()),
+        ("i32.atomic.store8", InstructionArity::mem_store()),
+        ("i32.atomic.store16", InstructionArity::mem_store()),
+        ("i64.atomic.store8", InstructionArity::mem_store()),
+        ("i64.atomic.store16", InstructionArity::mem_store()),
+        ("i64.atomic.store32", InstructionArity::mem_store()),
+        // Atomic RMW i32 full-width
+        ("i32.atomic.rmw.add", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw.sub", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw.and", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw.or", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw.xor", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw.xchg", InstructionArity::mem_rmw()),
+        // Atomic RMW i32 narrow
+        ("i32.atomic.rmw8.add_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw8.sub_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw8.and_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw8.or_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw8.xor_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw8.xchg_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw16.add_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw16.sub_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw16.and_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw16.or_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw16.xor_u", InstructionArity::mem_rmw()),
+        ("i32.atomic.rmw16.xchg_u", InstructionArity::mem_rmw()),
+        // Atomic RMW i64 full-width
+        ("i64.atomic.rmw.add", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw.sub", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw.and", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw.or", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw.xor", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw.xchg", InstructionArity::mem_rmw()),
+        // Atomic RMW i64 narrow
+        ("i64.atomic.rmw8.add_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw8.sub_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw8.and_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw8.or_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw8.xor_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw8.xchg_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw16.add_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw16.sub_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw16.and_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw16.or_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw16.xor_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw16.xchg_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw32.add_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw32.sub_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw32.and_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw32.or_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw32.xor_u", InstructionArity::mem_rmw()),
+        ("i64.atomic.rmw32.xchg_u", InstructionArity::mem_rmw()),
+        // Atomic cmpxchg
+        ("i32.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg()),
+        ("i64.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg()),
+        ("i32.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg()),
+        (
+            "i32.atomic.rmw16.cmpxchg_u",
+            InstructionArity::mem_cmpxchg(),
+        ),
+        ("i64.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg()),
+        (
+            "i64.atomic.rmw16.cmpxchg_u",
+            InstructionArity::mem_cmpxchg(),
+        ),
+        (
+            "i64.atomic.rmw32.cmpxchg_u",
+            InstructionArity::mem_cmpxchg(),
+        ),
+        // Wait/notify
+        ("memory.atomic.wait32", InstructionArity::exact(0, "", 3, 1)),
+        ("memory.atomic.wait64", InstructionArity::exact(0, "", 3, 1)),
+        ("memory.atomic.notify", InstructionArity::exact(0, "", 2, 1)),
+    ];
+    entries.sort_by_key(|(name, _)| *name);
+    entries
+}
+
+/// Look up instruction arity by name using binary search on the sorted table.
+pub fn lookup_instruction_arity(name: &str) -> Option<&'static InstructionArity> {
+    let table = ARITY_TABLE.get_or_init(init_arity_table);
+    table
+        .binary_search_by_key(&name, |(k, _)| k)
+        .ok()
+        .map(|i| &table[i].1)
+}
+
+/// Returns a map of instruction names to their expected parameter counts (test-only).
+#[cfg(test)]
 pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
-    let mut map = HashMap::new();
-
-    // Local variable instructions (index-based, produce values)
-    map.insert("local.get", InstructionArity::index("index"));
-    map.insert("local.set", InstructionArity::index_set("index")); // consumes 1 value
-    map.insert("local.tee", InstructionArity::index_tee("index")); // consumes 1 value, produces 1
-
-    // Global variable instructions
-    map.insert("global.get", InstructionArity::index("index"));
-    map.insert("global.set", InstructionArity::index_set("index")); // consumes 1 value
-
-    // Control flow instructions
-    // br and br_if can pass values to blocks with result types (multi-value)
-    map.insert("br", InstructionArity::dynamic(1, 1, "label index", 0)); // terminates
-    map.insert("br_if", InstructionArity::dynamic(1, 1, "label index", 0)); // consumes condition + optional values
-    map.insert(
-        "br_table",
-        InstructionArity::dynamic(1, usize::MAX, "label indices", 0),
-    ); // terminates - always branches
-    map.insert("call", InstructionArity::dynamic(1, 1, "function index", 0)); // produces depend on function signature (set to 0, handled dynamically)
-    map.insert(
-        "return_call",
-        InstructionArity::dynamic(1, 1, "function index", 0),
-    ); // tail call - args depend on callee signature
-    map.insert(
-        "call_indirect",
-        InstructionArity::dynamic(1, 1, "type index", 0),
-    ); // args + table index -> dynamic results
-    map.insert(
-        "return_call_indirect",
-        InstructionArity::dynamic(1, 1, "type index", 0),
-    ); // args + table index -> dynamic results
-       // return can pass values for functions with result types
-    map.insert("return", InstructionArity::dynamic(0, 0, "", 0)); // terminates
-    map.insert("unreachable", InstructionArity::nullary()); // terminates
-    map.insert("nop", InstructionArity::nullary());
-
-    // Constant instructions (produce values)
-    map.insert("i32.const", InstructionArity::constant("literal value"));
-    map.insert("i64.const", InstructionArity::constant("literal value"));
-    map.insert("f32.const", InstructionArity::constant("literal value"));
-    map.insert("f64.const", InstructionArity::constant("literal value"));
-
-    // Stack manipulation
-    map.insert("drop", InstructionArity::drop_op()); // consumes 1 value, produces 0
-    map.insert("select", InstructionArity::exact(0, "", 3, 1)); // consumes 3 values, produces 1
-
-    // i32 arithmetic operations (binary)
-    map.insert("i32.add", InstructionArity::binary_op());
-    map.insert("i32.sub", InstructionArity::binary_op());
-    map.insert("i32.mul", InstructionArity::binary_op());
-    map.insert("i32.div_s", InstructionArity::binary_op());
-    map.insert("i32.div_u", InstructionArity::binary_op());
-    map.insert("i32.rem_s", InstructionArity::binary_op());
-    map.insert("i32.rem_u", InstructionArity::binary_op());
-    map.insert("i32.and", InstructionArity::binary_op());
-    map.insert("i32.or", InstructionArity::binary_op());
-    map.insert("i32.xor", InstructionArity::binary_op());
-    map.insert("i32.shl", InstructionArity::binary_op());
-    map.insert("i32.shr_s", InstructionArity::binary_op());
-    map.insert("i32.shr_u", InstructionArity::binary_op());
-    map.insert("i32.rotl", InstructionArity::binary_op());
-    map.insert("i32.rotr", InstructionArity::binary_op());
-
-    // i32 comparison operations (binary)
-    map.insert("i32.eq", InstructionArity::binary_op());
-    map.insert("i32.ne", InstructionArity::binary_op());
-    map.insert("i32.lt_s", InstructionArity::binary_op());
-    map.insert("i32.lt_u", InstructionArity::binary_op());
-    map.insert("i32.le_s", InstructionArity::binary_op());
-    map.insert("i32.le_u", InstructionArity::binary_op());
-    map.insert("i32.gt_s", InstructionArity::binary_op());
-    map.insert("i32.gt_u", InstructionArity::binary_op());
-    map.insert("i32.ge_s", InstructionArity::binary_op());
-    map.insert("i32.ge_u", InstructionArity::binary_op());
-
-    // i32 unary operations
-    map.insert("i32.clz", InstructionArity::unary_op());
-    map.insert("i32.ctz", InstructionArity::unary_op());
-    map.insert("i32.popcnt", InstructionArity::unary_op());
-    map.insert("i32.eqz", InstructionArity::unary_op());
-
-    // i64 arithmetic operations (binary)
-    map.insert("i64.add", InstructionArity::binary_op());
-    map.insert("i64.sub", InstructionArity::binary_op());
-    map.insert("i64.mul", InstructionArity::binary_op());
-    map.insert("i64.div_s", InstructionArity::binary_op());
-    map.insert("i64.div_u", InstructionArity::binary_op());
-    map.insert("i64.rem_s", InstructionArity::binary_op());
-    map.insert("i64.rem_u", InstructionArity::binary_op());
-    map.insert("i64.and", InstructionArity::binary_op());
-    map.insert("i64.or", InstructionArity::binary_op());
-    map.insert("i64.xor", InstructionArity::binary_op());
-    map.insert("i64.shl", InstructionArity::binary_op());
-    map.insert("i64.shr_s", InstructionArity::binary_op());
-    map.insert("i64.shr_u", InstructionArity::binary_op());
-    map.insert("i64.rotl", InstructionArity::binary_op());
-    map.insert("i64.rotr", InstructionArity::binary_op());
-
-    // i64 comparison operations (binary)
-    map.insert("i64.eq", InstructionArity::binary_op());
-    map.insert("i64.ne", InstructionArity::binary_op());
-    map.insert("i64.lt_s", InstructionArity::binary_op());
-    map.insert("i64.lt_u", InstructionArity::binary_op());
-    map.insert("i64.le_s", InstructionArity::binary_op());
-    map.insert("i64.le_u", InstructionArity::binary_op());
-    map.insert("i64.gt_s", InstructionArity::binary_op());
-    map.insert("i64.gt_u", InstructionArity::binary_op());
-    map.insert("i64.ge_s", InstructionArity::binary_op());
-    map.insert("i64.ge_u", InstructionArity::binary_op());
-
-    // i64 unary operations
-    map.insert("i64.clz", InstructionArity::unary_op());
-    map.insert("i64.ctz", InstructionArity::unary_op());
-    map.insert("i64.popcnt", InstructionArity::unary_op());
-    map.insert("i64.eqz", InstructionArity::unary_op());
-
-    // f32 arithmetic operations (binary)
-    map.insert("f32.add", InstructionArity::binary_op());
-    map.insert("f32.sub", InstructionArity::binary_op());
-    map.insert("f32.mul", InstructionArity::binary_op());
-    map.insert("f32.div", InstructionArity::binary_op());
-    map.insert("f32.min", InstructionArity::binary_op());
-    map.insert("f32.max", InstructionArity::binary_op());
-    map.insert("f32.copysign", InstructionArity::binary_op());
-
-    // f32 comparison operations (binary)
-    map.insert("f32.eq", InstructionArity::binary_op());
-    map.insert("f32.ne", InstructionArity::binary_op());
-    map.insert("f32.lt", InstructionArity::binary_op());
-    map.insert("f32.le", InstructionArity::binary_op());
-    map.insert("f32.gt", InstructionArity::binary_op());
-    map.insert("f32.ge", InstructionArity::binary_op());
-
-    // f32 unary operations
-    map.insert("f32.abs", InstructionArity::unary_op());
-    map.insert("f32.neg", InstructionArity::unary_op());
-    map.insert("f32.ceil", InstructionArity::unary_op());
-    map.insert("f32.floor", InstructionArity::unary_op());
-    map.insert("f32.trunc", InstructionArity::unary_op());
-    map.insert("f32.nearest", InstructionArity::unary_op());
-    map.insert("f32.sqrt", InstructionArity::unary_op());
-
-    // f64 arithmetic operations (binary)
-    map.insert("f64.add", InstructionArity::binary_op());
-    map.insert("f64.sub", InstructionArity::binary_op());
-    map.insert("f64.mul", InstructionArity::binary_op());
-    map.insert("f64.div", InstructionArity::binary_op());
-    map.insert("f64.min", InstructionArity::binary_op());
-    map.insert("f64.max", InstructionArity::binary_op());
-    map.insert("f64.copysign", InstructionArity::binary_op());
-
-    // f64 comparison operations (binary)
-    map.insert("f64.eq", InstructionArity::binary_op());
-    map.insert("f64.ne", InstructionArity::binary_op());
-    map.insert("f64.lt", InstructionArity::binary_op());
-    map.insert("f64.le", InstructionArity::binary_op());
-    map.insert("f64.gt", InstructionArity::binary_op());
-    map.insert("f64.ge", InstructionArity::binary_op());
-
-    // f64 unary operations
-    map.insert("f64.abs", InstructionArity::unary_op());
-    map.insert("f64.neg", InstructionArity::unary_op());
-    map.insert("f64.ceil", InstructionArity::unary_op());
-    map.insert("f64.floor", InstructionArity::unary_op());
-    map.insert("f64.trunc", InstructionArity::unary_op());
-    map.insert("f64.nearest", InstructionArity::unary_op());
-    map.insert("f64.sqrt", InstructionArity::unary_op());
-
-    // Conversion operations (unary)
-    map.insert("i32.wrap_i64", InstructionArity::unary_op());
-    map.insert("i64.extend_i32_s", InstructionArity::unary_op());
-    map.insert("i64.extend_i32_u", InstructionArity::unary_op());
-    map.insert("i32.trunc_f32_s", InstructionArity::unary_op());
-    map.insert("i32.trunc_f32_u", InstructionArity::unary_op());
-    map.insert("i32.trunc_f64_s", InstructionArity::unary_op());
-    map.insert("i32.trunc_f64_u", InstructionArity::unary_op());
-    map.insert("i64.trunc_f32_s", InstructionArity::unary_op());
-    map.insert("i64.trunc_f32_u", InstructionArity::unary_op());
-    map.insert("i64.trunc_f64_s", InstructionArity::unary_op());
-    map.insert("i64.trunc_f64_u", InstructionArity::unary_op());
-    map.insert("f32.convert_i32_s", InstructionArity::unary_op());
-    map.insert("f32.convert_i32_u", InstructionArity::unary_op());
-    map.insert("f32.convert_i64_s", InstructionArity::unary_op());
-    map.insert("f32.convert_i64_u", InstructionArity::unary_op());
-    map.insert("f32.demote_f64", InstructionArity::unary_op());
-    map.insert("f64.convert_i32_s", InstructionArity::unary_op());
-    map.insert("f64.convert_i32_u", InstructionArity::unary_op());
-    map.insert("f64.convert_i64_s", InstructionArity::unary_op());
-    map.insert("f64.convert_i64_u", InstructionArity::unary_op());
-    map.insert("f64.promote_f32", InstructionArity::unary_op());
-    map.insert("i32.reinterpret_f32", InstructionArity::unary_op());
-    map.insert("i64.reinterpret_f64", InstructionArity::unary_op());
-    map.insert("f32.reinterpret_i32", InstructionArity::unary_op());
-    map.insert("f64.reinterpret_i64", InstructionArity::unary_op());
-
-    // Memory load instructions (optional memory index, consume address)
-    map.insert("i32.load", InstructionArity::mem_load());
-    map.insert("i64.load", InstructionArity::mem_load());
-    map.insert("f32.load", InstructionArity::mem_load());
-    map.insert("f64.load", InstructionArity::mem_load());
-    map.insert("i32.load8_s", InstructionArity::mem_load());
-    map.insert("i32.load8_u", InstructionArity::mem_load());
-    map.insert("i32.load16_s", InstructionArity::mem_load());
-    map.insert("i32.load16_u", InstructionArity::mem_load());
-    map.insert("i64.load8_s", InstructionArity::mem_load());
-    map.insert("i64.load8_u", InstructionArity::mem_load());
-    map.insert("i64.load16_s", InstructionArity::mem_load());
-    map.insert("i64.load16_u", InstructionArity::mem_load());
-    map.insert("i64.load32_s", InstructionArity::mem_load());
-    map.insert("i64.load32_u", InstructionArity::mem_load());
-
-    // Memory store instructions (optional memory index, consume address and value)
-    map.insert("i32.store", InstructionArity::mem_store());
-    map.insert("i64.store", InstructionArity::mem_store());
-    map.insert("f32.store", InstructionArity::mem_store());
-    map.insert("f64.store", InstructionArity::mem_store());
-    map.insert("i32.store8", InstructionArity::mem_store());
-    map.insert("i32.store16", InstructionArity::mem_store());
-    map.insert("i64.store8", InstructionArity::mem_store());
-    map.insert("i64.store16", InstructionArity::mem_store());
-    map.insert("i64.store32", InstructionArity::mem_store());
-
-    // Memory management - support optional memory index (multi-memory proposal)
-    map.insert(
-        "memory.size",
-        InstructionArity {
-            min_params: 0,
-            max_params: 1,
-            param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(0),
-            produces: 1, // produces i32 (current size)
-        },
-    );
-    map.insert(
-        "memory.grow",
-        InstructionArity {
-            min_params: 0,
-            max_params: 1,
-            param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(1), // consumes delta
-            produces: 1,                         // produces i32 (previous size or -1)
-        },
-    );
-
-    // WasmGC Instructions
-    // Structs
-    map.insert(
-        "struct.new",
-        InstructionArity::dynamic(1, 1, "type index", 1),
-    ); // produces structref
-    map.insert(
-        "struct.new_default",
-        InstructionArity::exact(1, "type index", 0, 1), // produces structref
-    );
-    map.insert(
-        "struct.get",
-        InstructionArity::exact(2, "type and field index", 1, 1), // consumes structref, produces value
-    );
-    map.insert(
-        "struct.get_s",
-        InstructionArity::exact(2, "type and field index", 1, 1),
-    );
-    map.insert(
-        "struct.get_u",
-        InstructionArity::exact(2, "type and field index", 1, 1),
-    );
-    map.insert(
-        "struct.set",
-        InstructionArity::exact(2, "type and field index", 2, 0), // consumes structref + value, produces nothing
-    );
-
-    // Arrays
-    map.insert("array.new", InstructionArity::exact(1, "type index", 2, 1)); // value, len -> arrayref
-    map.insert(
-        "array.new_default",
-        InstructionArity::exact(1, "type index", 1, 1), // len -> arrayref
-    );
-    map.insert(
-        "array.new_fixed",
-        InstructionArity::dynamic(2, 2, "type index and length", 1), // -> arrayref
-    );
-    map.insert(
-        "array.new_data",
-        InstructionArity::exact(2, "type and data index", 2, 1), // offset, len -> arrayref
-    );
-    map.insert(
-        "array.new_elem",
-        InstructionArity::exact(2, "type and elem index", 2, 1), // offset, len -> arrayref
-    );
-    map.insert("array.get", InstructionArity::exact(1, "type index", 2, 1)); // arrayref, index -> value
-    map.insert(
-        "array.get_s",
-        InstructionArity::exact(1, "type index", 2, 1),
-    );
-    map.insert(
-        "array.get_u",
-        InstructionArity::exact(1, "type index", 2, 1),
-    );
-    map.insert("array.set", InstructionArity::exact(1, "type index", 3, 0)); // arrayref, index, value -> nothing
-    map.insert("array.len", InstructionArity::unary_op()); // arrayref -> i32
-    map.insert("array.fill", InstructionArity::exact(1, "type index", 4, 0)); // arrayref, index, value, len -> nothing
-    map.insert(
-        "array.copy",
-        InstructionArity::exact(2, "dest and src type index", 5, 0), // dest, dest_idx, src, src_idx, len -> nothing
-    );
-
-    // I31
-    map.insert("ref.i31", InstructionArity::unary_op()); // i32 -> i31ref
-    map.insert("i31.get_s", InstructionArity::unary_op()); // i31ref -> i32
-    map.insert("i31.get_u", InstructionArity::unary_op()); // i31ref -> i32
-
-    // Casts
-    map.insert("ref.test", InstructionArity::exact(1, "type index", 1, 1)); // ref -> i32
-    map.insert("ref.cast", InstructionArity::exact(1, "type index", 1, 1)); // ref -> ref
-    map.insert(
-        "ref.cast_null",
-        InstructionArity::exact(1, "type index", 1, 1),
-    ); // ref -> ref
-    map.insert(
-        "br_on_cast",
-        InstructionArity::exact(2, "label and type index", 1, 0), // ref -> (branches or continues)
-    );
-    map.insert(
-        "br_on_cast_fail",
-        InstructionArity::exact(2, "label and type index", 1, 0), // ref -> (branches or continues)
-    );
-
-    // Exceptions
-    map.insert("throw", InstructionArity::dynamic(1, 1, "tag index", 0)); // terminates
-    map.insert("throw_ref", InstructionArity::exact(0, "", 1, 0)); // exnref -> terminates (unary but not returning)
-    map.insert("rethrow", InstructionArity::exact(1, "label index", 0, 0)); // terminates
-
-    // Typed function references
-    map.insert("call_ref", InstructionArity::dynamic(1, 1, "type index", 0)); // args + funcref -> dynamic results
-    map.insert(
-        "return_call_ref",
-        InstructionArity::dynamic(1, 1, "type index", 0), // args + funcref -> terminates (tail call)
-    );
-
-    // Null-checking branches — operand count depends on branch target arity
-    // (branch args + ref to test), so use dynamic mode
-    map.insert(
-        "br_on_null",
-        InstructionArity::dynamic(1, 1, "label index", 1),
-    );
-    map.insert(
-        "br_on_non_null",
-        InstructionArity::dynamic(1, 1, "label index", 0),
-    );
-
-    // Reference equality
-    map.insert("ref.eq", InstructionArity::binary_op()); // eqref, eqref -> i32
-
-    // Reference conversions
-    map.insert("any.convert_extern", InstructionArity::unary_op()); // externref -> anyref
-    map.insert("extern.convert_any", InstructionArity::unary_op()); // anyref -> externref
-
-    // Array initialization from segments
-    map.insert(
-        "array.init_data",
-        InstructionArity::exact(2, "type and data index", 4, 0), // array, dst, src, len -> nothing
-    );
-    map.insert(
-        "array.init_elem",
-        InstructionArity::exact(2, "type and elem index", 4, 0), // array, dst, src, len -> nothing
-    );
-
-    // Bulk memory operations - support optional memory indices (multi-memory proposal)
-    map.insert(
-        "memory.copy",
-        InstructionArity {
-            min_params: 0,
-            max_params: 2,
-            param_description: "optional dest and src memory indices",
-            operand_mode: OperandMode::Fixed(3), // dest offset, src offset, len
-            produces: 0,
-        },
-    );
-    map.insert(
-        "memory.fill",
-        InstructionArity {
-            min_params: 0,
-            max_params: 1,
-            param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(3), // dest, val, len
-            produces: 0,
-        },
-    );
-    map.insert(
-        "memory.init",
-        InstructionArity {
-            min_params: 1,
-            max_params: 2,
-            param_description: "data index and optional memory index",
-            operand_mode: OperandMode::Fixed(3), // dest, offset, len
-            produces: 0,
-        },
-    );
-    map.insert("data.drop", InstructionArity::exact(1, "data index", 0, 0));
-
-    // Table operations
-    map.insert("table.get", InstructionArity::exact(1, "table index", 1, 1)); // index -> ref
-    map.insert("table.set", InstructionArity::exact(1, "table index", 2, 0)); // index, value -> nothing
-    map.insert(
-        "table.size",
-        InstructionArity::exact(1, "table index", 0, 1),
-    ); // -> i32
-    map.insert(
-        "table.grow",
-        InstructionArity::exact(1, "table index", 2, 1),
-    ); // init, delta -> i32
-    map.insert(
-        "table.fill",
-        InstructionArity::exact(1, "table index", 3, 0),
-    ); // index, value, len -> nothing
-    map.insert(
-        "table.copy",
-        InstructionArity::exact(2, "dest and src table index", 3, 0), // dest, src, len -> nothing
-    );
-    map.insert(
-        "table.init",
-        InstructionArity::exact(2, "table and elem index", 3, 0), // dest, offset, len -> nothing
-    );
-    map.insert("elem.drop", InstructionArity::exact(1, "elem index", 0, 0));
-
-    // Reference operations
-    map.insert("ref.null", InstructionArity::exact(1, "type", 0, 1)); // -> null ref
-    map.insert(
-        "ref.func",
-        InstructionArity::exact(1, "function index", 0, 1),
-    ); // -> funcref
-    map.insert("ref.is_null", InstructionArity::unary_op()); // ref -> i32
-    map.insert("ref.as_non_null", InstructionArity::unary_op()); // nullable ref -> non-null ref
-
-    // Saturating truncation operations
-    map.insert("i32.trunc_sat_f32_s", InstructionArity::unary_op());
-    map.insert("i32.trunc_sat_f32_u", InstructionArity::unary_op());
-    map.insert("i32.trunc_sat_f64_s", InstructionArity::unary_op());
-    map.insert("i32.trunc_sat_f64_u", InstructionArity::unary_op());
-    map.insert("i64.trunc_sat_f32_s", InstructionArity::unary_op());
-    map.insert("i64.trunc_sat_f32_u", InstructionArity::unary_op());
-    map.insert("i64.trunc_sat_f64_s", InstructionArity::unary_op());
-    map.insert("i64.trunc_sat_f64_u", InstructionArity::unary_op());
-
-    // Sign extension operations
-    map.insert("i32.extend8_s", InstructionArity::unary_op());
-    map.insert("i32.extend16_s", InstructionArity::unary_op());
-    map.insert("i64.extend8_s", InstructionArity::unary_op());
-    map.insert("i64.extend16_s", InstructionArity::unary_op());
-    map.insert("i64.extend32_s", InstructionArity::unary_op());
-
-    // Atomic operations
-    map.insert("atomic.fence", InstructionArity::nullary()); // no operands, no results
-
-    // Atomic loads - addr → value
-    map.insert("i32.atomic.load", InstructionArity::mem_load());
-    map.insert("i64.atomic.load", InstructionArity::mem_load());
-    map.insert("i32.atomic.load8_u", InstructionArity::mem_load());
-    map.insert("i32.atomic.load16_u", InstructionArity::mem_load());
-    map.insert("i64.atomic.load8_u", InstructionArity::mem_load());
-    map.insert("i64.atomic.load16_u", InstructionArity::mem_load());
-    map.insert("i64.atomic.load32_u", InstructionArity::mem_load());
-
-    // Atomic stores - addr + value → ∅
-    map.insert("i32.atomic.store", InstructionArity::mem_store());
-    map.insert("i64.atomic.store", InstructionArity::mem_store());
-    map.insert("i32.atomic.store8", InstructionArity::mem_store());
-    map.insert("i32.atomic.store16", InstructionArity::mem_store());
-    map.insert("i64.atomic.store8", InstructionArity::mem_store());
-    map.insert("i64.atomic.store16", InstructionArity::mem_store());
-    map.insert("i64.atomic.store32", InstructionArity::mem_store());
-
-    // Atomic RMW i32 full-width - addr + operand → old value
-    map.insert("i32.atomic.rmw.add", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw.sub", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw.and", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw.or", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw.xor", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw.xchg", InstructionArity::mem_rmw());
-
-    // Atomic RMW i32 narrow
-    map.insert("i32.atomic.rmw8.add_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw8.sub_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw8.and_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw8.or_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw8.xor_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw8.xchg_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw16.add_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw16.sub_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw16.and_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw16.or_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw16.xor_u", InstructionArity::mem_rmw());
-    map.insert("i32.atomic.rmw16.xchg_u", InstructionArity::mem_rmw());
-
-    // Atomic RMW i64 full-width
-    map.insert("i64.atomic.rmw.add", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw.sub", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw.and", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw.or", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw.xor", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw.xchg", InstructionArity::mem_rmw());
-
-    // Atomic RMW i64 narrow
-    map.insert("i64.atomic.rmw8.add_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw8.sub_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw8.and_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw8.or_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw8.xor_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw8.xchg_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw16.add_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw16.sub_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw16.and_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw16.or_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw16.xor_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw16.xchg_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw32.add_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw32.sub_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw32.and_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw32.or_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw32.xor_u", InstructionArity::mem_rmw());
-    map.insert("i64.atomic.rmw32.xchg_u", InstructionArity::mem_rmw());
-
-    // Atomic cmpxchg - addr + expected + replacement → old value
-    map.insert("i32.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg());
-    map.insert("i64.atomic.rmw.cmpxchg", InstructionArity::mem_cmpxchg());
-    map.insert("i32.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg());
-    map.insert(
-        "i32.atomic.rmw16.cmpxchg_u",
-        InstructionArity::mem_cmpxchg(),
-    );
-    map.insert("i64.atomic.rmw8.cmpxchg_u", InstructionArity::mem_cmpxchg());
-    map.insert(
-        "i64.atomic.rmw16.cmpxchg_u",
-        InstructionArity::mem_cmpxchg(),
-    );
-    map.insert(
-        "i64.atomic.rmw32.cmpxchg_u",
-        InstructionArity::mem_cmpxchg(),
-    );
-
-    // Wait/notify
-    map.insert("memory.atomic.wait32", InstructionArity::exact(0, "", 3, 1)); // addr + expected(i32) + timeout(i64) → i32
-    map.insert("memory.atomic.wait64", InstructionArity::exact(0, "", 3, 1)); // addr + expected(i64) + timeout(i64) → i32
-    map.insert("memory.atomic.notify", InstructionArity::exact(0, "", 2, 1)); // addr + count → woken
-
-    map
+    init_arity_table().into_iter().collect()
 }
 
 /// Infer the stack arity of a SIMD instruction from its name pattern.

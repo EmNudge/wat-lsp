@@ -541,22 +541,7 @@ impl LanguageServer for Backend {
             if let Some(target) =
                 references::identify_symbol_at_position(&doc, &syms, &tree, position)
             {
-                // Check if the symbol has a name - we don't support renaming unnamed symbols yet
-                let has_name = match &target {
-                    references::ReferenceTarget::Function { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Global { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Local { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Parameter { name, .. } => name.is_some(),
-                    references::ReferenceTarget::BlockLabel { .. } => true, // Block labels are always named if identified as such
-                    references::ReferenceTarget::Table { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Memory { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Type { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Tag { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Data { name, .. } => name.is_some(),
-                    references::ReferenceTarget::Elem { name, .. } => name.is_some(),
-                };
-
-                if !has_name {
+                if !target.has_name() {
                     self.client
                         .show_message(MessageType::ERROR, "Cannot rename unnamed symbol")
                         .await;

@@ -643,8 +643,7 @@ fn get_instruction_doc(word: &str) -> Option<String> {
     }
 
     // Fallback: check the arity map to at least identify known instructions
-    let arity_map = crate::diagnostics_core::get_arity_map();
-    if let Some(arity) = arity_map.get(word) {
+    if let Some(arity) = crate::instruction_metadata::lookup_instruction_arity(word) {
         let operands = match arity.operand_mode {
             crate::instruction_metadata::OperandMode::Fixed(n) => format!("{}", n),
             crate::instruction_metadata::OperandMode::Dynamic => "dynamic".to_string(),

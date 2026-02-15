@@ -4,9 +4,8 @@
 //! of immediate parameters (index nodes, constants, etc.).
 
 use crate::core::types::Diagnostic;
-use crate::instruction_metadata::get_instruction_arity_map;
+use crate::instruction_metadata::lookup_instruction_arity;
 use crate::utils::node_to_range;
-use std::sync::OnceLock;
 
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
@@ -14,16 +13,6 @@ use tree_sitter::Node;
 
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::Node;
-
-static INSTRUCTION_ARITY: OnceLock<
-    std::collections::HashMap<&'static str, crate::instruction_metadata::InstructionArity>,
-> = OnceLock::new();
-
-fn get_arity_map(
-) -> &'static std::collections::HashMap<&'static str, crate::instruction_metadata::InstructionArity>
-{
-    INSTRUCTION_ARITY.get_or_init(get_instruction_arity_map)
-}
 
 /// Check if an instruction has the correct number of parameters (linear format)
 pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagnostic> {
@@ -128,9 +117,7 @@ fn validate_instruction_arity(
     node: &Node,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let arity_map = get_arity_map();
-
-    if let Some(arity) = arity_map.get(instr_name) {
+    if let Some(arity) = lookup_instruction_arity(instr_name) {
         if !arity.is_valid(param_count) {
             let range = node_to_range(node);
             let param_word = if param_count == 1 {

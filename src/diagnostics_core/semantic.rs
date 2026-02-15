@@ -14,13 +14,10 @@
 
 use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
-    get_instruction_arity_map, infer_simd_instruction_arity, is_terminating_instruction,
-    InstructionArity, OperandMode,
+    infer_simd_instruction_arity, is_terminating_instruction, lookup_instruction_arity, OperandMode,
 };
 use crate::symbols::{SymbolTable, TypeKind, ValueType};
 use crate::utils::node_to_range;
-use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use super::sequence_always_terminates;
 use super::type_check::{CtrlOpcode, TypeChecker};
@@ -31,13 +28,6 @@ use tree_sitter::Node;
 
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::Node;
-
-// Lazy static initialization for instruction arity map
-static INSTRUCTION_ARITY: OnceLock<HashMap<&'static str, InstructionArity>> = OnceLock::new();
-
-pub fn get_arity_map() -> &'static HashMap<&'static str, InstructionArity> {
-    INSTRUCTION_ARITY.get_or_init(get_instruction_arity_map)
-}
 
 /// Track stack state through an instruction list and report underflow/type errors.
 /// If expected_results is None, skip return type validation (e.g., when function uses type reference).
@@ -50,7 +40,6 @@ pub fn track_stack_in_instr_list(
     symbols: &SymbolTable,
     expected_results: Option<&[ValueType]>,
 ) -> Vec<Diagnostic> {
-    let arity_map = get_arity_map();
     let mut checker = TypeChecker::new();
 
     // Get function result types for the control frame
@@ -76,31 +65,24 @@ pub fn track_stack_in_instr_list(
 
         match kind.as_ref() {
             "instr" => {
-                process_instr_node(&child, source, symbols, arity_map, &mut checker);
+                process_instr_node(&child, source, symbols, &mut checker);
             }
             "instr_plain" => {
                 if let Some(instr_name) = get_instruction_name(&child, source) {
-                    process_instruction(
-                        &child,
-                        &instr_name,
-                        &mut checker,
-                        symbols,
-                        source,
-                        arity_map,
-                    );
+                    process_instruction(&child, &instr_name, &mut checker, symbols, source);
                 }
             }
             "expr" => {
-                process_folded_expr(&child, source, symbols, arity_map, &mut checker);
+                process_folded_expr(&child, source, symbols, &mut checker);
             }
             "instr_block" | "instr_loop" => {
-                process_block_node(&child, source, symbols, arity_map, &mut checker);
+                process_block_node(&child, source, symbols, &mut checker);
             }
             "instr_if" => {
-                process_if_node(&child, source, symbols, arity_map, &mut checker);
+                process_if_node(&child, source, symbols, &mut checker);
             }
             "instr_call" => {
-                process_instr_call_node(&child, source, symbols, arity_map, &mut checker);
+                process_instr_call_node(&child, source, symbols, &mut checker);
             }
             "instr_list_call" => {
                 process_call_indirect_node(&child, source, symbols, &mut checker);
@@ -120,7 +102,6 @@ fn process_instr_node(
     instr_node: &Node,
     source: &str,
     symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
     checker: &mut TypeChecker,
 ) {
     let mut cursor = instr_node.walk();
@@ -133,20 +114,20 @@ fn process_instr_node(
         match kind.as_ref() {
             "instr_plain" => {
                 if let Some(instr_name) = get_instruction_name(&child, source) {
-                    process_instruction(&child, &instr_name, checker, symbols, source, arity_map);
+                    process_instruction(&child, &instr_name, checker, symbols, source);
                 }
             }
             "expr" => {
-                process_folded_expr(&child, source, symbols, arity_map, checker);
+                process_folded_expr(&child, source, symbols, checker);
             }
             "instr_block" | "instr_loop" => {
-                process_block_node(&child, source, symbols, arity_map, checker);
+                process_block_node(&child, source, symbols, checker);
             }
             "instr_if" => {
-                process_if_node(&child, source, symbols, arity_map, checker);
+                process_if_node(&child, source, symbols, checker);
             }
             "instr_call" => {
-                process_instr_call_node(&child, source, symbols, arity_map, checker);
+                process_instr_call_node(&child, source, symbols, checker);
             }
             "instr_list_call" => {
                 process_call_indirect_node(&child, source, symbols, checker);
@@ -158,13 +139,7 @@ fn process_instr_node(
 
 /// Process a block or loop instruction (instr_block or instr_loop).
 /// Uses push_ctrl/pop_ctrl for proper control frame tracking.
-fn process_block_node(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
-    checker: &mut TypeChecker,
-) {
+fn process_block_node(node: &Node, source: &str, symbols: &SymbolTable, checker: &mut TypeChecker) {
     let is_if = contains_block_if(node);
 
     // If this is a linear if, pop i32 condition from outer stack
@@ -196,20 +171,14 @@ fn process_block_node(
     checker.push_ctrl(opcode, params, results);
 
     // Process body
-    process_block_body(node, source, symbols, arity_map, checker);
+    process_block_body(node, source, symbols, checker);
 
     // Pop control frame
     checker.pop_ctrl(node);
 }
 
 /// Process an if instruction (instr_if — folded or linear format with explicit if keyword).
-fn process_if_node(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
-    checker: &mut TypeChecker,
-) {
+fn process_if_node(node: &Node, source: &str, symbols: &SymbolTable, checker: &mut TypeChecker) {
     // Pop i32 condition
     checker.pop_expect(&ValueType::I32, node);
 
@@ -224,19 +193,13 @@ fn process_if_node(
     checker.push_ctrl(CtrlOpcode::If, params, results);
 
     // Process body
-    process_block_body(node, source, symbols, arity_map, checker);
+    process_block_body(node, source, symbols, checker);
 
     checker.pop_ctrl(node);
 }
 
 /// Process the body of a block/loop/if by recursing into children
-fn process_block_body(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
-    checker: &mut TypeChecker,
-) {
+fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker: &mut TypeChecker) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -256,7 +219,7 @@ fn process_block_body(
 
                     match list_kind.as_ref() {
                         "instr" => {
-                            process_instr_node(&list_child, source, symbols, arity_map, checker);
+                            process_instr_node(&list_child, source, symbols, checker);
                         }
                         "instr_plain" => {
                             if let Some(instr_name) = get_instruction_name(&list_child, source) {
@@ -266,27 +229,20 @@ fn process_block_body(
                                     checker,
                                     symbols,
                                     source,
-                                    arity_map,
                                 );
                             }
                         }
                         "expr" => {
-                            process_folded_expr(&list_child, source, symbols, arity_map, checker);
+                            process_folded_expr(&list_child, source, symbols, checker);
                         }
                         "instr_block" | "instr_loop" => {
-                            process_block_node(&list_child, source, symbols, arity_map, checker);
+                            process_block_node(&list_child, source, symbols, checker);
                         }
                         "instr_if" => {
-                            process_if_node(&list_child, source, symbols, arity_map, checker);
+                            process_if_node(&list_child, source, symbols, checker);
                         }
                         "instr_call" => {
-                            process_instr_call_node(
-                                &list_child,
-                                source,
-                                symbols,
-                                arity_map,
-                                checker,
-                            );
+                            process_instr_call_node(&list_child, source, symbols, checker);
                         }
                         "instr_list_call" => {
                             process_call_indirect_node(&list_child, source, symbols, checker);
@@ -297,38 +253,38 @@ fn process_block_body(
             }
             "block_block" | "loop_block" => {
                 // Nested block in linear format
-                process_block_body(&child, source, symbols, arity_map, checker);
+                process_block_body(&child, source, symbols, checker);
             }
             "block_if" | "if_block" => {
                 // Nested if block in linear format
-                process_block_body(&child, source, symbols, arity_map, checker);
+                process_block_body(&child, source, symbols, checker);
             }
             "instr_else" | "else" => {
                 // At else, we need to reset to block params for the else branch
                 // The then branch's values should match end_types, then reset
                 // For simplicity, just process the else branch's instructions
-                process_block_body(&child, source, symbols, arity_map, checker);
+                process_block_body(&child, source, symbols, checker);
             }
             // Direct instruction children
             "instr" => {
-                process_instr_node(&child, source, symbols, arity_map, checker);
+                process_instr_node(&child, source, symbols, checker);
             }
             "instr_plain" => {
                 if let Some(instr_name) = get_instruction_name(&child, source) {
-                    process_instruction(&child, &instr_name, checker, symbols, source, arity_map);
+                    process_instruction(&child, &instr_name, checker, symbols, source);
                 }
             }
             "expr" => {
-                process_folded_expr(&child, source, symbols, arity_map, checker);
+                process_folded_expr(&child, source, symbols, checker);
             }
             "instr_block" | "instr_loop" => {
-                process_block_node(&child, source, symbols, arity_map, checker);
+                process_block_node(&child, source, symbols, checker);
             }
             "instr_if" => {
-                process_if_node(&child, source, symbols, arity_map, checker);
+                process_if_node(&child, source, symbols, checker);
             }
             "instr_call" => {
-                process_instr_call_node(&child, source, symbols, arity_map, checker);
+                process_instr_call_node(&child, source, symbols, checker);
             }
             "instr_list_call" => {
                 process_call_indirect_node(&child, source, symbols, checker);
@@ -451,7 +407,6 @@ fn process_instr_call_node(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
     checker: &mut TypeChecker,
 ) {
     process_call_indirect_node(node, source, symbols, checker);
@@ -465,7 +420,7 @@ fn process_instr_call_node(
         let kind = child.kind();
 
         if kind == "instr" {
-            process_instr_node(&child, source, symbols, arity_map, checker);
+            process_instr_node(&child, source, symbols, checker);
         }
     }
 }
@@ -477,11 +432,10 @@ fn process_instruction(
     checker: &mut TypeChecker,
     symbols: &SymbolTable,
     source: &str,
-    arity_map: &HashMap<&'static str, InstructionArity>,
 ) {
     // Handle tail call instructions
     if matches!(instr_name, "return_call" | "return_call_ref") {
-        let consumed = get_instruction_consumed_types(node, instr_name, symbols, source, arity_map);
+        let consumed = get_instruction_consumed_types(node, instr_name, symbols, source);
         if !consumed.is_empty() {
             checker.pop_vals_for_instr(&consumed, node, instr_name);
         }
@@ -543,8 +497,7 @@ fn process_instruction(
         }
         // For 'throw', pop tag parameter types
         if instr_name == "throw" {
-            let consumed =
-                get_instruction_consumed_types(node, instr_name, symbols, source, arity_map);
+            let consumed = get_instruction_consumed_types(node, instr_name, symbols, source);
             if !consumed.is_empty() {
                 checker.pop_vals_for_instr(&consumed, node, instr_name);
             }
@@ -554,14 +507,14 @@ fn process_instruction(
     }
 
     // Regular instructions: consume typed operands, produce typed results
-    let consumed = get_instruction_consumed_types(node, instr_name, symbols, source, arity_map);
+    let consumed = get_instruction_consumed_types(node, instr_name, symbols, source);
     if !consumed.is_empty() {
         checker.pop_vals_for_instr(&consumed, node, instr_name);
     }
 
     let produced = infer_instruction_result_types(instr_name, node, symbols, source);
     // If we know the instruction produces N values but couldn't infer types, pad with Unknown
-    let produces_count = get_instruction_produces_count(instr_name, arity_map);
+    let produces_count = get_instruction_produces_count(instr_name);
     let mut types = produced;
     while types.len() < produces_count {
         types.push(ValueType::Unknown);
@@ -570,11 +523,8 @@ fn process_instruction(
 }
 
 /// Get the number of values an instruction produces
-fn get_instruction_produces_count(
-    instr_name: &str,
-    arity_map: &HashMap<&'static str, InstructionArity>,
-) -> usize {
-    if let Some(arity) = arity_map.get(instr_name) {
+fn get_instruction_produces_count(instr_name: &str) -> usize {
+    if let Some(arity) = lookup_instruction_arity(instr_name) {
         arity.produces
     } else if let Some((_c, p)) = infer_simd_instruction_arity(instr_name) {
         p
@@ -590,7 +540,6 @@ fn get_instruction_consumed_types(
     instr_name: &str,
     symbols: &SymbolTable,
     source: &str,
-    arity_map: &HashMap<&'static str, InstructionArity>,
 ) -> Vec<ValueType> {
     // Try pattern-based type derivation first
     if let Some(types) = derive_consumed_types_from_name(instr_name, node, symbols, source) {
@@ -598,7 +547,7 @@ fn get_instruction_consumed_types(
     }
 
     // Fall back to untyped count from arity map (use Unknown for each operand)
-    let count = if let Some(arity) = arity_map.get(instr_name) {
+    let count = if let Some(arity) = lookup_instruction_arity(instr_name) {
         match arity.operand_mode {
             OperandMode::Fixed(n) => n,
             OperandMode::Dynamic => get_dynamic_operand_count(node, instr_name, symbols, source),
@@ -1136,7 +1085,6 @@ pub fn infer_instruction_result_types(
     symbols: &SymbolTable,
     source: &str,
 ) -> Vec<ValueType> {
-    let arity_map = get_arity_map();
     let skip_early_return = matches!(
         instr_name,
         "call"
@@ -1147,7 +1095,7 @@ pub fn infer_instruction_result_types(
             | "return_call_indirect"
     );
     if !skip_early_return {
-        if let Some(arity) = arity_map.get(instr_name) {
+        if let Some(arity) = lookup_instruction_arity(instr_name) {
             if arity.produces == 0 {
                 return vec![];
             }
@@ -1547,10 +1495,9 @@ pub fn get_expected_operands_by_name(
     instr_name: &str,
     symbols: &SymbolTable,
     source: &str,
-    arity_map: &HashMap<&'static str, InstructionArity>,
     expr: &Node,
 ) -> usize {
-    if let Some(arity) = arity_map.get(instr_name) {
+    if let Some(arity) = lookup_instruction_arity(instr_name) {
         match arity.operand_mode {
             OperandMode::Fixed(n) => n,
             OperandMode::Dynamic => {
@@ -1598,7 +1545,6 @@ fn process_folded_expr(
     expr: &Node,
     source: &str,
     symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
     checker: &mut TypeChecker,
 ) {
     if let Some((instr_name, explicit_operands)) = get_folded_expr_info(expr, source) {
@@ -1607,8 +1553,7 @@ fn process_folded_expr(
             instr_name.as_str(),
             "return_call" | "return_call_ref" | "return_call_indirect"
         ) {
-            let expected =
-                get_expected_operands_by_name(&instr_name, symbols, source, arity_map, expr);
+            let expected = get_expected_operands_by_name(&instr_name, symbols, source, expr);
             let from_stack = expected.saturating_sub(explicit_operands);
             if from_stack > 0 {
                 let consumed = vec![ValueType::Unknown; from_stack];
@@ -1630,7 +1575,7 @@ fn process_folded_expr(
         }
 
         // Calculate operands needed from the stack
-        let expected = get_expected_operands_by_name(&instr_name, symbols, source, arity_map, expr);
+        let expected = get_expected_operands_by_name(&instr_name, symbols, source, expr);
         let from_stack = expected.saturating_sub(explicit_operands);
 
         if from_stack > 0 {
@@ -1652,17 +1597,12 @@ fn process_folded_expr(
     }
 
     // Produce result values with actual types
-    let result_types = get_expr_result_types(expr, source, symbols, arity_map);
+    let result_types = get_expr_result_types(expr, source, symbols);
     checker.push_vals(&result_types);
 }
 
 /// Get result types from a folded expression
-pub fn get_expr_result_types(
-    expr: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    arity_map: &HashMap<&'static str, InstructionArity>,
-) -> Vec<ValueType> {
+pub fn get_expr_result_types(expr: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -1671,7 +1611,7 @@ pub fn get_expr_result_types(
         let kind = child.kind();
 
         if kind.starts_with("expr1_") {
-            return get_expr1_result_types(&child, source, symbols, arity_map);
+            return get_expr1_result_types(&child, source, symbols);
         }
         if kind == "expr1" {
             let mut inner_cursor = child.walk();
@@ -1682,7 +1622,7 @@ pub fn get_expr_result_types(
                 let inner_kind = inner_child.kind();
 
                 if inner_kind.starts_with("expr1_") {
-                    return get_expr1_result_types(&inner_child, source, symbols, arity_map);
+                    return get_expr1_result_types(&inner_child, source, symbols);
                 }
             }
         }
@@ -1691,12 +1631,7 @@ pub fn get_expr_result_types(
 }
 
 /// Get result types for expr1_* nodes
-fn get_expr1_result_types(
-    expr1: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    _arity_map: &HashMap<&'static str, InstructionArity>,
-) -> Vec<ValueType> {
+fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
     #[cfg(feature = "native")]
     let kind = expr1.kind();
     #[cfg(all(feature = "wasm", not(feature = "native")))]
