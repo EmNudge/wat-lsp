@@ -5,7 +5,7 @@
 //! detect both stack underflow AND type mismatches.
 
 use crate::core::types::Diagnostic;
-use crate::symbols::ValueType;
+use crate::symbols::{SymbolTable, TypeKind, ValueType};
 use crate::utils::node_to_range;
 
 // Use the appropriate tree-sitter types based on feature
@@ -77,12 +77,124 @@ fn is_ref_subtype(sub: &ValueType, sup: &ValueType) -> bool {
         // i31ref, structref, arrayref <: eqref <: anyref
         (I31ref | Structref | Arrayref | Eqref, Anyref) => true,
         (I31ref | Structref | Arrayref, Eqref) => true,
-        // Ref(n) <: funcref (non-null func ref)
+        // Ref(n) / RefNull(n) — without symbol table, assume func hierarchy only
         (Ref(_), Funcref) => true,
-        // RefNull(n) <: funcref (nullable func ref)
         (RefNull(_), Funcref) => true,
+        // Non-null <: nullable for same index
+        (Ref(a), RefNull(b)) if a == b => true,
         _ => false,
     }
+}
+
+/// Check type compatibility with access to the symbol table for concrete GC type resolution.
+///
+/// This extends `types_compatible()` with knowledge of concrete type definitions,
+/// enabling validation of `Ref(n)` / `RefNull(n)` against abstract supertypes
+/// (structref, arrayref, eqref, anyref) and concrete parent chains.
+pub fn types_compatible_with_symbols(
+    actual: &ValueType,
+    expected: &ValueType,
+    symbols: &SymbolTable,
+) -> bool {
+    // Fast path: check without symbols first
+    if types_compatible(actual, expected) {
+        return true;
+    }
+    // Concrete ref subtyping requires symbols
+    is_concrete_ref_subtype(actual, expected, symbols)
+}
+
+/// Check concrete reference subtyping using the symbol table.
+///
+/// Handles:
+/// - `Ref(n)` where n is struct → subtype of Structref, Eqref, Anyref
+/// - `Ref(n)` where n is array → subtype of Arrayref, Eqref, Anyref
+/// - `Ref(n)` where n is func → subtype of Funcref
+/// - `Ref(child)` → subtype of `Ref(parent)` via declared parent chain
+/// - `Ref(n)` → subtype of `RefNull(n)` (non-null <: nullable)
+/// - `RefNull(n)` carries same hierarchy but includes null
+fn is_concrete_ref_subtype(sub: &ValueType, sup: &ValueType, symbols: &SymbolTable) -> bool {
+    use ValueType::*;
+
+    let (sub_idx, sub_nullable) = match sub {
+        Ref(n) => (*n, false),
+        RefNull(n) => (*n, true),
+        _ => return false,
+    };
+
+    // Concrete ref vs concrete ref subtyping via parent chain
+    match sup {
+        RefNull(sup_n) => {
+            // Ref(n) <: RefNull(n) and RefNull(n) <: RefNull(n) via parent chain
+            return is_type_subtype(sub_idx as usize, *sup_n as usize, symbols);
+        }
+        Ref(sup_n) => {
+            if sub_nullable {
+                // RefNull(n) is NOT a subtype of Ref(m) — nullable cannot satisfy non-null
+                return false;
+            }
+            return is_type_subtype(sub_idx as usize, *sup_n as usize, symbols);
+        }
+        _ => {}
+    }
+
+    // Check concrete type against abstract supertypes
+    // In the Wasm spec, abstract types like structref/arrayref/funcref are nullable,
+    // so both Ref(n) and RefNull(n) are subtypes.
+    let type_def = match symbols.get_type_by_index(sub_idx as usize) {
+        Some(td) => td,
+        None => return false,
+    };
+
+    matches!(
+        (&type_def.kind, sup),
+        (TypeKind::Struct { .. }, Structref | Eqref | Anyref)
+            | (TypeKind::Array { .. }, Arrayref | Eqref | Anyref)
+            | (TypeKind::Func { .. }, Funcref)
+    )
+}
+
+/// Check if `child_idx` is a declared subtype of `parent_idx` via the parent chain.
+///
+/// Walks up the `TypeDef.parent` chain from child, checking if parent_idx is encountered.
+/// Max depth of 64 prevents infinite loops from cyclic declarations.
+fn is_type_subtype(child_idx: usize, parent_idx: usize, symbols: &SymbolTable) -> bool {
+    if child_idx == parent_idx {
+        return true;
+    }
+
+    let mut current_idx = child_idx;
+    for _ in 0..64 {
+        let type_def = match symbols.get_type_by_index(current_idx) {
+            Some(td) => td,
+            None => return false,
+        };
+
+        let parent_ref = match &type_def.parent {
+            Some(p) => p.clone(),
+            None => return false,
+        };
+
+        // Resolve parent reference to index
+        let resolved_idx = if parent_ref.starts_with('$') {
+            match symbols.get_type_by_name(&parent_ref) {
+                Some(td) => td.index,
+                None => return false,
+            }
+        } else {
+            match parent_ref.parse::<usize>() {
+                Ok(idx) => idx,
+                Err(_) => return false,
+            }
+        };
+
+        if resolved_idx == parent_idx {
+            return true;
+        }
+        current_idx = resolved_idx;
+    }
+
+    false
 }
 
 impl TypeChecker {
@@ -391,5 +503,189 @@ impl TypeChecker {
     /// Take all collected diagnostics out of the checker.
     pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
         std::mem::take(&mut self.diagnostics)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbols::{TypeDef, TypeKind};
+
+    fn make_symbols_with_types(types: Vec<TypeDef>) -> SymbolTable {
+        let mut symbols = SymbolTable::default();
+        for td in types {
+            symbols.add_type(td);
+        }
+        symbols
+    }
+
+    fn struct_type(index: usize, name: Option<&str>, parent: Option<&str>) -> TypeDef {
+        TypeDef {
+            name: name.map(|s| s.to_string()),
+            index,
+            kind: TypeKind::Struct {
+                fields: vec![(None, ValueType::I32, false)],
+            },
+            parent: parent.map(|s| s.to_string()),
+            is_final: false,
+            line: 0,
+            range: None,
+        }
+    }
+
+    fn array_type(index: usize, name: Option<&str>) -> TypeDef {
+        TypeDef {
+            name: name.map(|s| s.to_string()),
+            index,
+            kind: TypeKind::Array {
+                element_type: ValueType::I32,
+                mutable: false,
+            },
+            parent: None,
+            is_final: false,
+            line: 0,
+            range: None,
+        }
+    }
+
+    fn func_type(index: usize, name: Option<&str>) -> TypeDef {
+        TypeDef {
+            name: name.map(|s| s.to_string()),
+            index,
+            kind: TypeKind::Func {
+                params: vec![],
+                results: vec![],
+            },
+            parent: None,
+            is_final: false,
+            line: 0,
+            range: None,
+        }
+    }
+
+    #[test]
+    fn test_is_type_subtype_self() {
+        let symbols = make_symbols_with_types(vec![struct_type(0, Some("$a"), None)]);
+        assert!(is_type_subtype(0, 0, &symbols));
+    }
+
+    #[test]
+    fn test_is_type_subtype_direct_parent() {
+        let symbols = make_symbols_with_types(vec![
+            struct_type(0, Some("$parent"), None),
+            struct_type(1, Some("$child"), Some("$parent")),
+        ]);
+        assert!(is_type_subtype(1, 0, &symbols));
+        assert!(!is_type_subtype(0, 1, &symbols));
+    }
+
+    #[test]
+    fn test_is_type_subtype_grandparent() {
+        let symbols = make_symbols_with_types(vec![
+            struct_type(0, Some("$grand"), None),
+            struct_type(1, Some("$parent"), Some("$grand")),
+            struct_type(2, Some("$child"), Some("$parent")),
+        ]);
+        assert!(is_type_subtype(2, 0, &symbols));
+        assert!(is_type_subtype(2, 1, &symbols));
+        assert!(!is_type_subtype(0, 2, &symbols));
+    }
+
+    #[test]
+    fn test_is_type_subtype_unrelated() {
+        let symbols = make_symbols_with_types(vec![
+            struct_type(0, Some("$a"), None),
+            struct_type(1, Some("$b"), None),
+        ]);
+        assert!(!is_type_subtype(0, 1, &symbols));
+        assert!(!is_type_subtype(1, 0, &symbols));
+    }
+
+    #[test]
+    fn test_concrete_struct_ref_subtype_of_structref() {
+        let symbols = make_symbols_with_types(vec![struct_type(0, Some("$s"), None)]);
+        assert!(types_compatible_with_symbols(
+            &ValueType::Ref(0),
+            &ValueType::Structref,
+            &symbols
+        ));
+    }
+
+    #[test]
+    fn test_concrete_struct_ref_subtype_of_eqref() {
+        let symbols = make_symbols_with_types(vec![struct_type(0, Some("$s"), None)]);
+        assert!(types_compatible_with_symbols(
+            &ValueType::Ref(0),
+            &ValueType::Eqref,
+            &symbols
+        ));
+    }
+
+    #[test]
+    fn test_concrete_struct_ref_subtype_of_anyref() {
+        let symbols = make_symbols_with_types(vec![struct_type(0, Some("$s"), None)]);
+        assert!(types_compatible_with_symbols(
+            &ValueType::Ref(0),
+            &ValueType::Anyref,
+            &symbols
+        ));
+    }
+
+    #[test]
+    fn test_concrete_array_ref_subtype_of_arrayref() {
+        let symbols = make_symbols_with_types(vec![array_type(0, Some("$a"))]);
+        assert!(types_compatible_with_symbols(
+            &ValueType::Ref(0),
+            &ValueType::Arrayref,
+            &symbols
+        ));
+    }
+
+    #[test]
+    fn test_concrete_func_ref_not_subtype_of_structref() {
+        let symbols = make_symbols_with_types(vec![func_type(0, Some("$f"))]);
+        assert!(!types_compatible_with_symbols(
+            &ValueType::Ref(0),
+            &ValueType::Structref,
+            &symbols
+        ));
+    }
+
+    #[test]
+    fn test_ref_subtype_of_refnull_same_index() {
+        let symbols = make_symbols_with_types(vec![struct_type(0, Some("$s"), None)]);
+        assert!(types_compatible_with_symbols(
+            &ValueType::Ref(0),
+            &ValueType::RefNull(0),
+            &symbols
+        ));
+    }
+
+    #[test]
+    fn test_refnull_not_subtype_of_ref() {
+        let symbols = make_symbols_with_types(vec![struct_type(0, Some("$s"), None)]);
+        assert!(!types_compatible_with_symbols(
+            &ValueType::RefNull(0),
+            &ValueType::Ref(0),
+            &symbols
+        ));
+    }
+
+    #[test]
+    fn test_concrete_ref_parent_chain() {
+        let symbols = make_symbols_with_types(vec![
+            struct_type(0, Some("$parent"), None),
+            struct_type(1, Some("$child"), Some("$parent")),
+        ]);
+        assert!(types_compatible_with_symbols(
+            &ValueType::Ref(1),
+            &ValueType::Ref(0),
+            &symbols
+        ));
+        assert!(types_compatible_with_symbols(
+            &ValueType::Ref(1),
+            &ValueType::RefNull(0),
+            &symbols
+        ));
     }
 }

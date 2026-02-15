@@ -1,0 +1,10 @@
+{
+  "description": "Struct field index out of bounds should produce error",
+  "diagnostics": [
+    {
+      "line": 5,
+      "message_contains": "unknown field",
+      "severity": 1
+    }
+  ]
+}

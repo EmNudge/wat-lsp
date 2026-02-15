@@ -193,7 +193,7 @@ pub fn walk_tree_for_diagnostics(
         }
     }
 
-    // Check SIMD lane indices and alignment constraints
+    // Check SIMD lane indices, alignment constraints, and GC struct field access
     if kind_str == "instr_plain" {
         diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
             &node, source,
@@ -201,6 +201,9 @@ pub fn walk_tree_for_diagnostics(
         diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
             &node, source,
         ));
+        diagnostics.extend(
+            crate::diagnostics_core::gc_checks::check_struct_field_access(&node, source, symbols),
+        );
     } else if kind_str == "expr1_plain" {
         // In folded form, instr_plain is a child that won't be visited separately
         let mut cursor = node.walk();
@@ -212,6 +215,11 @@ pub fn walk_tree_for_diagnostics(
                 diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
                     &child, source,
                 ));
+                diagnostics.extend(
+                    crate::diagnostics_core::gc_checks::check_struct_field_access(
+                        &child, source, symbols,
+                    ),
+                );
                 break;
             }
         }

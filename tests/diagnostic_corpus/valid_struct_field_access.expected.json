@@ -1,0 +1,4 @@
+{
+  "description": "Valid struct field access should produce no errors",
+  "diagnostics": []
+}

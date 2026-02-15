@@ -6,6 +6,7 @@
 pub mod alignment_checks;
 pub mod arity;
 pub mod folded_checks;
+pub mod gc_checks;
 pub mod memory_checks;
 pub mod module_checks;
 pub mod references;

@@ -26,26 +26,26 @@
 
   ;; Base shape type
   (type $shape (sub (struct
-    (field $x f64)
-    (field $y f64))))
+    (field $x (mut f64))
+    (field $y (mut f64)))))
 
   ;; Circle extends shape
   (type $circle (sub $shape (struct
-    (field $x f64)
-    (field $y f64)
+    (field $x (mut f64))
+    (field $y (mut f64))
     (field $radius f64))))
 
   ;; Rectangle extends shape
   (type $rectangle (sub $shape (struct
-    (field $x f64)
-    (field $y f64)
+    (field $x (mut f64))
+    (field $y (mut f64))
     (field $width f64)
     (field $height f64))))
 
   ;; Final square type (cannot be extended)
   (type $square (sub final $rectangle (struct
-    (field $x f64)
-    (field $y f64)
+    (field $x (mut f64))
+    (field $y (mut f64))
     (field $width f64)
     (field $height f64))))
 
