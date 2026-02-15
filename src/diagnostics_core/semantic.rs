@@ -154,6 +154,8 @@ fn process_block_node(node: &Node, source: &str, symbols: &SymbolTable, checker:
         CtrlOpcode::If
     } else if is_loop_node(node) {
         CtrlOpcode::Loop
+    } else if is_try_table_node(node) {
+        CtrlOpcode::TryTable
     } else {
         CtrlOpcode::Block
     };
@@ -163,6 +165,7 @@ fn process_block_node(node: &Node, source: &str, symbols: &SymbolTable, checker:
         let block_name = match opcode {
             CtrlOpcode::If => "if",
             CtrlOpcode::Loop => "loop",
+            CtrlOpcode::TryTable => "try_table",
             _ => "block",
         };
         checker.pop_vals_for_instr(&params, node, block_name);
@@ -259,6 +262,14 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
                 // Nested if block in linear format
                 process_block_body(&child, source, symbols, checker);
             }
+            "block_try_table" | "block_try" => {
+                // Exception handling block — recurse into its body
+                process_block_body(&child, source, symbols, checker);
+            }
+            "catch_clause" => {
+                // Catch clauses in try_table are label declarations, not code blocks.
+                // Reference checking is handled in tree_walk.rs.
+            }
             "instr_else" | "else" => {
                 // At else, we need to reset to block params for the else branch
                 // The then branch's values should match end_types, then reset
@@ -327,6 +338,25 @@ fn contains_block_if(node: &Node) -> bool {
         let kind = child.kind();
 
         if kind == "block_if" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a node is or contains a try_table block
+fn is_try_table_node(node: &Node) -> bool {
+    #[cfg(feature = "native")]
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = node.kind();
+
+    if kind == "block_try_table" {
+        return true;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "block_try_table" {
             return true;
         }
     }
@@ -1815,7 +1845,12 @@ pub fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType>
         if kind == "block_type" {
             return parse_result_types(&child, source);
         }
-        if kind == "block_block" || kind == "loop_block" || kind == "if_block" || kind == "block_if"
+        if kind == "block_block"
+            || kind == "loop_block"
+            || kind == "if_block"
+            || kind == "block_if"
+            || kind == "block_try_table"
+            || kind == "block_try"
         {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
@@ -1842,7 +1877,12 @@ fn get_block_param_types_from_expr(expr: &Node, source: &str) -> Vec<ValueType> 
         #[cfg(all(feature = "wasm", not(feature = "native")))]
         let kind = child.kind();
 
-        if kind == "expr1_block" || kind == "expr1_loop" || kind == "expr1_if" {
+        if kind == "expr1_block"
+            || kind == "expr1_loop"
+            || kind == "expr1_if"
+            || kind == "expr1_try_table"
+            || kind == "expr1_try"
+        {
             return get_block_param_types(&child, source);
         }
         if kind == "expr1" {
@@ -1856,6 +1896,8 @@ fn get_block_param_types_from_expr(expr: &Node, source: &str) -> Vec<ValueType> 
                 if inner_kind == "expr1_block"
                     || inner_kind == "expr1_loop"
                     || inner_kind == "expr1_if"
+                    || inner_kind == "expr1_try_table"
+                    || inner_kind == "expr1_try"
                 {
                     return get_block_param_types(&inner_child, source);
                 }
@@ -1878,7 +1920,12 @@ pub fn get_block_param_types(block_node: &Node, source: &str) -> Vec<ValueType> 
         if kind == "func_type_params_many" {
             types.extend(parse_func_type_results(&child, source));
         }
-        if kind == "block_block" || kind == "loop_block" || kind == "if_block" || kind == "block_if"
+        if kind == "block_block"
+            || kind == "loop_block"
+            || kind == "if_block"
+            || kind == "block_if"
+            || kind == "block_try_table"
+            || kind == "block_try"
         {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
