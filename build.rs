@@ -112,7 +112,13 @@ fn parse_docs(content: &str) -> HashMap<String, String> {
             in_code_block = !in_code_block;
             // Add code fence to doc if we're collecting
             if instruction_name.is_some() {
-                doc_lines.push(trimmed);
+                // Normalize wat-snippet to wat for LSP hover rendering
+                let fence = if trimmed == "```wat-snippet" {
+                    "```wat"
+                } else {
+                    trimmed
+                };
+                doc_lines.push(fence);
             }
             continue;
         }
