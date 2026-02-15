@@ -488,11 +488,11 @@ fn init_arity_table() -> Vec<(&'static str, InstructionArity)> {
         ),
         (
             "br_on_cast",
-            InstructionArity::exact(2, "label and type index", 1, 0),
+            InstructionArity::exact(3, "label, source and target type", 1, 0),
         ),
         (
             "br_on_cast_fail",
-            InstructionArity::exact(2, "label and type index", 1, 0),
+            InstructionArity::exact(3, "label, source and target type", 1, 0),
         ),
         // Exceptions
         ("throw", InstructionArity::dynamic(1, 1, "tag index", 0)),
@@ -579,6 +579,10 @@ fn init_arity_table() -> Vec<(&'static str, InstructionArity)> {
         (
             "ref.func",
             InstructionArity::exact(1, "function index", 0, 1),
+        ),
+        (
+            "ref.extern",
+            InstructionArity::exact(1, "externref index", 0, 1),
         ),
         ("ref.is_null", InstructionArity::unary_op()),
         ("ref.as_non_null", InstructionArity::unary_op()),

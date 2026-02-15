@@ -3117,4 +3117,114 @@ mod tests {
             undefined_diags
         );
     }
+
+    // ======================================================================
+    // br_table label consistency tests (#190)
+    // ======================================================================
+
+    #[test]
+    fn test_br_table_consistent_labels_ok() {
+        // Linear format: both blocks have (result i32)
+        let document = r#"(module (func (result i32)
+  block (result i32)
+    block (result i32)
+      i32.const 1
+      i32.const 0
+      br_table 0 1
+    end
+  end
+))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let br_table_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("br_table"))
+            .collect();
+        assert!(
+            br_table_diags.is_empty(),
+            "Consistent br_table targets should not produce diagnostics, got: {:?}",
+            br_table_diags
+        );
+    }
+
+    #[test]
+    fn test_br_table_mismatched_labels() {
+        // Linear format: inner block has no result, outer block has (result i32)
+        let document = r#"(module (func
+  block (result i32)
+    block
+      i32.const 0
+      br_table 0 1
+    end
+    i32.const 42
+  end
+  drop
+))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let br_table_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("br_table targets have inconsistent"))
+            .collect();
+        assert!(
+            !br_table_diags.is_empty(),
+            "Mismatched br_table targets should produce a diagnostic"
+        );
+    }
+
+    // ======================================================================
+    // Typed select tests (#192)
+    // ======================================================================
+
+    #[test]
+    fn test_typed_select_ok() {
+        let document = r#"(module (func (result i32)
+  (i32.const 1)
+  (i32.const 2)
+  (i32.const 0)
+  (select (result i32))
+))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let type_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("type mismatch"))
+            .collect();
+        assert!(
+            type_diags.is_empty(),
+            "Valid typed select should not produce type mismatch, got: {:?}",
+            type_diags
+        );
+    }
+
+    #[test]
+    fn test_untyped_select_ok() {
+        let document = r#"(module (func (result i32)
+  (i32.const 1)
+  (i32.const 2)
+  (i32.const 0)
+  (select)
+))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let stack_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.message.contains("Stack underflow") || d.message.contains("type mismatch")
+            })
+            .collect();
+        assert!(
+            stack_diags.is_empty(),
+            "Valid untyped select should not produce diagnostics, got: {:?}",
+            stack_diags
+        );
+    }
 }
