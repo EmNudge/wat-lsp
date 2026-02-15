@@ -7,6 +7,7 @@
 //! - Duplicate export names
 //! - Import ordering (imports must precede definitions)
 //! - Duplicate identifiers within the same index space
+//! - Duplicate local/parameter names within functions
 //! - Inline function type mismatches
 //! - Constant expression validation
 //! - Block label mismatches
@@ -39,6 +40,7 @@ pub fn validate_module_structure(
 
     check_memory_limits(symbols, &mut diagnostics);
     check_min_gt_max(symbols, &mut diagnostics);
+    check_duplicate_locals(symbols, &mut diagnostics);
 
     // Find the module node for AST-based checks
     if let Some(module_node) = find_module_node(root) {
@@ -991,6 +993,48 @@ fn check_label_match(
 }
 
 // ============================================================================
+// Duplicate local/parameter names within functions
+// ============================================================================
+
+fn check_duplicate_locals(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnostic>) {
+    for func in &symbols.functions {
+        let mut seen: HashMap<&str, Range> = HashMap::new();
+
+        // Check parameters first
+        for param in &func.parameters {
+            if let Some(ref name) = param.name {
+                if let Some(ref range) = param.range {
+                    if let Some(_first) = seen.get(name.as_str()) {
+                        diagnostics.push(Diagnostic::error(
+                            *range,
+                            format!("duplicate local {}", name),
+                        ));
+                    } else {
+                        seen.insert(name, *range);
+                    }
+                }
+            }
+        }
+
+        // Check locals (also conflicts with params)
+        for local in &func.locals {
+            if let Some(ref name) = local.name {
+                if let Some(ref range) = local.range {
+                    if let Some(_first) = seen.get(name.as_str()) {
+                        diagnostics.push(Diagnostic::error(
+                            *range,
+                            format!("duplicate local {}", name),
+                        ));
+                    } else {
+                        seen.insert(name, *range);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1218,6 +1262,64 @@ mod tests {
         let source = r#"(module
             (type $t (func (param i32) (result i32)))
             (func (type $t) (param i32) (result i32))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(diags.is_empty());
+    }
+
+    // ======================================================================
+    // Duplicate local/parameter name tests
+    // ======================================================================
+
+    #[test]
+    fn test_duplicate_param_names() {
+        let source = r#"(module
+            (func $f (param $x i32) (param $x i64))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("duplicate local $x"));
+    }
+
+    #[test]
+    fn test_duplicate_local_names() {
+        let source = r#"(module
+            (func $f
+                (local $y i32)
+                (local $y f64)
+            )
+        )"#;
+        let diags = get_diagnostics(source);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("duplicate local $y"));
+    }
+
+    #[test]
+    fn test_local_shadows_param() {
+        let source = r#"(module
+            (func $f (param $x i32)
+                (local $x i64)
+            )
+        )"#;
+        let diags = get_diagnostics(source);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("duplicate local $x"));
+    }
+
+    #[test]
+    fn test_same_name_different_functions_ok() {
+        let source = r#"(module
+            (func $f (param $x i32))
+            (func $g (param $x i32))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_unnamed_params_no_conflict() {
+        let source = r#"(module
+            (func (param i32) (param i32))
         )"#;
         let diags = get_diagnostics(source);
         assert!(diags.is_empty());

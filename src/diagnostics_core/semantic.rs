@@ -473,13 +473,54 @@ fn process_instruction(
     }
 
     if instr_name == "br_table" {
-        // Pop i32 index, pop label types, mark unreachable
+        // Pop i32 index
         checker.pop_expect(&ValueType::I32, node);
-        // Use default label (last one) for type checking
-        if let Some(depth) = get_last_branch_depth(node, source, checker) {
-            if let Some(label_types) = checker.label_types(depth) {
+        let depths = get_all_branch_depths(node, source, checker);
+        if let Some(&default_depth) = depths.last() {
+            // Type-check using the default (last) label
+            if let Some(label_types) = checker.label_types(default_depth) {
                 let label_types = label_types.to_vec();
                 checker.pop_vals_for_instr(&label_types, node, instr_name);
+            }
+            // Validate all non-default labels have consistent types with default
+            if let Some(default_types) = checker.label_types(default_depth) {
+                let default_types = default_types.to_vec();
+                let default_arity = default_types.len();
+                let mut reported = false;
+                for &depth in depths.iter().take(depths.len().saturating_sub(1)) {
+                    if reported {
+                        break;
+                    }
+                    if let Some(target_types) = checker.label_types(depth) {
+                        let target_types = target_types.to_vec();
+                        if target_types.len() != default_arity {
+                            checker.diagnostics.push(
+                                Diagnostic::error(
+                                    node_to_range(node),
+                                    "type mismatch: br_table targets have inconsistent types"
+                                        .to_string(),
+                                )
+                                .with_code("type-mismatch"),
+                            );
+                            reported = true;
+                        } else {
+                            for (t, d) in target_types.iter().zip(default_types.iter()) {
+                                if !types_compatible(t, d) {
+                                    checker.diagnostics.push(
+                                        Diagnostic::error(
+                                            node_to_range(node),
+                                            "type mismatch: br_table targets have inconsistent types"
+                                                .to_string(),
+                                        )
+                                        .with_code("type-mismatch"),
+                                    );
+                                    reported = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         checker.mark_unreachable();
@@ -653,7 +694,11 @@ fn derive_consumed_types_from_name(
         "drop" => Some(vec![ValueType::Unknown]),
 
         // Select — 2 same-type values + i32 condition
-        "select" => Some(vec![ValueType::Unknown, ValueType::Unknown, ValueType::I32]),
+        // Typed select: (select (result T)) uses declared type for operands
+        "select" => {
+            let ty = get_select_result_type(node, source).unwrap_or(ValueType::Unknown);
+            Some(vec![ty.clone(), ty, ValueType::I32])
+        }
 
         // Local/global get — consume nothing
         "local.get" | "global.get" => Some(vec![]),
@@ -907,10 +952,9 @@ fn get_branch_depth(node: &Node, source: &str, checker: &TypeChecker) -> Option<
     None
 }
 
-/// Get the last (default) branch depth from a br_table instruction
-fn get_last_branch_depth(node: &Node, source: &str, checker: &TypeChecker) -> Option<usize> {
-    // br_table has multiple indices; the last one is the default
-    let mut last_index = None;
+/// Get all branch depths from a br_table instruction (last one is the default)
+fn get_all_branch_depths(node: &Node, source: &str, checker: &TypeChecker) -> Vec<usize> {
+    let mut indices = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -919,7 +963,7 @@ fn get_last_branch_depth(node: &Node, source: &str, checker: &TypeChecker) -> Op
         let kind = child.kind();
 
         if kind == "index" || kind == "identifier" || kind == "nat" {
-            last_index = Some(source[child.byte_range()].trim().to_string());
+            indices.push(source[child.byte_range()].trim().to_string());
         }
         if kind.starts_with("op_") {
             let mut inner_cursor = child.walk();
@@ -930,15 +974,63 @@ fn get_last_branch_depth(node: &Node, source: &str, checker: &TypeChecker) -> Op
                 let inner_kind = inner_child.kind();
 
                 if inner_kind == "index" || inner_kind == "identifier" || inner_kind == "nat" {
-                    last_index = Some(source[inner_child.byte_range()].trim().to_string());
+                    indices.push(source[inner_child.byte_range()].trim().to_string());
                 }
             }
         }
     }
-    if let Some(ref idx_str) = last_index {
-        if let Ok(depth) = idx_str.parse::<usize>() {
-            if depth < checker.ctrl_depth() {
-                return Some(depth);
+    indices
+        .iter()
+        .filter_map(|idx_str| {
+            idx_str
+                .parse::<usize>()
+                .ok()
+                .filter(|&depth| depth < checker.ctrl_depth())
+        })
+        .collect()
+}
+
+/// Check if two value types are compatible for br_table target consistency
+fn types_compatible(a: &ValueType, b: &ValueType) -> bool {
+    if *a == ValueType::Unknown || *b == ValueType::Unknown {
+        return true;
+    }
+    a == b
+}
+
+/// Get the result type from a typed select instruction: `(select (result T))`
+/// Returns None for untyped select.
+fn get_select_result_type(node: &Node, source: &str) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "op_select" {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let inner_kind = inner_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let inner_kind = inner_child.kind();
+
+                if inner_kind == "func_type_results" {
+                    // Look for value_type children inside (result T)
+                    let mut vt_cursor = inner_child.walk();
+                    for vt_child in inner_child.children(&mut vt_cursor) {
+                        #[cfg(feature = "native")]
+                        let vt_kind = vt_child.kind();
+                        #[cfg(all(feature = "wasm", not(feature = "native")))]
+                        let vt_kind = vt_child.kind();
+
+                        if vt_kind == "value_type" {
+                            let text = &source[vt_child.byte_range()];
+                            return ValueType::try_parse(text.trim());
+                        }
+                    }
+                }
             }
         }
     }
@@ -1226,9 +1318,12 @@ pub fn infer_instruction_result_types(
 
         "ref.null" => vec![ValueType::Unknown],
         "ref.func" => vec![ValueType::Funcref],
+        "ref.extern" => vec![ValueType::Externref],
         "ref.is_null" => vec![ValueType::I32],
 
-        "select" => vec![ValueType::Unknown],
+        "select" => {
+            vec![get_select_result_type(node, source).unwrap_or(ValueType::Unknown)]
+        }
         "br_if" => vec![],
 
         "v128.any_true" => vec![ValueType::I32],
