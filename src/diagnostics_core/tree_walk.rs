@@ -4,9 +4,11 @@
 //! diagnostic checks in a single pass over the AST. Both native and WASM
 //! builds delegate to this shared implementation.
 
+use std::collections::HashSet;
+
 use crate::core::types::Diagnostic;
 use crate::symbols::{SymbolTable, ValueType};
-use crate::utils::{determine_instruction_context_at_node, InstructionContext};
+use crate::utils::{determine_instruction_context_at_node, node_to_range, InstructionContext};
 
 #[cfg(feature = "native")]
 use tree_sitter::Node;
@@ -83,12 +85,17 @@ pub fn walk_tree_for_diagnostics(
 
         if !found_instr_list && !expected_results.is_empty() {
             diagnostics.push(Diagnostic::error(
-                crate::utils::node_to_range(&node),
+                node_to_range(&node),
                 format!(
                     "Type mismatch: function body leaves 0 values on stack but signature requires {}",
                     expected_results.len()
                 ),
             ));
+        }
+
+        // Check for unused locals and parameters
+        if !has_inline_import(&node) {
+            check_unused_locals(&node, source, symbols, diagnostics);
         }
     }
 
@@ -254,4 +261,161 @@ pub fn walk_tree_for_diagnostics(
     for child in node.children(&mut cursor) {
         walk_tree_for_diagnostics(child, source, symbols, config, diagnostics);
     }
+}
+
+/// Check if a function node has an inline import
+fn has_inline_import(node: &Node) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = &*ck;
+        if ck == "import" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check for unused locals and parameters in a function.
+fn check_unused_locals(
+    func_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let func_line = func_node.start_position().row as u32;
+    let func = match symbols.find_function_containing_line(func_line) {
+        Some(f) => f,
+        None => return,
+    };
+
+    // Total number of params + locals
+    let num_params = func.parameters.len();
+    let num_locals = func.locals.len();
+    let total = num_params + num_locals;
+    if total == 0 {
+        return;
+    }
+
+    // Collect all used indices by scanning the function body
+    let mut used_indices: HashSet<usize> = HashSet::new();
+    collect_local_uses(func_node, source, func, &mut used_indices);
+
+    // Check parameters
+    for param in &func.parameters {
+        if param.name.is_none() {
+            continue; // Can't meaningfully warn on unnamed params
+        }
+        if !used_indices.contains(&param.index) {
+            if let Some(range) = param.range {
+                let name = param.name.as_ref().unwrap();
+                diagnostics.push(Diagnostic::hint(
+                    range,
+                    format!("Unused parameter {}", name),
+                ));
+            }
+        }
+    }
+
+    // Check locals
+    for local in &func.locals {
+        if local.name.is_none() {
+            continue; // Can't meaningfully warn on unnamed locals
+        }
+        let absolute_idx = num_params + local.index;
+        if !used_indices.contains(&absolute_idx) {
+            if let Some(range) = local.range {
+                let name = local.name.as_ref().unwrap();
+                diagnostics.push(Diagnostic::warning(range, format!("Unused local {}", name)));
+            }
+        }
+    }
+}
+
+/// Recursively scan a node tree for local.get/local.set/local.tee references
+/// and record which local indices are used.
+fn collect_local_uses(
+    node: &Node,
+    source: &str,
+    func: &crate::symbols::Function,
+    used: &mut HashSet<usize>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = &*kind;
+
+    if kind == "instr_plain" || kind == "expr1_plain" {
+        let text = &source[node.byte_range()];
+        let first_token = text.split_whitespace().next().unwrap_or("");
+        if matches!(first_token, "local.get" | "local.set" | "local.tee") {
+            // Find the index/identifier child
+            if let Some(idx) = resolve_local_index(node, source, func) {
+                used.insert(idx);
+            }
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_local_uses(&child, source, func, used);
+    }
+}
+
+/// Resolve the local index referenced by a local.get/set/tee instruction.
+fn resolve_local_index(
+    node: &Node,
+    source: &str,
+    func: &crate::symbols::Function,
+) -> Option<usize> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = &*ck;
+
+        if ck == "index" || ck == "identifier" || ck == "nat" {
+            let text = source[child.byte_range()].trim();
+            if text.starts_with('$') {
+                // Named reference — find the param or local
+                for param in &func.parameters {
+                    if param.name.as_deref() == Some(text) {
+                        return Some(param.index);
+                    }
+                }
+                for local in &func.locals {
+                    if local.name.as_deref() == Some(text) {
+                        return Some(func.parameters.len() + local.index);
+                    }
+                }
+            } else if let Ok(idx) = text.parse::<usize>() {
+                return Some(idx);
+            }
+            // Check inside index node for identifier/nat children
+            let mut ic = child.walk();
+            for idx_child in child.children(&mut ic) {
+                let ik = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = &*ik;
+                if ik == "identifier" {
+                    let id_text = source[idx_child.byte_range()].trim();
+                    for param in &func.parameters {
+                        if param.name.as_deref() == Some(id_text) {
+                            return Some(param.index);
+                        }
+                    }
+                    for local in &func.locals {
+                        if local.name.as_deref() == Some(id_text) {
+                            return Some(func.parameters.len() + local.index);
+                        }
+                    }
+                } else if ik == "nat" {
+                    if let Ok(idx) = source[idx_child.byte_range()].trim().parse::<usize>() {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+    }
+    None
 }

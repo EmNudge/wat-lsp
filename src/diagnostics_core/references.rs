@@ -364,6 +364,11 @@ pub fn check_references(
         return check_multi_index_instruction(node, source, symbols, context, &second_context);
     }
 
+    // memory.copy and table.copy take two indices of the same context (dest, src)
+    if first_token == "memory.copy" || first_token == "table.copy" {
+        return check_multi_index_instruction(node, source, symbols, context, context);
+    }
+
     find_undefined_identifiers(node, source, symbols, context)
 }
 

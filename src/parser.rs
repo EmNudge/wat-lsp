@@ -40,6 +40,7 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     // Extract imports FIRST - imports get indices before regular declarations
     // Returns counters for each kind of import
     let import_counts = extract_imports(&root, source, &mut symbol_table);
+    symbol_table.num_imported_globals = import_counts.globals;
 
     // Extract in order: globals, types, tables, memories, functions
     // (Order matters for index assignment)

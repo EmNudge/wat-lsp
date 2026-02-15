@@ -272,6 +272,9 @@ pub struct SymbolTable {
     pub tag_map: HashMap<String, usize>,
     pub data_map: HashMap<String, usize>,
     pub elem_map: HashMap<String, usize>,
+
+    // Import counts — items with index < count are imports
+    pub num_imported_globals: usize,
 }
 
 /// Macro to generate add/get methods for symbol types.
