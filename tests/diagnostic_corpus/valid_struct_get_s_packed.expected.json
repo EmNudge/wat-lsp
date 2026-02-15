@@ -1,0 +1,4 @@
+{
+  "description": "Valid struct.get_s on packed i8 field should produce no errors",
+  "diagnostics": []
+}

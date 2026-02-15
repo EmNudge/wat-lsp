@@ -1,0 +1,10 @@
+{
+  "description": "struct.get_s on non-packed field type should produce error",
+  "diagnostics": [
+    {
+      "line": 5,
+      "message_contains": "packed storage type",
+      "severity": 1
+    }
+  ]
+}
