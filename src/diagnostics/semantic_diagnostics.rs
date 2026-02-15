@@ -3227,4 +3227,239 @@ mod tests {
             stack_diags
         );
     }
+
+    // ======================================================================
+    // Unused locals and parameters tests (Issue #198)
+    // ======================================================================
+
+    #[test]
+    fn test_unused_local_warning() {
+        let document = r#"(module (func (local $x i32) (i32.const 1)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused local"))
+            .collect();
+        assert_eq!(unused.len(), 1);
+        assert!(unused[0].message.contains("$x"));
+        assert_eq!(unused[0].severity, Some(DiagnosticSeverity::WARNING),);
+    }
+
+    #[test]
+    fn test_used_local_via_get() {
+        let document = r#"(module (func (local $x i32) (local.get $x) (drop)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(unused.is_empty(), "Used local should not be flagged");
+    }
+
+    #[test]
+    fn test_used_local_via_set() {
+        let document = r#"(module (func (local $x i32) (i32.const 1) (local.set $x)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(unused.is_empty(), "Set local should count as used");
+    }
+
+    #[test]
+    fn test_used_local_via_tee() {
+        let document = r#"(module (func (local $x i32) (i32.const 1) (local.tee $x) (drop)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(unused.is_empty(), "Tee local should count as used");
+    }
+
+    #[test]
+    fn test_unused_parameter_hint() {
+        let document = r#"(module (func (param $p i32)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused parameter"))
+            .collect();
+        assert_eq!(unused.len(), 1);
+        assert!(unused[0].message.contains("$p"));
+        assert_eq!(unused[0].severity, Some(DiagnosticSeverity::HINT),);
+    }
+
+    #[test]
+    fn test_used_parameter() {
+        let document = r#"(module (func (param $p i32) (result i32) (local.get $p)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(unused.is_empty(), "Used parameter should not be flagged");
+    }
+
+    #[test]
+    fn test_numeric_index_counts_as_usage() {
+        let document = r#"(module (func (param $p i32) (result i32) (local.get 0)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(unused.is_empty(), "Numeric index 0 should mark $p as used");
+    }
+
+    #[test]
+    fn test_multiple_locals_one_unused() {
+        let document = r#"(module (func
+            (local $used i32) (local $unused i32)
+            (local.get $used) (drop)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert_eq!(unused.len(), 1);
+        assert!(unused[0].message.contains("$unused"));
+    }
+
+    #[test]
+    fn test_usage_inside_nested_block() {
+        let document = r#"(module (func
+            (local $x i32)
+            (block (local.get $x) (drop))))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(unused.is_empty(), "Usage in nested block should count");
+    }
+
+    #[test]
+    fn test_unnamed_locals_no_warning() {
+        let document = r#"(module (func (local i32)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(unused.is_empty(), "Unnamed locals should not get warnings");
+    }
+
+    #[test]
+    fn test_no_false_positives_all_used() {
+        let document = r#"(module (func (param $a i32) (param $b i32) (result i32)
+            (local $c i32)
+            (local.set $c (i32.add (local.get $a) (local.get $b)))
+            (local.get $c)))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let unused: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused"))
+            .collect();
+        assert!(
+            unused.is_empty(),
+            "All params/locals used — no warnings expected"
+        );
+    }
+
+    // ======================================================================
+    // Multi-memory/table bulk operation index validation (Issue #194)
+    // ======================================================================
+
+    #[test]
+    fn test_memory_copy_valid_single_memory() {
+        // memory.copy without explicit indices defaults to memory 0
+        let document = r#"(module
+            (memory 1)
+            (func
+                (memory.copy (i32.const 0) (i32.const 0) (i32.const 0))))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let ref_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unknown memory"))
+            .collect();
+        assert!(ref_diags.is_empty());
+    }
+
+    #[test]
+    fn test_memory_fill_invalid_index() {
+        let document = r#"(module
+            (memory 1)
+            (func
+                (memory.fill 5 (i32.const 0) (i32.const 0) (i32.const 0))))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let ref_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unknown memory"))
+            .collect();
+        assert!(
+            !ref_diags.is_empty(),
+            "memory.fill with invalid index should be flagged"
+        );
+    }
+
+    #[test]
+    fn test_table_fill_invalid_index() {
+        let document = r#"(module
+            (table 1 funcref)
+            (func
+                (table.fill 5 (i32.const 0) (ref.null func) (i32.const 0))))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let ref_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unknown table"))
+            .collect();
+        assert!(
+            !ref_diags.is_empty(),
+            "table.fill with invalid index should be flagged"
+        );
+    }
 }

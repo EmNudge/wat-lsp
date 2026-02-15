@@ -45,11 +45,14 @@ pub fn validate_module_structure(
     // Find the module node for AST-based checks
     if let Some(module_node) = find_module_node(root) {
         check_multiple_starts(&module_node, source, &mut diagnostics);
+        check_start_signature(&module_node, source, symbols, &mut diagnostics);
         check_duplicate_exports(&module_node, source, &mut diagnostics);
         check_import_ordering(&module_node, source, &mut diagnostics);
         check_duplicate_identifiers(&module_node, source, &mut diagnostics);
         check_inline_type_mismatches(&module_node, source, symbols, &mut diagnostics);
-        check_constant_expressions(&module_node, source, &mut diagnostics);
+        check_constant_expressions(&module_node, source, symbols, &mut diagnostics);
+        check_data_segment_memory_indices(&module_node, source, symbols, &mut diagnostics);
+        check_elem_segment_table_indices(&module_node, source, symbols, &mut diagnostics);
     }
 
     diagnostics
@@ -215,6 +218,68 @@ fn check_multiple_starts(module: &Node, source: &str, diagnostics: &mut Vec<Diag
                 ));
             } else {
                 seen_start = true;
+            }
+        }
+    });
+}
+
+// ============================================================================
+// 3b. Start function signature must be [] -> []
+// ============================================================================
+
+fn check_start_signature(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_start" {
+            return;
+        }
+
+        // Find the function index referenced by start
+        let mut cursor = field.walk();
+        for child in field.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "index" || ck == "identifier" {
+                let text = node_text(&child, source);
+                let func = if text.starts_with('$') {
+                    symbols.get_function_by_name(text)
+                } else if let Ok(idx) = text.parse::<usize>() {
+                    symbols.get_function_by_index(idx)
+                } else {
+                    // Might be an index node wrapping an identifier/nat
+                    let mut ic = child.walk();
+                    let mut found = None;
+                    for idx_child in child.children(&mut ic) {
+                        let ik = idx_child.kind();
+                        #[cfg(all(feature = "wasm", not(feature = "native")))]
+                        let ik = ik.as_str();
+                        if ik == "identifier" {
+                            let id_text = node_text(&idx_child, source);
+                            found = symbols.get_function_by_name(id_text);
+                        } else if ik == "nat" {
+                            let nat_text = node_text(&idx_child, source);
+                            if let Ok(idx) = nat_text.parse::<usize>() {
+                                found = symbols.get_function_by_index(idx);
+                            }
+                        }
+                    }
+                    found
+                };
+
+                if let Some(func) = func {
+                    if !func.parameters.is_empty() || !func.results.is_empty() {
+                        diagnostics.push(Diagnostic::error(node_to_range(field), "start function"));
+                    }
+                }
+                return;
             }
         }
     });
@@ -716,7 +781,12 @@ const CONST_INSTRUCTIONS: &[&str] = &[
     "i64.mul",
 ];
 
-fn check_constant_expressions(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn check_constant_expressions(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     for_each_module_field(module, |field| {
         let fk = field.kind();
         #[cfg(all(feature = "wasm", not(feature = "native")))]
@@ -725,27 +795,32 @@ fn check_constant_expressions(module: &Node, source: &str, diagnostics: &mut Vec
         match fk {
             "module_field_global" => {
                 // Check instructions after global_type
-                check_global_init_expr(field, source, diagnostics);
+                check_global_init_expr(field, source, symbols, diagnostics);
             }
             "module_field_data" => {
                 // Check offset expression
-                check_offset_expr(field, source, diagnostics);
+                check_offset_expr(field, source, symbols, diagnostics);
             }
             "module_field_elem" => {
                 // Check offset expression and elem expressions
-                check_offset_expr(field, source, diagnostics);
-                check_elem_exprs(field, source, diagnostics);
+                check_offset_expr(field, source, symbols, diagnostics);
+                check_elem_exprs(field, source, symbols, diagnostics);
             }
             "module_field_table" => {
                 // Check table init expression (if any)
-                check_table_init_expr(field, source, diagnostics);
+                check_table_init_expr(field, source, symbols, diagnostics);
             }
             _ => {}
         }
     });
 }
 
-fn check_global_init_expr(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn check_global_init_expr(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     // Global: (global $id? type init_expr...)
     // init instructions appear after global_type as instr or expr nodes
     let mut past_global_type = false;
@@ -759,36 +834,51 @@ fn check_global_init_expr(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
             continue;
         }
         if past_global_type {
-            check_const_instruction_tree(&child, source, diagnostics);
+            check_const_instruction_tree(&child, source, symbols, diagnostics);
         }
     }
 }
 
-fn check_offset_expr(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn check_offset_expr(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let ck = child.kind();
         #[cfg(all(feature = "wasm", not(feature = "native")))]
         let ck = ck.as_str();
         if ck == "offset" {
-            check_const_instruction_tree(&child, source, diagnostics);
+            check_const_instruction_tree(&child, source, symbols, diagnostics);
         }
     }
 }
 
-fn check_elem_exprs(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn check_elem_exprs(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let ck = child.kind();
         #[cfg(all(feature = "wasm", not(feature = "native")))]
         let ck = ck.as_str();
         if ck == "elem_expr" {
-            check_const_instruction_tree(&child, source, diagnostics);
+            check_const_instruction_tree(&child, source, symbols, diagnostics);
         }
     }
 }
 
-fn check_table_init_expr(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn check_table_init_expr(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let ck = child.kind();
@@ -802,7 +892,7 @@ fn check_table_init_expr(node: &Node, source: &str, diagnostics: &mut Vec<Diagno
                 #[cfg(all(feature = "wasm", not(feature = "native")))]
                 let gk = gk.as_str();
                 if gk == "expr" {
-                    check_const_instruction_tree(&gc, source, diagnostics);
+                    check_const_instruction_tree(&gc, source, symbols, diagnostics);
                 }
             }
         }
@@ -810,7 +900,12 @@ fn check_table_init_expr(node: &Node, source: &str, diagnostics: &mut Vec<Diagno
 }
 
 /// Recursively check that all instructions in a tree are constant expressions.
-fn check_const_instruction_tree(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn check_const_instruction_tree(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let kind = node.kind();
     #[cfg(all(feature = "wasm", not(feature = "native")))]
     let kind = kind.as_str();
@@ -825,6 +920,8 @@ fn check_const_instruction_tree(node: &Node, source: &str, diagnostics: &mut Vec
                     node_to_range(node),
                     format!("Constant expression required, but found '{}'", first_token),
                 ));
+            } else if first_token == "global.get" {
+                check_global_get_in_const(node, source, symbols, diagnostics);
             }
             return;
         }
@@ -843,10 +940,12 @@ fn check_const_instruction_tree(node: &Node, source: &str, diagnostics: &mut Vec
                             node_to_range(node),
                             format!("Constant expression required, but found '{}'", first_token),
                         ));
+                    } else if first_token == "global.get" {
+                        check_global_get_in_const(&child, source, symbols, diagnostics);
                     }
                 } else if ck == "expr" {
                     // Check nested expressions for constness too
-                    check_const_instruction_tree(&child, source, diagnostics);
+                    check_const_instruction_tree(&child, source, symbols, diagnostics);
                 }
             }
             return;
@@ -865,8 +964,200 @@ fn check_const_instruction_tree(node: &Node, source: &str, diagnostics: &mut Vec
     // Recurse into children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        check_const_instruction_tree(&child, source, diagnostics);
+        check_const_instruction_tree(&child, source, symbols, diagnostics);
     }
+}
+
+/// Check that global.get in a constant expression references an immutable imported global.
+fn check_global_get_in_const(
+    instr_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Find the index/identifier child
+    let mut cursor = instr_node.walk();
+    for child in instr_node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "index" || ck == "identifier" {
+            let text = node_text(&child, source);
+            let global = if text.starts_with('$') {
+                symbols.get_global_by_name(text)
+            } else if let Ok(idx) = text.parse::<usize>() {
+                symbols.get_global_by_index(idx)
+            } else {
+                // Check for identifier/nat child inside index node
+                let mut ic = child.walk();
+                let mut found = None;
+                for idx_child in child.children(&mut ic) {
+                    let ik = idx_child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ik = ik.as_str();
+                    if ik == "identifier" {
+                        found = symbols.get_global_by_name(node_text(&idx_child, source));
+                    } else if ik == "nat" {
+                        if let Ok(idx) = node_text(&idx_child, source).parse::<usize>() {
+                            found = symbols.get_global_by_index(idx);
+                        }
+                    }
+                }
+                found
+            };
+
+            if let Some(global) = global {
+                if global.is_mutable {
+                    diagnostics.push(Diagnostic::error(
+                        node_to_range(instr_node),
+                        "constant expression required: global.get of mutable global",
+                    ));
+                } else if global.index >= symbols.num_imported_globals {
+                    diagnostics.push(Diagnostic::error(
+                        node_to_range(instr_node),
+                        "constant expression required: global.get of non-imported global",
+                    ));
+                }
+            }
+            return;
+        }
+    }
+}
+
+// ============================================================================
+// Data segment memory index validation
+// ============================================================================
+
+fn check_data_segment_memory_indices(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_data" {
+            return;
+        }
+
+        // Look for memory_use child (e.g., (memory 1)) or an index before offset
+        // Active data segments have an offset expression
+        let mut has_offset = false;
+        let mut memory_idx: Option<usize> = None;
+        let mut memory_node_range = None;
+
+        let mut cursor = field.walk();
+        for child in field.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "offset" {
+                has_offset = true;
+            }
+            if ck == "memory_use" {
+                // (memory $idx) or (memory N)
+                let mut mc = child.walk();
+                for mc_child in child.children(&mut mc) {
+                    let mk = mc_child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let mk = mk.as_str();
+                    if mk == "index" || mk == "identifier" || mk == "nat" {
+                        let text = node_text(&mc_child, source);
+                        memory_node_range = Some(node_to_range(&child));
+                        if text.starts_with('$') {
+                            if let Some(mem) = symbols.get_memory_by_name(text) {
+                                memory_idx = Some(mem.index);
+                            } else {
+                                // Unknown memory — reference check will handle this
+                                return;
+                            }
+                        } else if let Ok(idx) = text.parse::<usize>() {
+                            memory_idx = Some(idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        if !has_offset {
+            return; // passive segment — no memory index needed
+        }
+
+        // Default memory index is 0
+        let idx = memory_idx.unwrap_or(0);
+        if idx >= symbols.memories.len() {
+            let range = memory_node_range.unwrap_or_else(|| node_to_range(field));
+            diagnostics.push(Diagnostic::error(range, format!("unknown memory {}", idx)));
+        }
+    });
+}
+
+// ============================================================================
+// Element segment table index validation
+// ============================================================================
+
+fn check_elem_segment_table_indices(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_elem" {
+            return;
+        }
+
+        // Look for table_use child or active segment with offset
+        let mut has_offset = false;
+        let mut table_idx: Option<usize> = None;
+        let mut table_node_range = None;
+
+        let mut cursor = field.walk();
+        for child in field.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "offset" {
+                has_offset = true;
+            }
+            if ck == "table_use" {
+                let mut tc = child.walk();
+                for tc_child in child.children(&mut tc) {
+                    let tk = tc_child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let tk = tk.as_str();
+                    if tk == "index" || tk == "identifier" || tk == "nat" {
+                        let text = node_text(&tc_child, source);
+                        table_node_range = Some(node_to_range(&child));
+                        if text.starts_with('$') {
+                            if let Some(tbl) = symbols.get_table_by_name(text) {
+                                table_idx = Some(tbl.index);
+                            } else {
+                                return; // unknown table — reference check handles
+                            }
+                        } else if let Ok(idx) = text.parse::<usize>() {
+                            table_idx = Some(idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        if !has_offset {
+            return; // passive or declarative segment
+        }
+
+        let idx = table_idx.unwrap_or(0);
+        if idx >= symbols.tables.len() {
+            let range = table_node_range.unwrap_or_else(|| node_to_range(field));
+            diagnostics.push(Diagnostic::error(range, format!("unknown table {}", idx)));
+        }
+    });
 }
 
 // ============================================================================
@@ -1323,5 +1614,139 @@ mod tests {
         )"#;
         let diags = get_diagnostics(source);
         assert!(diags.is_empty());
+    }
+
+    // ======================================================================
+    // Start function signature tests (Issue #191)
+    // ======================================================================
+
+    #[test]
+    fn test_start_function_ok() {
+        let source = "(module (func $f) (start $f))";
+        let diags = get_diagnostics(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_start_function_with_params() {
+        let source = "(module (func $f (param i32)) (start $f))";
+        let diags = get_diagnostics(source);
+        assert!(
+            !diags.is_empty(),
+            "Expected diagnostic for start function with params"
+        );
+        assert!(diags.iter().any(|d| d.message.contains("start function")));
+    }
+
+    #[test]
+    fn test_start_function_with_results() {
+        let source = "(module (func $f (result i32) (i32.const 0)) (start $f))";
+        let diags = get_diagnostics(source);
+        assert!(
+            !diags.is_empty(),
+            "Expected diagnostic for start function with results"
+        );
+        assert!(diags.iter().any(|d| d.message.contains("start function")));
+    }
+
+    #[test]
+    fn test_start_function_numeric_index_ok() {
+        let source = "(module (func) (start 0))";
+        let diags = get_diagnostics(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_start_function_numeric_index_bad() {
+        let source = "(module (func (param i32)) (start 0))";
+        let diags = get_diagnostics(source);
+        assert!(!diags.is_empty());
+        assert!(diags.iter().any(|d| d.message.contains("start function")));
+    }
+
+    // ======================================================================
+    // global.get in constant expressions (Issue #191)
+    // ======================================================================
+
+    #[test]
+    fn test_global_get_const_imported_immutable_ok() {
+        let source = r#"(module
+            (import "env" "g" (global i32))
+            (global i32 (global.get 0))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_global_get_const_mutable_error() {
+        let source = r#"(module
+            (import "env" "g" (global (mut i32)))
+            (global i32 (global.get 0))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(!diags.is_empty());
+        assert!(diags.iter().any(|d| d.message.contains("mutable")));
+    }
+
+    #[test]
+    fn test_global_get_const_non_imported_error() {
+        let source = r#"(module
+            (global $g i32 (i32.const 0))
+            (global $h i32 (global.get $g))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(!diags.is_empty());
+        assert!(diags.iter().any(|d| d.message.contains("non-imported")));
+    }
+
+    // ======================================================================
+    // Data segment memory index validation (Issue #191)
+    // ======================================================================
+
+    #[test]
+    fn test_data_segment_memory_ok() {
+        let source = r#"(module
+            (memory 1)
+            (data (offset (i32.const 0)) "hello")
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_data_segment_no_memory() {
+        let source = r#"(module
+            (data (offset (i32.const 0)) "hello")
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(!diags.is_empty());
+        assert!(diags.iter().any(|d| d.message.contains("unknown memory")));
+    }
+
+    // ======================================================================
+    // Element segment table index validation (Issue #191)
+    // ======================================================================
+
+    #[test]
+    fn test_elem_segment_table_ok() {
+        let source = r#"(module
+            (table 1 funcref)
+            (func $f)
+            (elem (offset (i32.const 0)) $f)
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_elem_segment_no_table() {
+        let source = r#"(module
+            (func $f)
+            (elem (offset (i32.const 0)) $f)
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(!diags.is_empty());
+        assert!(diags.iter().any(|d| d.message.contains("unknown table")));
     }
 }

@@ -422,8 +422,14 @@ mod import_diagnostics {
 
         let diagnostics = get_all_diagnostics(wat);
 
-        if !diagnostics.is_empty() {
-            for diag in &diagnostics {
+        // Filter to errors only — warnings/hints for unused locals are expected
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+
+        if !errors.is_empty() {
+            for diag in &errors {
                 eprintln!(
                     "Line {}: {:?} - {}",
                     diag.range.start.line, diag.severity, diag.message
@@ -432,10 +438,21 @@ mod import_diagnostics {
         }
 
         assert!(
-            diagnostics.is_empty(),
-            "Expected no diagnostics for valid 010_memory.wat, but got {} diagnostics",
-            diagnostics.len()
+            errors.is_empty(),
+            "Expected no error diagnostics for valid 010_memory.wat, but got {} errors",
+            errors.len()
         );
+
+        // But we expect a warning for the unused local $cur_num
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.severity == Some(DiagnosticSeverity::WARNING)
+                    && d.message.contains("Unused local")
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1, "Expected 1 unused local warning");
+        assert!(warnings[0].message.contains("$cur_num"));
     }
 
     /// Test 011_host.wat - imports memory AND function, uses call
