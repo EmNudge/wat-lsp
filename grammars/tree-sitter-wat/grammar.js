@@ -977,9 +977,12 @@ module.exports = grammar({
 
     field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), repeat1($.storage_type), ")"),
 
-    // Storage type can be mutable or immutable
-    storage_type: $ => choice($.value_type, $.mut_storage_type),
-    mut_storage_type: $ => seq("(", "mut", $.value_type, ")"),
+    // Packed types (i8/i16) are only valid as storage types in struct/array fields
+    packed_type: $ => choice("i8", "i16"),
+
+    // Storage type can be mutable or immutable, and includes packed types
+    storage_type: $ => choice($.value_type, $.packed_type, $.mut_storage_type),
+    mut_storage_type: $ => seq("(", "mut", choice($.value_type, $.packed_type), ")"),
 
     // Exception handling blocks
     block_try_table: $ =>
@@ -1016,7 +1019,7 @@ module.exports = grammar({
 
     value_type: $ => choice($.value_type_num_type, $.value_type_ref_type),
 
-    value_type_num_type: $ => choice($.num_type_f32, $.num_type_f64, $.num_type_i32, $.num_type_i64, $.num_type_v128, "i8", "i16"),
+    value_type_num_type: $ => choice($.num_type_f32, $.num_type_f64, $.num_type_i32, $.num_type_i64, $.num_type_v128),
 
     value_type_ref_type: $ => $.ref_type,
   },

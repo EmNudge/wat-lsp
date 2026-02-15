@@ -1320,10 +1320,28 @@ fn extract_field_type(field_node: &Node, source: &str) -> (Option<String>, Value
 
     let mut cursor = field_node.walk();
     for child in field_node.children(&mut cursor) {
-        if child.kind() == "identifier" {
-            field_name = Some(node_text(&child, source));
-        } else if child.kind() == "value_type" {
-            field_type = extract_value_type(&child, source);
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        match ck {
+            "identifier" => {
+                field_name = Some(node_text(&child, source));
+            }
+            "value_type" => {
+                field_type = extract_value_type(&child, source);
+            }
+            "storage_type" => {
+                field_type = extract_storage_type(&child, source);
+            }
+            "packed_type" => {
+                let text = node_text(&child, source);
+                field_type = match text.as_str() {
+                    "i8" => ValueType::I8,
+                    "i16" => ValueType::I16,
+                    _ => ValueType::Unknown,
+                };
+            }
+            _ => {}
         }
     }
 
@@ -1410,24 +1428,8 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
 
             for struct_child in child.children(&mut struct_cursor) {
                 if struct_child.kind() == "field_type" {
-                    let mut field_name = None;
-                    let mut field_type = ValueType::Unknown;
-                    let mut mutable = false;
-
-                    let mut fc = struct_child.walk();
-                    for c in struct_child.children(&mut fc) {
-                        if c.kind() == "identifier" {
-                            field_name = Some(node_text(&c, source));
-                        } else if c.kind() == "value_type" {
-                            field_type = extract_value_type(&c, source);
-                        }
-                    }
-
-                    let text = node_text(&struct_child, source);
-                    if text.contains("(mut") || text.contains(" mut ") {
-                        mutable = true;
-                    }
-
+                    let (field_name, field_type, mutable) =
+                        extract_field_type(&struct_child, source);
                     fields.push((field_name, field_type, mutable));
                 }
             }
@@ -1440,16 +1442,9 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
             let mut array_cursor = child.walk();
             for array_child in child.children(&mut array_cursor) {
                 if array_child.kind() == "field_type" {
-                    let mut fc = array_child.walk();
-                    for c in array_child.children(&mut fc) {
-                        if c.kind() == "value_type" {
-                            element_type = extract_value_type(&c, source);
-                        }
-                    }
-                    let text = node_text(&array_child, source);
-                    if text.contains("(mut") || text.contains(" mut ") {
-                        mutable = true;
-                    }
+                    let (_, ft, m) = extract_field_type(&array_child, source);
+                    element_type = ft;
+                    mutable = m;
                 }
             }
             kind = TypeKind::Array {
@@ -1474,31 +1469,8 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
 
                     for struct_child in field_child.children(&mut struct_cursor) {
                         if struct_child.kind() == "field_type" {
-                            // field_type: (field $id? type ...)
-                            let mut field_name = None;
-                            let mut field_type = ValueType::Unknown;
-                            let mut mutable = false;
-
-                            let mut fc = struct_child.walk();
-                            for c in struct_child.children(&mut fc) {
-                                if c.kind() == "identifier" {
-                                    field_name = Some(node_text(&c, source));
-                                } else if c.kind() == "value_type" {
-                                    field_type = extract_value_type(&c, source);
-                                } else if c.kind() == "mut" {
-                                    // If we see 'mut' directly (depends on grammar)
-                                    mutable = true;
-                                }
-                                // Check for (mut type) pattern if it exists as a node
-                                // Current grammar is tricky, doing best effort
-                            }
-
-                            // Check source text for "mut" if structure is unclear
-                            let text = node_text(&struct_child, source);
-                            if text.contains("(mut") || text.contains(" mut ") {
-                                mutable = true;
-                            }
-
+                            let (field_name, field_type, mutable) =
+                                extract_field_type(&struct_child, source);
                             fields.push((field_name, field_type, mutable));
                         }
                     }
@@ -1512,17 +1484,9 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                     let mut array_cursor = field_child.walk();
                     for array_child in field_child.children(&mut array_cursor) {
                         if array_child.kind() == "field_type" {
-                            // Extract type from field_type
-                            let mut fc = array_child.walk();
-                            for c in array_child.children(&mut fc) {
-                                if c.kind() == "value_type" {
-                                    element_type = extract_value_type(&c, source);
-                                }
-                            }
-                            let text = node_text(&array_child, source);
-                            if text.contains("(mut") || text.contains(" mut ") {
-                                mutable = true;
-                            }
+                            let (_, ft, m) = extract_field_type(&array_child, source);
+                            element_type = ft;
+                            mutable = m;
                         }
                     }
                     kind = TypeKind::Array {
@@ -1615,16 +1579,9 @@ fn extract_array_kind(array_node: &Node, source: &str) -> TypeKind {
     let mut array_cursor = array_node.walk();
     for array_child in array_node.children(&mut array_cursor) {
         if array_child.kind() == "field_type" {
-            let mut fc = array_child.walk();
-            for c in array_child.children(&mut fc) {
-                if c.kind() == "value_type" {
-                    element_type = extract_value_type(&c, source);
-                }
-            }
-            let text = node_text(&array_child, source);
-            if text.contains("(mut") || text.contains(" mut ") {
-                mutable = true;
-            }
+            let (_, ft, m) = extract_field_type(&array_child, source);
+            element_type = ft;
+            mutable = m;
         }
     }
     TypeKind::Array {
@@ -2045,6 +2002,52 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
         }
     }
     ValueType::Unknown
+}
+
+/// Extract value type from a storage_type node (handles packed types and value types)
+fn extract_storage_type(storage_node: &Node, source: &str) -> ValueType {
+    let mut cursor = storage_node.walk();
+    for child in storage_node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        match ck {
+            "value_type" => return extract_value_type(&child, source),
+            "packed_type" => {
+                let text = node_text(&child, source);
+                return match text.as_str() {
+                    "i8" => ValueType::I8,
+                    "i16" => ValueType::I16,
+                    _ => ValueType::Unknown,
+                };
+            }
+            "mut_storage_type" => {
+                // Recurse into the mutable wrapper
+                let mut inner_cursor = child.walk();
+                for inner_child in child.children(&mut inner_cursor) {
+                    let ik = inner_child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ik = ik.as_str();
+                    match ik {
+                        "value_type" => return extract_value_type(&inner_child, source),
+                        "packed_type" => {
+                            let text = node_text(&inner_child, source);
+                            return match text.as_str() {
+                                "i8" => ValueType::I8,
+                                "i16" => ValueType::I16,
+                                _ => ValueType::Unknown,
+                            };
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // Fallback: try text
+    let text = node_text(storage_node, source);
+    ValueType::try_parse(&text).unwrap_or(ValueType::Unknown)
 }
 
 /// Alias for ValueType::try_parse for convenience in tree traversal code.

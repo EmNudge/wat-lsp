@@ -53,6 +53,21 @@ pub fn walk_tree_for_diagnostics(
     #[cfg(all(feature = "wasm", not(feature = "native")))]
     let kind_str = &*kind;
 
+    // Check for packed types (i8/i16) used in value type positions (params, results, locals, globals)
+    if kind_str == "ERROR" {
+        let text = &source[node.byte_range()];
+        let trimmed = text.trim();
+        if (trimmed == "i8" || trimmed == "i16") && is_value_type_context(&node) {
+            diagnostics.push(Diagnostic::error(
+                node_to_range(&node),
+                format!(
+                    "{} is a packed storage type and can only be used in struct/array field definitions",
+                    trimmed
+                ),
+            ));
+        }
+    }
+
     // Check block label mismatches
     if matches!(kind_str, "block_block" | "block_loop" | "block_if") {
         diagnostics.extend(
@@ -260,6 +275,27 @@ pub fn walk_tree_for_diagnostics(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         walk_tree_for_diagnostics(child, source, symbols, config, diagnostics);
+    }
+}
+
+/// Check if an ERROR node is in a value type context (params, results, locals, globals)
+fn is_value_type_context(node: &Node) -> bool {
+    if let Some(parent) = node.parent() {
+        let pk = parent.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let pk = &*pk;
+        matches!(
+            pk,
+            "func_type_params_many"
+                | "func_type_params_one"
+                | "func_type_results"
+                | "func_locals_many"
+                | "func_locals_one"
+                | "global_type_imm"
+                | "global_type_mut"
+        )
+    } else {
+        false
     }
 }
 
