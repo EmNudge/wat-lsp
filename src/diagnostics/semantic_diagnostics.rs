@@ -972,8 +972,8 @@ mod tests {
     }
 
     #[test]
-    fn test_call_ref_type_use_syntax() {
-        // Issue #124: call_ref (type $t) syntax should be recognized
+    fn test_call_ref_bare_index_syntax() {
+        // call_ref takes a bare type index (not type_use like call_indirect)
         let document = r#"(module
   (type $t (func (param i32) (result i32)))
   (func $inc (type $t) (param $x i32) (result i32)
@@ -988,7 +988,7 @@ mod tests {
     ref.func $inc
     drop
     local.get $x
-    call_ref (type $t))
+    call_ref $t)
 )"#;
 
         let mut parser = create_parser();
@@ -1003,15 +1003,14 @@ mod tests {
         assert_eq!(
             errors.len(),
             0,
-            "call_ref (type $t) should produce no errors, got: {:?}",
+            "call_ref $t should produce no errors, got: {:?}",
             errors.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
 
     #[test]
-    fn test_return_call_ref_type_use_syntax() {
-        // return_call_ref (type $t) should also be recognized
-        // The function needs param + funcref on the stack for return_call_ref
+    fn test_return_call_ref_bare_index_syntax() {
+        // return_call_ref takes a bare type index
         let document = r#"(module
   (type $t (func (param i32) (result i32)))
   (func $inc (type $t) (param $x i32) (result i32)
@@ -1022,7 +1021,7 @@ mod tests {
   (func $dispatch (type $t) (param $x i32) (param $f funcref) (result i32)
     local.get $x
     local.get $f
-    return_call_ref (type $t))
+    return_call_ref $t)
 )"#;
 
         let mut parser = create_parser();
@@ -1037,7 +1036,7 @@ mod tests {
         assert_eq!(
             errors.len(),
             0,
-            "return_call_ref (type $t) should produce no errors, got: {:?}",
+            "return_call_ref $t should produce no errors, got: {:?}",
             errors.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }

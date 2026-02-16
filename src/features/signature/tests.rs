@@ -414,37 +414,10 @@ fn test_call_type_enum() {
     assert_eq!(call_info_return_ref.call_type, CallType::ReturnCallRef);
 }
 
-// Tests for (type $t) annotation form
+// call_ref uses bare type index (not type_use like call_indirect)
 
 #[test]
-fn test_find_function_call_call_ref_type_use() {
-    let line = "call_ref (type $binop)(";
-    let info = find_function_call(line);
-    assert!(info.is_some());
-
-    let call = info.unwrap();
-    assert_eq!(call.name, "$binop");
-    assert_eq!(call.call_type, CallType::CallRef);
-}
-
-#[test]
-fn test_find_function_call_return_call_ref_type_use() {
-    let line = "return_call_ref (type $binop)(";
-    let info = find_function_call(line);
-    assert!(info.is_some());
-
-    let call = info.unwrap();
-    assert_eq!(call.name, "$binop");
-    assert_eq!(call.call_type, CallType::ReturnCallRef);
-}
-
-#[test]
-fn test_extract_name_from_call_type_use() {
-    assert_eq!(
-        extract_name_from_call("(type $binop)"),
-        Some("$binop".to_string())
-    );
-    assert_eq!(extract_name_from_call("(type 0)"), Some("0".to_string()));
-    // Bare index form should still work
+fn test_extract_name_from_call_bare_index() {
     assert_eq!(extract_name_from_call("$binop"), Some("$binop".to_string()));
+    assert_eq!(extract_name_from_call("0"), Some("0".to_string()));
 }
