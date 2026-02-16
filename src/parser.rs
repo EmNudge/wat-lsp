@@ -86,23 +86,148 @@ fn extract_imports(root: &Node, source: &str, symbol_table: &mut SymbolTable) ->
                 if module_child.kind() == "module_field" {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
-                        if field_child.kind() == "module_field_import" {
-                            extract_single_import(&field_child, source, symbol_table, &mut counts);
-                        }
+                        process_import_field(&field_child, source, symbol_table, &mut counts);
                     }
                 }
             }
         } else if child.kind() == "module_field" {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
-                if field_child.kind() == "module_field_import" {
-                    extract_single_import(&field_child, source, symbol_table, &mut counts);
-                }
+                process_import_field(&field_child, source, symbol_table, &mut counts);
             }
         }
     }
 
     counts
+}
+
+/// Process a single module field for imports (both standalone and inline forms).
+fn process_import_field(
+    field_child: &Node,
+    source: &str,
+    symbol_table: &mut SymbolTable,
+    counts: &mut ImportCounts,
+) {
+    let kind = field_child.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    match kind {
+        "module_field_import" => {
+            extract_single_import(field_child, source, symbol_table, counts);
+        }
+        "module_field_func" if node_has_import_child(field_child) => {
+            if let Some(func) =
+                extract_inline_import_func(field_child, source, counts.functions, symbol_table)
+            {
+                symbol_table.add_function(func);
+                counts.functions += 1;
+            }
+        }
+        "module_field_global" if node_has_import_child(field_child) => {
+            if let Some(global) = extract_inline_import_global(field_child, source, counts.globals)
+            {
+                symbol_table.add_global(global);
+                counts.globals += 1;
+            }
+        }
+        "module_field_table" if node_has_import_child(field_child) => {
+            if let Some(table) = extract_inline_import_table(field_child, source, counts.tables) {
+                symbol_table.add_table(table);
+                counts.tables += 1;
+            }
+        }
+        "module_field_memory" if node_has_import_child(field_child) => {
+            if let Some(memory) = extract_inline_import_memory(field_child, source, counts.memories)
+            {
+                symbol_table.add_memory(memory);
+                counts.memories += 1;
+            }
+        }
+        "module_field_tag" if node_has_import_child(field_child) => {
+            if let Some(tag) = extract_tag(field_child, source, counts.tags) {
+                symbol_table.add_tag(tag);
+                counts.tags += 1;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Check if a node has an `import` child (inline import syntax).
+fn node_has_import_child(node: &Node) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = kind.as_str();
+        if kind == "import" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Extract a function from inline import syntax: `(func $name (import "M" "f") (param i32) (result i32))`
+fn extract_inline_import_func(
+    func_node: &Node,
+    source: &str,
+    index: usize,
+    symbol_table: &SymbolTable,
+) -> Option<Function> {
+    let (name, name_range) = if let Some(id_node) = find_identifier_node(func_node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut parameters = extract_parameters(func_node, source);
+    let mut results = extract_results(func_node, source);
+
+    // Resolve type_use if no explicit params/results
+    if results.is_empty() {
+        if let Some((type_params, type_results)) = resolve_type_use(func_node, source, symbol_table)
+        {
+            results = type_results;
+            if parameters.is_empty() {
+                parameters = type_params;
+            }
+        }
+    }
+
+    Some(Function {
+        name,
+        index,
+        parameters,
+        results,
+        locals: Vec::new(),
+        blocks: Vec::new(),
+        line: func_node.range().start_point.row as u32,
+        end_line: func_node.range().end_point.row as u32,
+        start_byte: func_node.start_byte(),
+        end_byte: func_node.end_byte(),
+        range: name_range,
+        doc_comment: None,
+    })
+}
+
+/// Extract a global from inline import syntax: `(global $name (import "M" "g") i32)`
+fn extract_inline_import_global(global_node: &Node, source: &str, index: usize) -> Option<Global> {
+    // Reuse the existing extract_global which already handles the global_type child
+    extract_global(global_node, source, index)
+}
+
+/// Extract a table from inline import syntax: `(table $name (import "M" "t") 10 20 funcref)`
+fn extract_inline_import_table(table_node: &Node, source: &str, index: usize) -> Option<Table> {
+    extract_table(table_node, source, index)
+}
+
+/// Extract a memory from inline import syntax: `(memory $name (import "M" "m") 1 2)`
+fn extract_inline_import_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memory> {
+    extract_memory(memory_node, source, index)
 }
 
 /// Extract a single import declaration
@@ -508,7 +633,9 @@ fn extract_functions_with_offset(
                 if module_child.kind() == "module_field" {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
-                        if field_child.kind() == "module_field_func" {
+                        if field_child.kind() == "module_field_func"
+                            && !node_has_import_child(&field_child)
+                        {
                             if let Some(func) =
                                 extract_function(&field_child, source, func_index, symbol_table)
                             {
@@ -538,7 +665,8 @@ fn extract_functions_with_offset(
             // Direct module_field (for standalone functions)
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
-                if field_child.kind() == "module_field_func" {
+                if field_child.kind() == "module_field_func" && !node_has_import_child(&field_child)
+                {
                     if let Some(func) =
                         extract_function(&field_child, source, func_index, symbol_table)
                     {
@@ -975,7 +1103,9 @@ fn extract_globals_with_offset(
                 if module_child.kind() == "module_field" {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
-                        if field_child.kind() == "module_field_global" {
+                        if field_child.kind() == "module_field_global"
+                            && !node_has_import_child(&field_child)
+                        {
                             if let Some(global) = extract_global(&field_child, source, global_index)
                             {
                                 symbol_table.add_global(global);
@@ -988,7 +1118,9 @@ fn extract_globals_with_offset(
         } else if child.kind() == "module_field" {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
-                if field_child.kind() == "module_field_global" {
+                if field_child.kind() == "module_field_global"
+                    && !node_has_import_child(&field_child)
+                {
                     if let Some(global) = extract_global(&field_child, source, global_index) {
                         symbol_table.add_global(global);
                         global_index += 1;
@@ -1634,7 +1766,9 @@ fn extract_tables_with_offset(
                 if module_child.kind() == "module_field" {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
-                        if field_child.kind() == "module_field_table" {
+                        if field_child.kind() == "module_field_table"
+                            && !node_has_import_child(&field_child)
+                        {
                             if let Some(table) = extract_table(&field_child, source, table_index) {
                                 symbol_table.add_table(table);
                                 table_index += 1;
@@ -1646,7 +1780,9 @@ fn extract_tables_with_offset(
         } else if child.kind() == "module_field" {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
-                if field_child.kind() == "module_field_table" {
+                if field_child.kind() == "module_field_table"
+                    && !node_has_import_child(&field_child)
+                {
                     if let Some(table) = extract_table(&field_child, source, table_index) {
                         symbol_table.add_table(table);
                         table_index += 1;
@@ -1758,7 +1894,9 @@ fn extract_memories_with_offset(
                 if module_child.kind() == "module_field" {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
-                        if field_child.kind() == "module_field_memory" {
+                        if field_child.kind() == "module_field_memory"
+                            && !node_has_import_child(&field_child)
+                        {
                             if let Some(memory) = extract_memory(&field_child, source, memory_index)
                             {
                                 symbol_table.add_memory(memory);
@@ -1771,7 +1909,9 @@ fn extract_memories_with_offset(
         } else if child.kind() == "module_field" {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
-                if field_child.kind() == "module_field_memory" {
+                if field_child.kind() == "module_field_memory"
+                    && !node_has_import_child(&field_child)
+                {
                     if let Some(memory) = extract_memory(&field_child, source, memory_index) {
                         symbol_table.add_memory(memory);
                         memory_index += 1;
@@ -1897,7 +2037,9 @@ fn extract_tags_with_offset(
                 if module_child.kind() == "module_field" {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
-                        if field_child.kind() == "module_field_tag" {
+                        if field_child.kind() == "module_field_tag"
+                            && !node_has_import_child(&field_child)
+                        {
                             if let Some(tag) = extract_tag(&field_child, source, tag_index) {
                                 symbol_table.add_tag(tag);
                                 tag_index += 1;
@@ -1909,7 +2051,8 @@ fn extract_tags_with_offset(
         } else if child.kind() == "module_field" {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
-                if field_child.kind() == "module_field_tag" {
+                if field_child.kind() == "module_field_tag" && !node_has_import_child(&field_child)
+                {
                     if let Some(tag) = extract_tag(&field_child, source, tag_index) {
                         symbol_table.add_tag(tag);
                         tag_index += 1;

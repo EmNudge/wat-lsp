@@ -98,7 +98,7 @@ pub fn walk_tree_for_diagnostics(
             }
         }
 
-        if !found_instr_list && !expected_results.is_empty() {
+        if !found_instr_list && !expected_results.is_empty() && !has_inline_import(&node) {
             diagnostics.push(Diagnostic::error(
                 node_to_range(&node),
                 format!(

@@ -429,21 +429,21 @@ impl TypeChecker {
         self.pop_vals(&end_types, node);
 
         // Check that we're back to frame height
-        if self.val_stack.len() != height && !self.is_current_unreachable() {
-            let extra = self.val_stack.len().saturating_sub(height);
-            if extra > 0 {
-                let range = node_to_range(node);
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        range,
-                        format!(
-                            "type mismatch: block leaves {} extra value(s) on stack",
-                            extra
-                        ),
-                    )
-                    .with_code("type-mismatch"),
-                );
-            }
+        // Even in unreachable context, concrete values pushed after unreachable
+        // count as excess values (spec §3.3 validation rules).
+        let extra = self.val_stack.len().saturating_sub(height);
+        if extra > 0 {
+            let range = node_to_range(node);
+            self.diagnostics.push(
+                Diagnostic::error(
+                    range,
+                    format!(
+                        "type mismatch: block leaves {} extra value(s) on stack",
+                        extra
+                    ),
+                )
+                .with_code("type-mismatch"),
+            );
         }
 
         // Restore val_stack to frame height
