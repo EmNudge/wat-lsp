@@ -1687,7 +1687,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                             for limit_child in type_child.children(&mut limits_cursor) {
                                 if limit_child.kind() == "nat" {
                                     let text = node_text(&limit_child, source);
-                                    if let Ok(num) = text.parse::<u32>() {
+                                    if let Some(num) = parse_wat_nat(&text).map(|n| n as u32) {
                                         if nat_index == 0 {
                                             min_limit = num;
                                         } else {
@@ -1806,7 +1806,7 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
             for limit_child in limits_node.children(&mut limits_cursor) {
                 if limit_child.kind() == "nat" {
                     let text = node_text(&limit_child, source);
-                    if let Ok(num) = text.parse::<u64>() {
+                    if let Some(num) = parse_wat_nat(&text) {
                         if nat_index == 0 {
                             *min = num;
                         } else {
@@ -1965,6 +1965,16 @@ fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
 /// Helper: Extract text from a node
 fn node_text(node: &Node, source: &str) -> String {
     source[node.byte_range()].to_string()
+}
+
+/// Parse a WAT natural number, handling hex (0x...) and underscore separators.
+fn parse_wat_nat(text: &str) -> Option<u64> {
+    let text = text.trim().replace('_', "");
+    if text.starts_with("0x") || text.starts_with("0X") {
+        u64::from_str_radix(&text[2..], 16).ok()
+    } else {
+        text.parse::<u64>().ok()
+    }
 }
 
 /// Extract value type from a value_type node (handles nested structure)

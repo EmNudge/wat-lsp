@@ -545,6 +545,18 @@ impl TypeChecker {
         None
     }
 
+    /// Peek at the Nth value from the top of the stack (0 = top).
+    /// Returns None if the stack doesn't have enough values.
+    pub fn peek(&self, n: usize) -> Option<&ValueType> {
+        let len = self.val_stack.len();
+        let height = self.current_frame_height();
+        if len > height + n {
+            self.val_stack.get(len - 1 - n)
+        } else {
+            None
+        }
+    }
+
     /// Get the current stack depth above the current frame height.
     pub fn stack_depth(&self) -> usize {
         self.val_stack
