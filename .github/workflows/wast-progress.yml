@@ -1,0 +1,156 @@
+name: WAST Spec Test Progress
+
+on:
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  wast-progress:
+    name: WAST Progress
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
+      - name: Generate tree-sitter parser
+        working-directory: grammars/tree-sitter-wat
+        run: tree-sitter generate
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target
+          key: ${{ runner.os }}-wast-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Download spec testsuite
+        run: git clone --depth 1 https://github.com/WebAssembly/testsuite.git testsuite
+
+      - name: Build wast-runner (PR branch)
+        run: cargo build --features native --release --bin wast-runner
+
+      - name: Run wast-runner (PR branch)
+        run: ./target/release/wast-runner testsuite/*.wast --format json > /tmp/pr-results.json
+
+      - name: Checkout base branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          clean: false
+
+      - name: Regenerate tree-sitter parser (base)
+        working-directory: grammars/tree-sitter-wat
+        run: tree-sitter generate
+
+      - name: Rebuild wast-runner (base branch)
+        run: cargo build --features native --release --bin wast-runner
+
+      - name: Run wast-runner (base branch)
+        run: ./target/release/wast-runner testsuite/*.wast --format json > /tmp/base-results.json
+
+      - name: Generate comparison
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const pr = JSON.parse(fs.readFileSync('/tmp/pr-results.json', 'utf8'));
+            const base = JSON.parse(fs.readFileSync('/tmp/base-results.json', 'utf8'));
+
+            function delta(val) {
+              if (val > 0) return `+${val}`;
+              if (val < 0) return `${val}`;
+              return '—';
+            }
+
+            function frac(pass, total) {
+              return `${pass}/${total}`;
+            }
+
+            // Summary-level comparison
+            const ps = pr.summary;
+            const bs = base.summary;
+
+            let body = `| Category | Base | PR | Delta |\n`;
+            body += `|----------|-----:|---:|------:|\n`;
+            body += `| **Total pass** | ${bs.pass} | ${ps.pass} | ${delta(ps.pass - bs.pass)} |\n`;
+            body += `| **Total fail** | ${bs.fail} | ${ps.fail} | ${delta(ps.fail - bs.fail)} |\n`;
+            body += `| **Total skip** | ${bs.skip} | ${ps.skip} | ${delta(ps.skip - bs.skip)} |\n`;
+            body += `| Valid modules | ${frac(bs.modules.pass, bs.modules.total)} | ${frac(ps.modules.pass, ps.modules.total)} | ${delta(ps.modules.pass - bs.modules.pass)} |\n`;
+            body += `| assert_invalid | ${frac(bs.assert_invalid.pass, bs.assert_invalid.total)} | ${frac(ps.assert_invalid.pass, ps.assert_invalid.total)} | ${delta(ps.assert_invalid.pass - bs.assert_invalid.pass)} |\n`;
+            body += `| assert_malformed | ${frac(bs.assert_malformed.pass, bs.assert_malformed.total)} | ${frac(ps.assert_malformed.pass, ps.assert_malformed.total)} | ${delta(ps.assert_malformed.pass - bs.assert_malformed.pass)} |\n`;
+
+            // Per-file comparison (only files that changed)
+            const baseByFile = {};
+            for (const f of base.files) {
+              baseByFile[f.file] = f;
+            }
+
+            const changedFiles = [];
+            for (const f of pr.files) {
+              const bf = baseByFile[f.file];
+              if (!bf) {
+                changedFiles.push({ file: f.file, basePass: 0, prPass: f.pass, delta: f.pass });
+              } else if (f.pass !== bf.pass) {
+                changedFiles.push({ file: f.file, basePass: bf.pass, prPass: f.pass, delta: f.pass - bf.pass });
+              }
+            }
+
+            const prByFile = {};
+            for (const f of pr.files) {
+              prByFile[f.file] = f;
+            }
+            for (const f of base.files) {
+              if (!prByFile[f.file]) {
+                changedFiles.push({ file: f.file, basePass: f.pass, prPass: 0, delta: -f.pass });
+              }
+            }
+
+            if (changedFiles.length > 0) {
+              changedFiles.sort((a, b) => b.delta - a.delta);
+
+              body += `\n<details>\n<summary>Per-file changes (${changedFiles.length} files)</summary>\n\n`;
+              body += `| File | Base pass | PR pass | Delta |\n`;
+              body += `|------|----------:|--------:|------:|\n`;
+              for (const cf of changedFiles) {
+                const name = cf.file.replace(/^.*\//, '');
+                body += `| ${name} | ${cf.basePass} | ${cf.prPass} | ${delta(cf.delta)} |\n`;
+              }
+              body += `\n</details>\n`;
+            }
+
+            fs.writeFileSync('/tmp/wast-comment.md', body);
+
+      - name: Checkout PR branch (for omni-comment config)
+        uses: actions/checkout@v6
+        with:
+          clean: false
+
+      - name: Post PR comment
+        uses: mskelton/omni-comment@v2.2.1
+        with:
+          section: wast_progress
+          title: WAST Spec Test Progress
+          file-path: /tmp/wast-comment.md
