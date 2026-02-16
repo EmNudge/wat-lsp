@@ -37,6 +37,8 @@ pub struct CtrlFrame {
     pub height: usize,
     /// True after unreachable/br/return — polymorphic stack bottom
     pub unreachable: bool,
+    /// Optional label name (e.g., "$loop1") for named branch resolution
+    pub label: Option<String>,
 }
 
 /// Core type checker state machine implementing Wasm spec validation.
@@ -389,6 +391,17 @@ impl TypeChecker {
         start_types: Vec<ValueType>,
         end_types: Vec<ValueType>,
     ) {
+        self.push_ctrl_labeled(opcode, start_types, end_types, None);
+    }
+
+    /// Enter a new control frame with an optional label name for named branch resolution.
+    pub fn push_ctrl_labeled(
+        &mut self,
+        opcode: CtrlOpcode,
+        start_types: Vec<ValueType>,
+        end_types: Vec<ValueType>,
+        label: Option<String>,
+    ) {
         let height = self.val_stack.len();
         self.ctrl_stack.push(CtrlFrame {
             opcode,
@@ -396,6 +409,7 @@ impl TypeChecker {
             end_types,
             height,
             unreachable: false,
+            label,
         });
         // Push start_types onto val_stack (block params become initial stack)
         self.push_vals(&start_types);
@@ -443,6 +457,47 @@ impl TypeChecker {
         Some(frame)
     }
 
+    /// Handle the else transition in an if block.
+    /// Validates the then branch produced end_types, resets stack to frame height,
+    /// and pushes start_types for the else branch.
+    pub fn else_transition(&mut self, node: &Node) {
+        if let Some(frame) = self.ctrl_stack.last() {
+            let end_types = frame.end_types.clone();
+            let start_types = frame.start_types.clone();
+            let height = frame.height;
+            let was_unreachable = frame.unreachable;
+
+            // Validate then branch produced the expected end types
+            if !was_unreachable {
+                self.pop_vals(&end_types, node);
+                // Check for excess values
+                if self.val_stack.len() > height {
+                    let extra = self.val_stack.len() - height;
+                    let range = node_to_range(node);
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            range,
+                            format!(
+                                "type mismatch: block leaves {} extra value(s) on stack",
+                                extra
+                            ),
+                        )
+                        .with_code("type-mismatch"),
+                    );
+                }
+            }
+
+            // Reset stack to frame height + start_types for else branch
+            self.val_stack.truncate(height);
+            self.push_vals(&start_types);
+
+            // Reset unreachable flag for else branch
+            if let Some(frame) = self.ctrl_stack.last_mut() {
+                frame.unreachable = false;
+            }
+        }
+    }
+
     /// Mark the current frame as unreachable.
     /// Truncates val_stack to frame height (polymorphic bottom).
     pub fn mark_unreachable(&mut self) {
@@ -475,6 +530,19 @@ impl TypeChecker {
             .last()
             .map(|f| f.unreachable)
             .unwrap_or(false)
+    }
+
+    /// Resolve a named label (e.g., "$loop1") to a control stack depth.
+    /// Returns the depth (0 = current frame) if found.
+    pub fn resolve_label_depth(&self, label: &str) -> Option<usize> {
+        for (i, frame) in self.ctrl_stack.iter().rev().enumerate() {
+            if let Some(ref name) = frame.label {
+                if name == label {
+                    return Some(i);
+                }
+            }
+        }
+        None
     }
 
     /// Get the current stack depth above the current frame height.

@@ -147,6 +147,7 @@ fn process_block_node(node: &Node, source: &str, symbols: &SymbolTable, checker:
         checker.pop_expect(&ValueType::I32, node);
     }
 
+    let label = get_block_label(node, source);
     let params = get_block_param_types(node, source);
     let results = get_block_result_types(node, source);
 
@@ -171,7 +172,7 @@ fn process_block_node(node: &Node, source: &str, symbols: &SymbolTable, checker:
         checker.pop_vals_for_instr(&params, node, block_name);
     }
 
-    checker.push_ctrl(opcode, params, results);
+    checker.push_ctrl_labeled(opcode, params, results, label);
 
     // Process body
     process_block_body(node, source, symbols, checker);
@@ -185,6 +186,7 @@ fn process_if_node(node: &Node, source: &str, symbols: &SymbolTable, checker: &m
     // Pop i32 condition
     checker.pop_expect(&ValueType::I32, node);
 
+    let label = get_block_label(node, source);
     let params = get_block_param_types(node, source);
     let results = get_block_result_types(node, source);
 
@@ -193,7 +195,7 @@ fn process_if_node(node: &Node, source: &str, symbols: &SymbolTable, checker: &m
         checker.pop_vals_for_instr(&params, node, "if");
     }
 
-    checker.push_ctrl(CtrlOpcode::If, params, results);
+    checker.push_ctrl_labeled(CtrlOpcode::If, params, results, label);
 
     // Process body
     process_block_body(node, source, symbols, checker);
@@ -271,9 +273,8 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
                 // Reference checking is handled in tree_walk.rs.
             }
             "instr_else" | "else" => {
-                // At else, we need to reset to block params for the else branch
-                // The then branch's values should match end_types, then reset
-                // For simplicity, just process the else branch's instructions
+                // At else: validate then branch, reset stack for else branch
+                checker.else_transition(&child);
                 process_block_body(&child, source, symbols, checker);
             }
             // Direct instruction children
@@ -303,6 +304,42 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
             _ => {}
         }
     }
+}
+
+/// Extract a label name from a block/loop/if/try_table node.
+/// Searches immediate children and inner block children for an identifier.
+fn get_block_label(node: &Node, source: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "identifier" {
+            return Some(source[child.byte_range()].trim().to_string());
+        }
+        // Check inside block_block, loop_block, block_if, block_try_table, etc.
+        let is_inner_block = kind == "block_block"
+            || kind == "loop_block"
+            || kind == "if_block"
+            || kind == "block_if"
+            || kind == "block_try_table"
+            || kind == "block_try";
+        if is_inner_block {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let ik = inner_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = inner_child.kind();
+                if ik == "identifier" {
+                    return Some(source[inner_child.byte_range()].trim().to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Check if a node is a loop (instr_loop or contains loop_block)
@@ -978,7 +1015,10 @@ fn get_branch_depth(node: &Node, source: &str, checker: &TypeChecker) -> Option<
             return Some(depth);
         }
     }
-    // Named labels not yet supported for depth resolution
+    // Try named label resolution
+    if index.starts_with('$') {
+        return checker.resolve_label_depth(&index);
+    }
     None
 }
 
@@ -1537,6 +1577,71 @@ pub fn get_call_indirect_result_types(
     vec![ValueType::Unknown]
 }
 
+/// Find the instr_plain node inside a folded expression (for branch depth resolution).
+#[cfg(feature = "native")]
+fn find_instr_plain_in_expr<'a>(expr: &'a Node) -> Option<Node<'a>> {
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "expr1" || kind.starts_with("expr1_") {
+            let mut inner_cursor = child.walk();
+            for inner in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let ik = inner.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = inner.kind();
+
+                if ik == "instr_plain" {
+                    return Some(inner);
+                }
+                // Check inside nested expr1 wrapper
+                if ik.starts_with("expr1_") {
+                    let mut deep_cursor = inner.walk();
+                    for deep in inner.children(&mut deep_cursor) {
+                        if deep.kind() == "instr_plain" {
+                            return Some(deep);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Find the instr_plain node inside a folded expression (for branch depth resolution).
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn find_instr_plain_in_expr(expr: &Node) -> Option<Node> {
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        let kind = child.kind();
+
+        if kind == "expr1" || kind.starts_with("expr1_") {
+            let mut inner_cursor = child.walk();
+            for inner in child.children(&mut inner_cursor) {
+                let ik = inner.kind();
+
+                if ik == "instr_plain" {
+                    return Some(inner);
+                }
+                if ik.starts_with("expr1_") {
+                    let mut deep_cursor = inner.walk();
+                    for deep in inner.children(&mut deep_cursor) {
+                        if deep.kind() == "instr_plain" {
+                            return Some(deep);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Get instruction info from a folded expression
 /// Returns (instruction_name, explicit_operand_count)
 pub fn get_folded_expr_info(expr: &Node, source: &str) -> Option<(String, usize)> {
@@ -1665,6 +1770,313 @@ fn get_dynamic_operand_count_from_expr(
     0
 }
 
+/// Check if a folded expression is a block-type (block, loop, if, try_table).
+/// Returns the expr1_* node if found.
+#[cfg(feature = "native")]
+fn find_folded_block_child<'a>(expr: &'a Node, source: &str) -> Option<(Node<'a>, &'static str)> {
+    let _ = source;
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        match kind.as_ref() {
+            "expr1_block" => return Some((child, "block")),
+            "expr1_loop" => return Some((child, "loop")),
+            "expr1_if" => return Some((child, "if")),
+            "expr1_try_table" => return Some((child, "try_table")),
+            "expr1" => {
+                // Check inside expr1 wrapper
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    #[cfg(feature = "native")]
+                    let ik = inner.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ik = inner.kind();
+                    match ik.as_ref() {
+                        "expr1_block" => return Some((inner, "block")),
+                        "expr1_loop" => return Some((inner, "loop")),
+                        "expr1_if" => return Some((inner, "if")),
+                        "expr1_try_table" => return Some((inner, "try_table")),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Check if a folded expression is a block-type (block, loop, if, try_table).
+/// Returns the expr1_* node if found.
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn find_folded_block_child(expr: &Node, source: &str) -> Option<(Node, &'static str)> {
+    let _ = source;
+    let mut cursor = expr.walk();
+    for child in expr.children(&mut cursor) {
+        let kind = child.kind();
+
+        match kind.as_ref() {
+            "expr1_block" => return Some((child, "block")),
+            "expr1_loop" => return Some((child, "loop")),
+            "expr1_if" => return Some((child, "if")),
+            "expr1_try_table" => return Some((child, "try_table")),
+            "expr1" => {
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    let ik = inner.kind();
+                    match ik.as_ref() {
+                        "expr1_block" => return Some((inner, "block")),
+                        "expr1_loop" => return Some((inner, "loop")),
+                        "expr1_if" => return Some((inner, "if")),
+                        "expr1_try_table" => return Some((inner, "try_table")),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Process a folded block expression (block, loop, if, try_table) with control frames.
+fn process_folded_block_expr(
+    expr: &Node,
+    block_node: &Node,
+    block_kind: &str,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    let opcode = match block_kind {
+        "loop" => CtrlOpcode::Loop,
+        "if" => CtrlOpcode::If,
+        "try_table" => CtrlOpcode::TryTable,
+        _ => CtrlOpcode::Block,
+    };
+
+    let label = get_block_label(block_node, source);
+    let params = get_block_param_types(block_node, source);
+    let results = get_block_result_types(block_node, source);
+
+    // For folded if, the condition sub-expressions are inside if_block.
+    // Process them on the outer stack first, then pop the i32 condition.
+    if opcode == CtrlOpcode::If {
+        process_folded_if_conditions(block_node, source, symbols, checker);
+        checker.pop_expect(&ValueType::I32, expr);
+
+        if !params.is_empty() {
+            checker.pop_vals_for_instr(&params, expr, "if");
+        }
+
+        checker.push_ctrl_labeled(CtrlOpcode::If, params, results, label);
+
+        // Process only the then/else bodies (not condition exprs again)
+        process_folded_if_bodies(block_node, source, symbols, checker);
+
+        checker.pop_ctrl(expr);
+        return;
+    }
+
+    // Pop param types from outer stack
+    if !params.is_empty() {
+        checker.pop_vals_for_instr(&params, expr, block_kind);
+    }
+
+    checker.push_ctrl_labeled(opcode, params, results, label);
+
+    // Process body - find instr_list or direct instruction children
+    process_folded_block_body(block_node, source, symbols, checker);
+
+    // Pop control frame - validates end_types and detects excess values
+    checker.pop_ctrl(expr);
+}
+
+/// Process the body of a folded block expression by finding and processing child nodes.
+fn process_folded_block_body(
+    block_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    let mut cursor = block_node.walk();
+    for child in block_node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        match kind.as_ref() {
+            "instr_list" => {
+                // Process all instructions in the list
+                let mut list_cursor = child.walk();
+                for list_child in child.children(&mut list_cursor) {
+                    process_folded_block_child(&list_child, source, symbols, checker);
+                }
+            }
+            "if_block" => {
+                // For folded if inside a block body (shouldn't normally occur here since
+                // folded ifs are handled by process_folded_block_expr, but handle as fallback)
+                process_folded_if_bodies_from_if_block(&child, source, symbols, checker);
+            }
+            // Direct instruction children (body without instr_list wrapper)
+            "instr" | "instr_plain" | "expr" | "instr_block" | "instr_loop" | "instr_if"
+            | "instr_call" | "instr_list_call" => {
+                process_folded_block_child(&child, source, symbols, checker);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Process a single child node in a folded block body.
+fn process_folded_block_child(
+    child: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    #[cfg(feature = "native")]
+    let kind = child.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = child.kind();
+
+    match kind.as_ref() {
+        "instr" => {
+            process_instr_node(child, source, symbols, checker);
+        }
+        "instr_plain" => {
+            if let Some(instr_name) = get_instruction_name(child, source) {
+                process_instruction(child, &instr_name, checker, symbols, source);
+            }
+        }
+        "expr" => {
+            process_folded_expr(child, source, symbols, checker);
+        }
+        "instr_block" | "instr_loop" => {
+            process_block_node(child, source, symbols, checker);
+        }
+        "instr_if" => {
+            process_if_node(child, source, symbols, checker);
+        }
+        "instr_call" => {
+            process_instr_call_node(child, source, symbols, checker);
+        }
+        "instr_list_call" => {
+            process_call_indirect_node(child, source, symbols, checker);
+        }
+        _ => {}
+    }
+}
+
+/// Process an if_block directly (conditions + bodies), used as fallback in block body processing.
+fn process_folded_if_bodies_from_if_block(
+    if_block: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    let mut cursor = if_block.walk();
+    for child in if_block.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "instr_list" {
+            let mut list_cursor = child.walk();
+            for list_child in child.children(&mut list_cursor) {
+                process_folded_block_child(&list_child, source, symbols, checker);
+            }
+        }
+    }
+}
+
+/// Process the condition sub-expressions of a folded if on the OUTER stack.
+/// These are the `expr` children inside the `if_block` that appear before `(then ...)`.
+fn process_folded_if_conditions(
+    block_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    // Find the if_block child of expr1_if
+    let mut cursor = block_node.walk();
+    for child in block_node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "if_block" {
+            let mut if_cursor = child.walk();
+            for if_child in child.children(&mut if_cursor) {
+                #[cfg(feature = "native")]
+                let ik = if_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = if_child.kind();
+
+                // Process condition expr children on the outer stack
+                if ik == "expr" {
+                    process_folded_expr(&if_child, source, symbols, checker);
+                }
+            }
+        }
+    }
+}
+
+/// Process only the then/else bodies of a folded if (not the condition exprs).
+/// Uses else_transition to properly reset the stack between then and else branches.
+fn process_folded_if_bodies(
+    block_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    // Find the if_block child of expr1_if
+    let mut cursor = block_node.walk();
+    for child in block_node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "if_block" {
+            let mut found_then = false;
+            let mut if_cursor = child.walk();
+            for if_child in child.children(&mut if_cursor) {
+                #[cfg(feature = "native")]
+                let ik = if_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = if_child.kind();
+
+                if ik == "instr_list" {
+                    if !found_then {
+                        // Process then body
+                        let mut list_cursor = if_child.walk();
+                        for list_child in if_child.children(&mut list_cursor) {
+                            process_folded_block_child(&list_child, source, symbols, checker);
+                        }
+                        found_then = true;
+                        // Perform else transition: validate then, reset stack for else
+                        checker.else_transition(&if_child);
+                    } else {
+                        // Process else body
+                        let mut list_cursor = if_child.walk();
+                        for list_child in if_child.children(&mut list_cursor) {
+                            process_folded_block_child(&list_child, source, symbols, checker);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Process a folded expression: consume implicit stack operands, produce results
 fn process_folded_expr(
     expr: &Node,
@@ -1672,6 +2084,13 @@ fn process_folded_expr(
     symbols: &SymbolTable,
     checker: &mut TypeChecker,
 ) {
+    // Check if this is a block-type expression (block, loop, if, try_table)
+    // These need control frame tracking for proper stack validation.
+    if let Some((block_node, block_kind)) = find_folded_block_child(expr, source) {
+        process_folded_block_expr(expr, &block_node, block_kind, source, symbols, checker);
+        return;
+    }
+
     if let Some((instr_name, explicit_operands)) = get_folded_expr_info(expr, source) {
         // Handle tail call instructions
         if matches!(
@@ -1693,8 +2112,74 @@ fn process_folded_expr(
             return;
         }
 
-        // Handle other terminating instructions
+        // Handle other terminating instructions (br, unreachable, return, throw, throw_ref)
         if is_terminating_instruction(&instr_name) {
+            // For folded br: (br $label values...)
+            // Need to consume label types from sub-expressions
+            if instr_name == "br" {
+                if let Some(instr_node) = find_instr_plain_in_expr(expr) {
+                    if let Some(depth) = get_branch_depth(&instr_node, source, checker) {
+                        if let Some(label_types) = checker.label_types(depth) {
+                            let label_count = label_types.len();
+                            // Sub-expressions provide label values; check if we need more from stack
+                            let from_stack = label_count.saturating_sub(explicit_operands);
+                            if from_stack > 0 {
+                                let consumed = vec![ValueType::Unknown; from_stack];
+                                checker.pop_vals_for_instr(&consumed, expr, &instr_name);
+                            }
+                        }
+                    }
+                }
+            }
+            checker.mark_unreachable();
+            return;
+        }
+
+        // Handle folded branch instructions with label types
+        if instr_name == "br_if" {
+            // (br_if $label value... condition)
+            // Consumes: label_types + i32 condition
+            // Produces: label_types (pushed back on fall-through)
+            if let Some(instr_node) = find_instr_plain_in_expr(expr) {
+                if let Some(depth) = get_branch_depth(&instr_node, source, checker) {
+                    if let Some(label_types) = checker.label_types(depth) {
+                        let label_types = label_types.to_vec();
+                        let total_expected = label_types.len() + 1; // label types + condition
+                        let from_stack = total_expected.saturating_sub(explicit_operands);
+                        if from_stack > 0 {
+                            let consumed = vec![ValueType::Unknown; from_stack];
+                            checker.pop_vals_for_instr(&consumed, expr, &instr_name);
+                        }
+                        // Push label types back for fall-through path
+                        checker.push_vals(&label_types);
+                        return;
+                    }
+                }
+            }
+            // Fallback: no label resolution, treat as consuming 1 (condition) producing 0
+            let from_stack = 1usize.saturating_sub(explicit_operands);
+            if from_stack > 0 {
+                checker.pop_vals_for_instr(&[ValueType::I32], expr, &instr_name);
+            }
+            return;
+        }
+
+        if instr_name == "br_table" {
+            // (br_table 0 1 2 default condition) — consumes label_types + i32 index
+            if let Some(instr_node) = find_instr_plain_in_expr(expr) {
+                let depths = get_all_branch_depths(&instr_node, source, checker);
+                if let Some(&default_depth) = depths.last() {
+                    if let Some(label_types) = checker.label_types(default_depth) {
+                        let label_count = label_types.len();
+                        let total_expected = label_count + 1; // label types + index
+                        let from_stack = total_expected.saturating_sub(explicit_operands);
+                        if from_stack > 0 {
+                            let consumed = vec![ValueType::Unknown; from_stack];
+                            checker.pop_vals_for_instr(&consumed, expr, &instr_name);
+                        }
+                    }
+                }
+            }
             checker.mark_unreachable();
             return;
         }
@@ -1707,12 +2192,6 @@ fn process_folded_expr(
             let consumed = vec![ValueType::Unknown; from_stack];
             checker.pop_vals_for_instr(&consumed, expr, &instr_name);
         }
-    }
-
-    // For block expressions, consume param types from outer stack
-    let block_params = get_block_param_types_from_expr(expr, source);
-    if !block_params.is_empty() {
-        checker.pop_vals(&block_params, expr);
     }
 
     // Check if expression always terminates
@@ -1869,44 +2348,6 @@ pub fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType>
 }
 
 /// Get block param types from a folded expression (expr node)
-fn get_block_param_types_from_expr(expr: &Node, source: &str) -> Vec<ValueType> {
-    let mut cursor = expr.walk();
-    for child in expr.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
-
-        if kind == "expr1_block"
-            || kind == "expr1_loop"
-            || kind == "expr1_if"
-            || kind == "expr1_try_table"
-            || kind == "expr1_try"
-        {
-            return get_block_param_types(&child, source);
-        }
-        if kind == "expr1" {
-            let mut inner_cursor = child.walk();
-            for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
-
-                if inner_kind == "expr1_block"
-                    || inner_kind == "expr1_loop"
-                    || inner_kind == "expr1_if"
-                    || inner_kind == "expr1_try_table"
-                    || inner_kind == "expr1_try"
-                {
-                    return get_block_param_types(&inner_child, source);
-                }
-            }
-        }
-    }
-    vec![]
-}
-
 /// Get param types from a block/loop/if node
 pub fn get_block_param_types(block_node: &Node, source: &str) -> Vec<ValueType> {
     let mut types = Vec::new();
