@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::types::{Diagnostic, Range};
-use crate::symbols::{SymbolTable, TypeKind};
+use crate::symbols::{SymbolTable, TypeKind, ValueType};
 use crate::utils::node_to_range;
 
 #[cfg(feature = "native")]
@@ -39,6 +39,7 @@ pub fn validate_module_structure(
     let mut diagnostics = Vec::new();
 
     check_memory_limits(symbols, &mut diagnostics);
+    check_table_limits(symbols, &mut diagnostics);
     check_min_gt_max(symbols, &mut diagnostics);
     check_duplicate_locals(symbols, &mut diagnostics);
 
@@ -51,10 +52,15 @@ pub fn validate_module_structure(
         check_duplicate_identifiers(&module_node, source, &mut diagnostics);
         check_inline_type_mismatches(&module_node, source, symbols, &mut diagnostics);
         check_constant_expressions(&module_node, source, symbols, &mut diagnostics);
+        check_constant_expression_types(&module_node, source, symbols, &mut diagnostics);
+        check_global_forward_refs(&module_node, source, symbols, &mut diagnostics);
         check_data_segment_memory_indices(&module_node, source, symbols, &mut diagnostics);
         check_elem_segment_table_indices(&module_node, source, symbols, &mut diagnostics);
         check_ref_func_declarations(&module_node, source, symbols, &mut diagnostics);
         check_unknown_type_refs(&module_node, source, symbols, &mut diagnostics);
+        check_block_type_use_mismatches(&module_node, source, symbols, &mut diagnostics);
+        check_table_non_nullable_refs(&module_node, source, &mut diagnostics);
+        check_implicit_memory_refs(&module_node, source, symbols, &mut diagnostics);
     }
 
     diagnostics
@@ -1200,8 +1206,56 @@ fn check_ref_func_declarations(
         collect_inline_table_elem_funcs(field, source, symbols, &mut declared_funcs);
     });
 
+    // Also collect functions referenced via ref.func in global/table init expressions
+    // Per spec, ref.func in const init contexts counts as a function declaration
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk == "module_field_global" || fk == "module_field_table" {
+            collect_ref_func_in_const_expr(field, source, symbols, &mut declared_funcs);
+        }
+    });
+
     // Step 2: Walk all function bodies to find ref.func usage
     collect_ref_func_errors(module, source, symbols, &declared_funcs, diagnostics);
+}
+
+/// Collect function indices referenced by ref.func in a global init expression.
+fn collect_ref_func_in_const_expr(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &mut HashSet<usize>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    if kind == "instr_plain" {
+        let text = node_text(node, source);
+        if text.starts_with("ref.func") {
+            // Find the function reference
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                let ck = child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ck = ck.as_str();
+                if ck == "index" || ck == "identifier" || ck == "nat" {
+                    let ref_text = node_text(&child, source).trim();
+                    if let Some(idx) = resolve_func_index(ref_text, symbols) {
+                        declared.insert(idx);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_ref_func_in_const_expr(&child, source, symbols, declared);
+    }
 }
 
 /// Collect function indices declared in an element segment.
@@ -1707,6 +1761,1175 @@ fn parse_nat(text: &str) -> Result<usize, ()> {
         usize::from_str_radix(&text[2..], 16).map_err(|_| ())
     } else {
         text.parse::<usize>().map_err(|_| ())
+    }
+}
+
+// ============================================================================
+// Step 8: Table size limits
+// ============================================================================
+
+fn check_table_limits(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnostic>) {
+    const MAX_TABLE_SIZE: u64 = 0xFFFF_FFFF; // 2^32 - 1
+
+    for table in &symbols.tables {
+        let range = table
+            .range
+            .unwrap_or_else(|| Range::from_coords(table.line, 0, table.line, 0));
+
+        if table.limits.0 as u64 > MAX_TABLE_SIZE {
+            diagnostics.push(Diagnostic::error(
+                range,
+                "Size minimum must not be greater than 4294967295",
+            ));
+        }
+
+        if let Some(max) = table.limits.1 {
+            if max as u64 > MAX_TABLE_SIZE {
+                diagnostics.push(Diagnostic::error(
+                    range,
+                    "Size minimum must not be greater than 4294967295",
+                ));
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Step 1: Constant expression type validation
+// ============================================================================
+
+/// Infer the type produced by a single const instruction name.
+fn infer_const_instr_type(
+    instr_name: &str,
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Option<ValueType> {
+    match instr_name {
+        "i32.const" | "i32.add" | "i32.sub" | "i32.mul" => Some(ValueType::I32),
+        "i64.const" | "i64.add" | "i64.sub" | "i64.mul" => Some(ValueType::I64),
+        "f32.const" => Some(ValueType::F32),
+        "f64.const" => Some(ValueType::F64),
+        "v128.const" => Some(ValueType::V128),
+        "ref.null" => {
+            // Resolve the heap type from the argument
+            let heap_text = resolve_ref_null_heap_type(node, source);
+            match heap_text.as_deref() {
+                Some("func") | Some("funcref") => Some(ValueType::Funcref),
+                Some("extern") | Some("externref") => Some(ValueType::Externref),
+                Some("any") | Some("anyref") => Some(ValueType::Anyref),
+                Some("eq") | Some("eqref") => Some(ValueType::Eqref),
+                Some("i31") | Some("i31ref") => Some(ValueType::I31ref),
+                Some("struct") | Some("structref") => Some(ValueType::Structref),
+                Some("array") | Some("arrayref") => Some(ValueType::Arrayref),
+                Some("none") | Some("nullref") => Some(ValueType::Nullref),
+                Some("noextern") | Some("nullexternref") => Some(ValueType::Externref),
+                Some("nofunc") | Some("nullfuncref") => Some(ValueType::Funcref),
+                Some(s) if s.starts_with('$') => {
+                    // Named type — resolve to Ref(n)
+                    if let Some(t) = symbols.get_type_by_name(s) {
+                        Some(ValueType::RefNull(t.index as u32))
+                    } else {
+                        Some(ValueType::Unknown)
+                    }
+                }
+                Some(s) => {
+                    // Numeric type index
+                    if let Ok(idx) = s.parse::<u32>() {
+                        Some(ValueType::RefNull(idx))
+                    } else {
+                        Some(ValueType::Unknown)
+                    }
+                }
+                None => Some(ValueType::Unknown),
+            }
+        }
+        "ref.func" => Some(ValueType::Funcref),
+        "ref.i31" => Some(ValueType::I31ref),
+        "i31.get_s" | "i31.get_u" => Some(ValueType::I32),
+        "any.convert_extern" => Some(ValueType::Anyref),
+        "extern.convert_any" => Some(ValueType::Externref),
+        "struct.new" | "struct.new_default" | "array.new" | "array.new_default"
+        | "array.new_fixed" => {
+            // Try to resolve type index to Ref(n)
+            if let Some(type_idx) = get_const_instr_type_index(node, source, symbols) {
+                Some(ValueType::Ref(type_idx as u32))
+            } else {
+                Some(ValueType::Unknown)
+            }
+        }
+        "global.get" => {
+            // Resolve global type
+            if let Some(global_type) = resolve_global_get_type(node, source, symbols) {
+                Some(global_type)
+            } else {
+                Some(ValueType::Unknown)
+            }
+        }
+        _ => None, // Not a const instruction
+    }
+}
+
+/// Get the type index from a const instruction (e.g., struct.new $type_idx)
+fn get_const_instr_type_index(node: &Node, source: &str, symbols: &SymbolTable) -> Option<usize> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "index" || ck == "identifier" {
+            let text = node_text(&child, source);
+            if text.starts_with('$') {
+                return symbols.get_type_by_name(text).map(|t| t.index);
+            }
+            if let Ok(idx) = text.parse::<usize>() {
+                return Some(idx);
+            }
+            // Check children
+            let mut ic = child.walk();
+            for idx_child in child.children(&mut ic) {
+                let ik = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = ik.as_str();
+                if ik == "identifier" {
+                    return symbols
+                        .get_type_by_name(node_text(&idx_child, source))
+                        .map(|t| t.index);
+                }
+                if ik == "nat" {
+                    if let Ok(idx) = node_text(&idx_child, source).parse::<usize>() {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the type of a global.get instruction's target global.
+/// Resolve the heap type argument of a ref.null instruction.
+/// Looks for the heap type text in child nodes of the instruction.
+fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        // The heap type can appear as various node kinds
+        if matches!(
+            ck,
+            "heap_type" | "_heap_type_or_ref" | "identifier" | "nat" | "index"
+        ) {
+            let text = node_text(&child, source).trim().to_string();
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+        // Also check inside index nodes
+        if ck == "index" {
+            let mut ic = child.walk();
+            for idx_child in child.children(&mut ic) {
+                let ik = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = ik.as_str();
+                if matches!(ik, "identifier" | "nat") {
+                    let text = node_text(&idx_child, source).trim().to_string();
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: try to extract from text
+    let text = node_text(node, source);
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    if parts.len() >= 2 {
+        return Some(parts[1].to_string());
+    }
+    None
+}
+
+fn resolve_global_get_type(node: &Node, source: &str, symbols: &SymbolTable) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "index" || ck == "identifier" {
+            let text = node_text(&child, source);
+            if text.starts_with('$') {
+                return symbols.get_global_by_name(text).map(|g| g.var_type.clone());
+            }
+            if let Ok(idx) = text.parse::<usize>() {
+                return symbols.get_global_by_index(idx).map(|g| g.var_type.clone());
+            }
+            let mut ic = child.walk();
+            for idx_child in child.children(&mut ic) {
+                let ik = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = ik.as_str();
+                if ik == "identifier" {
+                    return symbols
+                        .get_global_by_name(node_text(&idx_child, source))
+                        .map(|g| g.var_type.clone());
+                }
+                if ik == "nat" {
+                    if let Ok(idx) = node_text(&idx_child, source).parse::<usize>() {
+                        return symbols.get_global_by_index(idx).map(|g| g.var_type.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Deep-count all leaf instructions in a const expression tree.
+/// This recursively traverses ALL children to find instructions at any depth.
+fn count_const_instrs_deep(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> (usize, Option<ValueType>) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    match kind {
+        "instr_plain" => {
+            let text = node_text(node, source);
+            let first_token = text.split_whitespace().next().unwrap_or("");
+            let ty = infer_const_instr_type(first_token, node, source, symbols);
+            (1, ty)
+        }
+        "expr1_plain" => {
+            // Folded expression: the instruction itself produces one value
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                let ck = child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ck = ck.as_str();
+                if ck == "instr_plain" {
+                    let text = node_text(&child, source);
+                    let first_token = text.split_whitespace().next().unwrap_or("");
+                    let ty = infer_const_instr_type(first_token, &child, source, symbols);
+                    return (1, ty);
+                }
+            }
+            (1, None)
+        }
+        _ => {
+            // Recurse into all children
+            let mut total = 0;
+            let mut last_type = None;
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                let (count, ty) = count_const_instrs_deep(&child, source, symbols);
+                total += count;
+                if ty.is_some() {
+                    last_type = ty;
+                }
+            }
+            (total, last_type)
+        }
+    }
+}
+
+/// Check that constant expression types match their expected types.
+fn check_constant_expression_types(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut global_idx = 0usize;
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+
+        match fk {
+            "module_field_global" => {
+                // Get expected type from global_type
+                if !has_inline_import(field) {
+                    if let Some(expected_type) = extract_global_value_type(field, source) {
+                        check_const_expr_type_for_global(
+                            field,
+                            source,
+                            symbols,
+                            &expected_type,
+                            diagnostics,
+                        );
+                    }
+                }
+                global_idx += 1;
+            }
+            "module_field_data" => {
+                // Data offset must be i32 (memory32) or i64 (memory64)
+                check_data_offset_type(field, source, symbols, diagnostics);
+            }
+            "module_field_elem" => {
+                // Elem offset must be i32
+                check_elem_offset_type(field, source, symbols, diagnostics);
+            }
+            "module_field_table" => {
+                // Table init expression must match table's ref type
+                check_table_init_type(field, source, symbols, diagnostics);
+            }
+            "module_field_import" => {
+                // Count imported globals for forward ref checking
+                let mut cursor = field.walk();
+                for child in field.children(&mut cursor) {
+                    let ck = child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ck = ck.as_str();
+                    if ck == "import_desc" {
+                        let mut dc = child.walk();
+                        for desc in child.children(&mut dc) {
+                            let dk = desc.kind();
+                            #[cfg(all(feature = "wasm", not(feature = "native")))]
+                            let dk = dk.as_str();
+                            if dk == "import_desc_global_type" {
+                                global_idx += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Extract the value type from a global's global_type node.
+fn extract_global_value_type(node: &Node, source: &str) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "global_type" {
+            // Search for value_type or ref_type inside global_type
+            return extract_type_from_global_type(&child, source);
+        }
+    }
+    None
+}
+
+/// Extract ValueType from a global_type node.
+fn extract_type_from_global_type(node: &Node, source: &str) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "global_type_imm"
+            || ck == "global_type_mut"
+            || ck == "value_type"
+            || ck == "ref_type"
+        {
+            let text = node_text(&child, source);
+            // Strip "mut" wrapper if present
+            let type_text = if ck == "global_type_mut" {
+                // (mut i32) -> i32
+                let inner = text.trim();
+                if inner.starts_with("(mut") && inner.ends_with(')') {
+                    inner[4..inner.len() - 1].trim()
+                } else {
+                    inner
+                }
+            } else {
+                text.trim()
+            };
+            if let Some(vt) = ValueType::try_parse(type_text) {
+                return Some(vt);
+            }
+            // Try extracting from children
+            return extract_value_type_recursive(&child, source);
+        }
+    }
+    None
+}
+
+/// Recursively extract ValueType from a node tree.
+fn extract_value_type_recursive(node: &Node, source: &str) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "value_type" || ck == "ref_type" {
+            let text = node_text(&child, source);
+            if let Some(vt) = ValueType::try_parse(text.trim()) {
+                return Some(vt);
+            }
+        }
+        if let Some(vt) = extract_value_type_recursive(&child, source) {
+            return Some(vt);
+        }
+    }
+    None
+}
+
+/// Simple type compatibility for const expression checking.
+fn const_types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
+    if *actual == ValueType::Unknown || *expected == ValueType::Unknown {
+        return true;
+    }
+    if actual == expected {
+        return true;
+    }
+    // Reference subtyping: funcref <: funcref, etc.
+    match (actual, expected) {
+        (ValueType::Funcref, ValueType::Funcref) => true,
+        (ValueType::Externref, ValueType::Externref) => true,
+        // Non-null ref subtypes nullable ref
+        (ValueType::Ref(a), ValueType::RefNull(b)) if a == b => true,
+        // Funcref covers Ref(n) and RefNull(n)
+        (ValueType::Ref(_) | ValueType::RefNull(_), ValueType::Funcref) => true,
+        // Anyref covers eqref, i31ref, structref, arrayref, Ref(n)
+        (
+            ValueType::Eqref | ValueType::I31ref | ValueType::Structref | ValueType::Arrayref,
+            ValueType::Anyref,
+        ) => true,
+        (ValueType::Ref(_), ValueType::Anyref | ValueType::Eqref) => true,
+        // Nullref is bottom for internal ref hierarchy
+        (
+            ValueType::Nullref,
+            ValueType::Anyref
+            | ValueType::Eqref
+            | ValueType::I31ref
+            | ValueType::Structref
+            | ValueType::Arrayref
+            | ValueType::Funcref
+            | ValueType::Externref,
+        ) => true,
+        _ => false,
+    }
+}
+
+/// Check const expression type for a global initializer.
+fn check_const_expr_type_for_global(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    expected: &ValueType,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Count instructions after global_type
+    let mut past_global_type = false;
+    let mut total_instrs = 0;
+    let mut last_type: Option<ValueType> = None;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "global_type" {
+            past_global_type = true;
+            continue;
+        }
+        if past_global_type
+            && ck != "identifier"
+            && ck != "export"
+            && ck != "import"
+            && ck != "("
+            && ck != ")"
+            && ck != "global"
+        {
+            let (count, ty) = count_const_instrs_deep(&child, source, symbols);
+            total_instrs += count;
+            if ty.is_some() {
+                last_type = ty;
+            }
+        }
+    }
+
+    if total_instrs != 1 {
+        diagnostics.push(
+            Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
+        );
+    } else if let Some(ref actual) = last_type {
+        if !const_types_compatible(actual, expected) {
+            diagnostics.push(
+                Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
+            );
+        }
+    }
+}
+
+/// Check data segment offset expression type.
+fn check_data_offset_type(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "offset" {
+            let (count, ty) = count_const_instrs_deep(&child, source, symbols);
+            // Expected: i32 for memory32, i64 for memory64
+            let expected = ValueType::I32; // default to i32
+            if count != 1 {
+                diagnostics.push(
+                    Diagnostic::error(node_to_range(node), "type mismatch")
+                        .with_code("type-mismatch"),
+                );
+            } else if let Some(ref actual) = ty {
+                if !const_types_compatible(actual, &expected) {
+                    diagnostics.push(
+                        Diagnostic::error(node_to_range(node), "type mismatch")
+                            .with_code("type-mismatch"),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Check elem segment offset expression type.
+fn check_elem_offset_type(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "offset" {
+            let (count, ty) = count_const_instrs_deep(&child, source, symbols);
+            let expected = ValueType::I32;
+            if count != 1 {
+                diagnostics.push(
+                    Diagnostic::error(node_to_range(node), "type mismatch")
+                        .with_code("type-mismatch"),
+                );
+            } else if let Some(ref actual) = ty {
+                if !const_types_compatible(actual, &expected) {
+                    diagnostics.push(
+                        Diagnostic::error(node_to_range(node), "type mismatch")
+                            .with_code("type-mismatch"),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Check table init expression type matches table's ref type.
+fn check_table_init_type(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Find the table's ref type and init expression
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "table_fields_type" {
+            let mut inner = child.walk();
+            for gc in child.children(&mut inner) {
+                let gk = gc.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let gk = gk.as_str();
+                if gk == "expr" {
+                    let (count, ty) = count_const_instrs_deep(&gc, source, symbols);
+                    // Get expected type from the table's ref_type
+                    let expected =
+                        extract_table_ref_type(&child, source).unwrap_or(ValueType::Funcref);
+                    if count == 1 {
+                        if let Some(ref actual) = ty {
+                            if !const_types_compatible(actual, &expected) {
+                                diagnostics.push(
+                                    Diagnostic::error(node_to_range(node), "type mismatch")
+                                        .with_code("type-mismatch"),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Extract the ref type from a table_fields_type node.
+fn extract_table_ref_type(node: &Node, source: &str) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "table_type" {
+            return extract_ref_type_from_node(&child, source);
+        }
+        if ck == "ref_type" || ck == "value_type" {
+            let text = node_text(&child, source);
+            return ValueType::try_parse(text.trim());
+        }
+    }
+    None
+}
+
+/// Extract a ref type from a table_type or similar node.
+fn extract_ref_type_from_node(node: &Node, source: &str) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "ref_type" || ck == "value_type" {
+            let text = node_text(&child, source);
+            if let Some(vt) = ValueType::try_parse(text.trim()) {
+                return Some(vt);
+            }
+        }
+        // Also check for abbreviated ref types like funcref, externref
+        if ck == "_heap_type_or_ref" {
+            let text = node_text(&child, source);
+            if let Some(vt) = ValueType::try_parse(text.trim()) {
+                return Some(vt);
+            }
+        }
+        // Recurse
+        if let Some(vt) = extract_ref_type_from_node(&child, source) {
+            return Some(vt);
+        }
+    }
+    None
+}
+
+// ============================================================================
+// Step 5: global.get forward reference validation
+// ============================================================================
+
+/// Check that global.get in constant expressions doesn't forward-reference globals.
+fn check_global_forward_refs(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut current_global_idx = 0usize;
+
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+
+        match fk {
+            "module_field_import" => {
+                // Count imported globals
+                let mut cursor = field.walk();
+                for child in field.children(&mut cursor) {
+                    let ck = child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ck = ck.as_str();
+                    if ck == "import_desc" {
+                        let mut dc = child.walk();
+                        for desc in child.children(&mut dc) {
+                            let dk = desc.kind();
+                            #[cfg(all(feature = "wasm", not(feature = "native")))]
+                            let dk = dk.as_str();
+                            if dk == "import_desc_global_type" {
+                                current_global_idx += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            "module_field_global" => {
+                if !has_inline_import(field) {
+                    // Check global.get refs in this global's init expr
+                    check_global_get_forward_ref(
+                        field,
+                        source,
+                        symbols,
+                        current_global_idx,
+                        diagnostics,
+                    );
+                }
+                current_global_idx += 1;
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Check global.get instructions in a global's init expression for forward references.
+fn check_global_get_forward_ref(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    current_idx: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut past_global_type = false;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "global_type" {
+            past_global_type = true;
+            continue;
+        }
+        if past_global_type {
+            check_global_get_forward_ref_recursive(
+                &child,
+                source,
+                symbols,
+                current_idx,
+                diagnostics,
+            );
+        }
+    }
+}
+
+/// Recursively find global.get instructions and check for forward references.
+fn check_global_get_forward_ref_recursive(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    current_idx: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    if kind == "instr_plain" {
+        let text = node_text(node, source);
+        let first_token = text.split_whitespace().next().unwrap_or("");
+        if first_token == "global.get" {
+            // Resolve the referenced global index
+            if let Some(ref_idx) = resolve_global_ref_index(node, source, symbols) {
+                if ref_idx >= current_idx {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(node),
+                            format!("unknown global {}", ref_idx),
+                        )
+                        .with_code("unknown-global"),
+                    );
+                }
+            }
+        }
+        return;
+    }
+
+    if kind == "expr1_plain" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "instr_plain" {
+                let text = node_text(&child, source);
+                let first_token = text.split_whitespace().next().unwrap_or("");
+                if first_token == "global.get" {
+                    if let Some(ref_idx) = resolve_global_ref_index(&child, source, symbols) {
+                        if ref_idx >= current_idx {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    node_to_range(node),
+                                    format!("unknown global {}", ref_idx),
+                                )
+                                .with_code("unknown-global"),
+                            );
+                        }
+                    }
+                }
+            } else {
+                check_global_get_forward_ref_recursive(
+                    &child,
+                    source,
+                    symbols,
+                    current_idx,
+                    diagnostics,
+                );
+            }
+        }
+        return;
+    }
+
+    // Recurse
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        check_global_get_forward_ref_recursive(&child, source, symbols, current_idx, diagnostics);
+    }
+}
+
+/// Resolve a global reference to its absolute index.
+fn resolve_global_ref_index(
+    instr_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Option<usize> {
+    let mut cursor = instr_node.walk();
+    for child in instr_node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "index" || ck == "identifier" {
+            let text = node_text(&child, source);
+            if text.starts_with('$') {
+                return symbols.get_global_by_name(text).map(|g| g.index);
+            }
+            if let Ok(idx) = text.parse::<usize>() {
+                return Some(idx);
+            }
+            let mut ic = child.walk();
+            for idx_child in child.children(&mut ic) {
+                let ik = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = ik.as_str();
+                if ik == "identifier" {
+                    return symbols
+                        .get_global_by_name(node_text(&idx_child, source))
+                        .map(|g| g.index);
+                }
+                if ik == "nat" {
+                    if let Ok(idx) = node_text(&idx_child, source).parse::<usize>() {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// ============================================================================
+// Step 7: Block-level type_use inline type mismatches
+// ============================================================================
+
+/// Check that block/loop/if nodes with type_use + inline params/results match.
+fn check_block_type_use_mismatches(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    walk_for_block_type_use_mismatches(module, source, symbols, diagnostics);
+}
+
+fn walk_for_block_type_use_mismatches(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    if matches!(
+        kind,
+        "block_block"
+            | "loop_block"
+            | "block_if"
+            | "if_block"
+            | "block_try_table"
+            | "block_try"
+            | "instr_block"
+            | "instr_loop"
+            | "instr_if"
+    ) {
+        check_block_node_type_use(node, source, symbols, diagnostics);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_block_type_use_mismatches(&child, source, symbols, diagnostics);
+    }
+}
+
+fn check_block_node_type_use(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut type_use_node = None;
+    let mut has_inline_sig = false;
+    let mut inline_params: Vec<String> = Vec::new();
+    let mut inline_results: Vec<String> = Vec::new();
+
+    // Check immediate children and one level of inner block
+    check_block_children_for_type_use(
+        node,
+        source,
+        &mut type_use_node,
+        &mut has_inline_sig,
+        &mut inline_params,
+        &mut inline_results,
+    );
+
+    let type_use = match type_use_node {
+        Some(n) if has_inline_sig => n,
+        _ => return,
+    };
+
+    if let Some(type_def) = resolve_type_use(&type_use, source, symbols) {
+        if let TypeKind::Func { params, results } = &type_def.kind {
+            let type_params: Vec<String> = params.iter().map(|p| p.to_string()).collect();
+            let type_results: Vec<String> = results.iter().map(|r| r.to_string()).collect();
+
+            if inline_params != type_params || inline_results != type_results {
+                diagnostics.push(Diagnostic::error(
+                    node_to_range(&type_use),
+                    "Inline function type does not match the type reference",
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+fn check_block_children_for_type_use<'a>(
+    node: &Node<'a>,
+    source: &str,
+    type_use_node: &mut Option<Node<'a>>,
+    has_inline_sig: &mut bool,
+    inline_params: &mut Vec<String>,
+    inline_results: &mut Vec<String>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        match ck {
+            "type_use" => *type_use_node = Some(child),
+            "func_type_params" | "func_type_params_many" => {
+                *has_inline_sig = true;
+                extract_param_types(&child, source, inline_params);
+            }
+            "func_type_results" => {
+                *has_inline_sig = true;
+                extract_result_types(&child, source, inline_results);
+            }
+            "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
+            | "block_try" => {
+                // Recurse one level
+                check_block_children_for_type_use(
+                    &child,
+                    source,
+                    type_use_node,
+                    has_inline_sig,
+                    inline_params,
+                    inline_results,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn check_block_children_for_type_use(
+    node: &Node,
+    source: &str,
+    type_use_node: &mut Option<Node>,
+    has_inline_sig: &mut bool,
+    inline_params: &mut Vec<String>,
+    inline_results: &mut Vec<String>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        let ck = ck.as_str();
+        match ck {
+            "type_use" => *type_use_node = Some(child.clone()),
+            "func_type_params" | "func_type_params_many" => {
+                *has_inline_sig = true;
+                extract_param_types(&child, source, inline_params);
+            }
+            "func_type_results" => {
+                *has_inline_sig = true;
+                extract_result_types(&child, source, inline_results);
+            }
+            "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
+            | "block_try" => {
+                check_block_children_for_type_use(
+                    &child,
+                    source,
+                    type_use_node,
+                    has_inline_sig,
+                    inline_params,
+                    inline_results,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+// ============================================================================
+// Step 9: Table non-nullable ref type validation
+// ============================================================================
+
+/// Tables with non-nullable ref types require an initializer expression.
+/// Also validate table init expression type matches table element type.
+fn check_table_non_nullable_refs(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_table" {
+            return;
+        }
+        if has_inline_import(field) {
+            return;
+        }
+
+        let mut cursor = field.walk();
+        for child in field.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "table_fields_type" {
+                let text = node_text(&child, source);
+                // Check if this table has a non-nullable ref type
+                // Non-nullable: (ref func), (ref $t) — NOT (ref null func)
+                let has_non_nullable = text.contains("(ref ") && !text.contains("(ref null");
+                if !has_non_nullable {
+                    return;
+                }
+
+                // Find the init expression
+                let mut init_expr = None;
+                let mut inner = child.walk();
+                for gc in child.children(&mut inner) {
+                    let gk = gc.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let gk = gk.as_str();
+                    if gk == "expr" {
+                        init_expr = Some(gc);
+                        break;
+                    }
+                }
+
+                match init_expr {
+                    None => {
+                        // Non-nullable table requires an init expression
+                        diagnostics.push(
+                            Diagnostic::error(node_to_range(field), "type mismatch")
+                                .with_code("type-mismatch"),
+                        );
+                    }
+                    Some(expr_node) => {
+                        // Even with an init, ref.null is not valid for non-nullable tables
+                        let expr_text = node_text(&expr_node, source);
+                        if expr_text.contains("ref.null") {
+                            diagnostics.push(
+                                Diagnostic::error(node_to_range(field), "type mismatch")
+                                    .with_code("type-mismatch"),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// ============================================================================
+// Step 3: Check memory instructions with no memory declared
+// ============================================================================
+
+/// Memory instruction prefixes that implicitly use memory 0.
+const MEMORY_INSTRUCTION_PREFIXES: &[&str] = &[
+    "i32.load",
+    "i64.load",
+    "f32.load",
+    "f64.load",
+    "i32.store",
+    "i64.store",
+    "f32.store",
+    "f64.store",
+    "i32.load8",
+    "i32.load16",
+    "i64.load8",
+    "i64.load16",
+    "i64.load32",
+    "i32.store8",
+    "i32.store16",
+    "i64.store8",
+    "i64.store16",
+    "i64.store32",
+    "v128.load",
+    "v128.store",
+    "memory.size",
+    "memory.grow",
+    "memory.fill",
+    "memory.copy",
+    "memory.init",
+    "memory.atomic",
+    "i32.atomic",
+    "i64.atomic",
+];
+
+fn is_memory_instruction(name: &str) -> bool {
+    MEMORY_INSTRUCTION_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+}
+
+/// Check that memory instructions don't implicitly reference memory 0
+/// when no memory is declared.
+fn check_implicit_memory_refs(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !symbols.memories.is_empty() {
+        return; // At least one memory exists, no need to check
+    }
+
+    // Walk all function bodies looking for memory instructions
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk == "module_field_func" {
+            walk_for_memory_instrs(field, source, diagnostics);
+        }
+    });
+}
+
+fn walk_for_memory_instrs(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    if kind == "instr_plain" {
+        let text = node_text(node, source);
+        let first_token = text.split_whitespace().next().unwrap_or("");
+        if is_memory_instruction(first_token) {
+            diagnostics.push(
+                Diagnostic::error(node_to_range(node), "unknown memory 0".to_string())
+                    .with_code("unknown-memory"),
+            );
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_memory_instrs(&child, source, diagnostics);
     }
 }
 
