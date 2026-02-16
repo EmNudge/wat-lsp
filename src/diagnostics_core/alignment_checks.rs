@@ -21,6 +21,7 @@ pub fn check_alignment(node: &Node, source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut instr_name = None;
     let mut align_node = None;
+    let mut offset_node = None;
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -39,17 +40,32 @@ pub fn check_alignment(node: &Node, source: &str) -> Vec<Diagnostic> {
             "align_value" => {
                 align_node = Some(child);
             }
+            "offset_value" => {
+                offset_node = Some(child);
+            }
             _ => {}
         }
     }
 
-    // Only check if we have both a memory instruction and an align_value
+    // Check offset range (must fit in u32 for memory32)
+    if let Some(ref offset_nd) = offset_node {
+        if let Some(offset) = parse_offset_value(offset_nd, source) {
+            if offset > u32::MAX as u64 {
+                diagnostics.push(Diagnostic::error(
+                    node_to_range(offset_nd),
+                    "offset out of range".to_string(),
+                ));
+            }
+        }
+    }
+
+    // Only check alignment if we have both a memory instruction and an align_value
     let (Some(instr), Some(align_nd)) = (instr_name, align_node) else {
         return diagnostics;
     };
 
-    // Extract the numeric value from align_offset_value child
-    let align_val = parse_align_value(&align_nd, source);
+    // Extract the numeric value (u64 to detect overflow)
+    let align_val = parse_align_value_u64(&align_nd, source);
     let Some(align) = align_val else {
         return diagnostics;
     };
@@ -65,7 +81,7 @@ pub fn check_alignment(node: &Node, source: &str) -> Vec<Diagnostic> {
 
     // Check against natural alignment
     if let Some(natural) = natural_alignment(&instr) {
-        if align > natural {
+        if align > natural as u64 {
             diagnostics.push(Diagnostic::error(
                 node_to_range(&align_nd),
                 "alignment must not be larger than natural".to_string(),
@@ -76,9 +92,8 @@ pub fn check_alignment(node: &Node, source: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// Parse the numeric alignment value from an `align_value` node.
-/// The node structure is: `align_value` -> `align_offset_value` (child with the number).
-fn parse_align_value(node: &Node, source: &str) -> Option<u32> {
+/// Parse the alignment value as u64 to detect values that overflow u32.
+fn parse_align_value_u64(node: &Node, source: &str) -> Option<u64> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let kind = child.kind();
@@ -89,23 +104,40 @@ fn parse_align_value(node: &Node, source: &str) -> Option<u32> {
 
         if kind_ref == "align_offset_value" {
             let text = &source[child.byte_range()];
-            return parse_alignment_number(text);
+            return parse_number_u64(text);
         }
     }
     None
 }
 
-/// Parse an alignment number, handling both decimal and hex formats.
-/// Underscores are allowed as digit separators.
-fn parse_alignment_number(text: &str) -> Option<u32> {
+/// Parse the numeric offset value from an `offset_value` node.
+fn parse_offset_value(node: &Node, source: &str) -> Option<u64> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        #[cfg(feature = "native")]
+        let kind_ref = kind;
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind_ref = &*kind;
+
+        if kind_ref == "align_offset_value" {
+            let text = &source[child.byte_range()];
+            return parse_number_u64(text);
+        }
+    }
+    None
+}
+
+/// Parse a number as u64, handling decimal and hex formats with underscore separators.
+fn parse_number_u64(text: &str) -> Option<u64> {
     let cleaned: String = text.chars().filter(|c| *c != '_').collect();
     if let Some(hex) = cleaned
         .strip_prefix("0x")
         .or_else(|| cleaned.strip_prefix("0X"))
     {
-        u32::from_str_radix(hex, 16).ok()
+        u64::from_str_radix(hex, 16).ok()
     } else {
-        cleaned.parse::<u32>().ok()
+        cleaned.parse::<u64>().ok()
     }
 }
 
@@ -290,13 +322,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_alignment_number() {
-        assert_eq!(parse_alignment_number("1"), Some(1));
-        assert_eq!(parse_alignment_number("4"), Some(4));
-        assert_eq!(parse_alignment_number("16"), Some(16));
-        assert_eq!(parse_alignment_number("0x10"), Some(16));
-        assert_eq!(parse_alignment_number("0x1"), Some(1));
-        assert_eq!(parse_alignment_number("1_000"), Some(1000));
+    fn test_parse_number_u64() {
+        assert_eq!(parse_number_u64("1"), Some(1));
+        assert_eq!(parse_number_u64("4"), Some(4));
+        assert_eq!(parse_number_u64("16"), Some(16));
+        assert_eq!(parse_number_u64("0x10"), Some(16));
+        assert_eq!(parse_number_u64("0x1"), Some(1));
+        assert_eq!(parse_number_u64("1_000"), Some(1000));
+        assert_eq!(parse_number_u64("0x1_0000_0000"), Some(0x100000000));
     }
 
     #[cfg(feature = "native")]

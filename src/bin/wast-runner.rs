@@ -121,13 +121,27 @@ struct GlobalSummary {
 // ---------------------------------------------------------------------------
 
 /// Find the matching close paren starting from an offset that points at or before '('.
+/// Skips block comments `(; ... ;)` (including nested ones) and line comments `;;`.
 fn find_matching_close_paren(source: &str, start: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     // Find the opening paren at or after start
     let open = bytes.iter().skip(start).position(|&b| b == b'(')? + start;
     let mut depth = 0i32;
-    for (i, &byte) in bytes.iter().enumerate().skip(open) {
-        match byte {
+    let mut i = open;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'(' && bytes[i + 1] == b';' {
+            // Block comment — skip, handling nesting
+            i = skip_block_comment(bytes, i)?;
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b';' && bytes[i + 1] == b';' {
+            // Line comment — skip to end of line
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        match bytes[i] {
             b'(' => depth += 1,
             b')' => {
                 depth -= 1;
@@ -137,8 +151,67 @@ fn find_matching_close_paren(source: &str, start: usize) -> Option<usize> {
             }
             _ => {}
         }
+        i += 1;
     }
     None
+}
+
+/// Walk backward from end of `text` to find the opening `(` that is NOT part of a block comment.
+fn rfind_open_paren_skip_comments(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        // Check for block comment end `;)` — walk backwards to find matching `(;`
+        if i > 0 && bytes[i] == b')' && bytes[i - 1] == b';' {
+            // Skip this block comment backwards
+            let mut depth = 1;
+            i -= 2; // Skip `;)`
+            while i > 0 && depth > 0 {
+                if bytes[i] == b';' && i > 0 && bytes[i - 1] == b'(' {
+                    depth -= 1;
+                    if depth > 0 {
+                        i -= 2;
+                    } else {
+                        i -= 1; // Move past the `(` of `(;`, then continue search
+                    }
+                } else if bytes[i] == b')' && i > 0 && bytes[i - 1] == b';' {
+                    depth += 1;
+                    i -= 2;
+                } else {
+                    i -= 1;
+                }
+            }
+            continue;
+        }
+        if bytes[i] == b'(' {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Skip a block comment `(; ... ;)`, handling nested block comments.
+/// Returns the position right after the closing `;)`.
+fn skip_block_comment(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut depth = 1;
+    let mut i = start + 2; // Skip opening `(;`
+    while i + 1 < bytes.len() && depth > 0 {
+        if bytes[i] == b'(' && bytes[i + 1] == b';' {
+            depth += 1;
+            i += 2;
+        } else if bytes[i] == b';' && bytes[i + 1] == b')' {
+            depth -= 1;
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    if depth == 0 {
+        Some(i)
+    } else {
+        None
+    }
 }
 
 /// Extract the WAT text for a QuoteWat directive from the original source.
@@ -148,7 +221,8 @@ fn extract_wat_text<'a>(qw: &wast::QuoteWat<'a>, source: &'a str) -> Option<Stri
             let span = wat.span();
             let offset = span.offset();
             // span points to 'module' or 'component' keyword — walk back to '('
-            let start = source[..offset].rfind('(')?;
+            // Must skip block comments like `(;comment;)` when searching backwards
+            let start = rfind_open_paren_skip_comments(&source[..offset])?;
             let end = find_matching_close_paren(source, start)?;
             Some(source[start..=end].to_string())
         }

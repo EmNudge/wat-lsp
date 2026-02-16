@@ -983,11 +983,9 @@ mod tests {
   (table 1 funcref)
   (elem (i32.const 0) $inc)
 
-  (func (export "dispatch") (param $i i32) (param $x i32) (result i32)
-    local.get $i
-    ref.func $inc
-    drop
+  (func (export "dispatch") (param $x i32) (result i32)
     local.get $x
+    ref.func $inc
     call_ref $t)
 )"#;
 

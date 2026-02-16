@@ -37,16 +37,18 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     let mut symbol_table = SymbolTable::new();
     let root = tree.root_node();
 
-    // Extract imports FIRST - imports get indices before regular declarations
+    // Extract types FIRST so they're available for type_use resolution in imports and functions
+    extract_types(&root, source, &mut symbol_table);
+
+    // Extract imports - imports get indices before regular declarations
     // Returns counters for each kind of import
     let import_counts = extract_imports(&root, source, &mut symbol_table);
     symbol_table.num_imported_globals = import_counts.globals;
 
-    // Extract in order: globals, types, tables, memories, functions
+    // Extract in order: globals, tables, memories, functions
     // (Order matters for index assignment)
     // Pass import counts to offset the indices
     extract_globals_with_offset(&root, source, &mut symbol_table, import_counts.globals);
-    extract_types(&root, source, &mut symbol_table);
     extract_tables_with_offset(&root, source, &mut symbol_table, import_counts.tables);
     extract_memories_with_offset(&root, source, &mut symbol_table, import_counts.memories);
     extract_tags_with_offset(&root, source, &mut symbol_table, import_counts.tags);
@@ -211,6 +213,7 @@ fn extract_inline_import_func(
         end_byte: func_node.end_byte(),
         range: name_range,
         doc_comment: None,
+        has_type_use: has_type_use_child(func_node),
     })
 }
 
@@ -251,9 +254,12 @@ fn extract_single_import(
                 match kind {
                     "import_desc_func_type" | "import_desc_type_use" => {
                         // Imported function: (func $name? ...)
-                        if let Some(func) =
-                            extract_imported_function(&desc_child, source, counts.functions)
-                        {
+                        if let Some(func) = extract_imported_function(
+                            &desc_child,
+                            source,
+                            counts.functions,
+                            symbol_table,
+                        ) {
                             symbol_table.add_function(func);
                             counts.functions += 1;
                         }
@@ -300,7 +306,12 @@ fn extract_single_import(
 }
 
 /// Extract an imported function
-fn extract_imported_function(desc_node: &Node, source: &str, index: usize) -> Option<Function> {
+fn extract_imported_function(
+    desc_node: &Node,
+    source: &str,
+    index: usize,
+    symbol_table: &SymbolTable,
+) -> Option<Function> {
     let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
         (
             Some(node_text(&id_node, source)),
@@ -357,6 +368,17 @@ fn extract_imported_function(desc_node: &Node, source: &str, index: usize) -> Op
         results = extract_results(desc_node, source);
     }
 
+    // Resolve type_use if no explicit params/results
+    if results.is_empty() {
+        if let Some((type_params, type_results)) = resolve_type_use(desc_node, source, symbol_table)
+        {
+            results = type_results;
+            if parameters.is_empty() {
+                parameters = type_params;
+            }
+        }
+    }
+
     Some(Function {
         name,
         index,
@@ -370,6 +392,7 @@ fn extract_imported_function(desc_node: &Node, source: &str, index: usize) -> Op
         end_byte: desc_node.end_byte(),
         range: name_range,
         doc_comment: None, // Imported functions don't have doc comments
+        has_type_use: has_type_use_child(desc_node),
     })
 }
 
@@ -434,8 +457,9 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
     };
 
     let mut ref_type = ValueType::Funcref;
-    let mut min_limit = 0;
-    let mut max_limit = None;
+    let mut min_limit: u64 = 0;
+    let mut max_limit: Option<u64> = None;
+    let mut is_table64 = false;
 
     let mut cursor = desc_node.walk();
     for child in desc_node.children(&mut cursor) {
@@ -448,7 +472,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
                     for limit_child in type_child.children(&mut limits_cursor) {
                         if limit_child.kind() == "nat" {
                             let text = node_text(&limit_child, source);
-                            if let Ok(num) = text.parse::<u32>() {
+                            if let Some(num) = parse_wat_nat(&text) {
                                 if nat_index == 0 {
                                     min_limit = num;
                                 } else {
@@ -460,6 +484,8 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
                     }
                 } else if type_child.kind() == "ref_type" {
                     ref_type = extract_ref_type(&type_child, source);
+                } else if type_child.kind() == "table64_type" {
+                    is_table64 = true;
                 }
             }
         }
@@ -470,6 +496,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
         index,
         ref_type,
         limits: (min_limit, max_limit),
+        is_table64,
         line: desc_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -826,6 +853,7 @@ fn extract_function(
     let mut results = extract_results(func_node, source);
     let locals = extract_locals(func_node, source);
     let blocks = extract_blocks(func_node, source);
+    let has_type_use = has_type_use_child(func_node);
 
     // If results (and/or params) are empty but there's a (type $t) reference, resolve from the type
     if results.is_empty() {
@@ -854,6 +882,7 @@ fn extract_function(
         end_byte: func_node.end_byte(),
         range: name_range,
         doc_comment,
+        has_type_use,
     })
 }
 
@@ -936,6 +965,17 @@ fn extract_results(func_node: &Node, source: &str) -> Vec<ValueType> {
     results
 }
 
+/// Check if a node has a `type_use` child (i.e., `(type ...)` reference).
+fn has_type_use_child(node: &Node) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_use" {
+            return true;
+        }
+    }
+    false
+}
+
 /// Resolve params and results from a `(type $t)` reference on a function node.
 /// Returns `Some((params, results))` if a type_use was found and resolved.
 fn resolve_type_use(
@@ -978,11 +1018,61 @@ fn resolve_type_use(
                             return Some((parameters, results.clone()));
                         }
                     }
+
+                    // Fallback: try implicit type resolution for numeric indices
+                    // beyond the explicit type count (e.g., types created by inline
+                    // function signatures)
+                    if let Ok(idx) = type_ref.parse::<usize>() {
+                        if let Some((params, results)) = resolve_implicit_type(idx, symbol_table) {
+                            let parameters = params
+                                .iter()
+                                .enumerate()
+                                .map(|(i, vt)| Parameter {
+                                    name: None,
+                                    param_type: vt.clone(),
+                                    index: i,
+                                    range: None,
+                                })
+                                .collect();
+                            return Some((parameters, results));
+                        }
+                    }
                 }
             }
         }
     }
     None
+}
+
+/// Resolve a type index that may refer to an implicit type created by
+/// inline function signatures. Builds the implicit type table:
+/// explicit func types + unique function signatures not matching any explicit type.
+/// Only functions without type_use create implicit types.
+fn resolve_implicit_type(
+    idx: usize,
+    symbol_table: &SymbolTable,
+) -> Option<(Vec<ValueType>, Vec<ValueType>)> {
+    let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
+    for type_def in &symbol_table.types {
+        if let TypeKind::Func { params, results } = &type_def.kind {
+            sigs.push((params.clone(), results.clone()));
+        }
+    }
+    for func in &symbol_table.functions {
+        if func.has_type_use {
+            continue;
+        }
+        let params: Vec<ValueType> = func
+            .parameters
+            .iter()
+            .map(|p| p.param_type.clone())
+            .collect();
+        let sig = (params, func.results.clone());
+        if !sigs.iter().any(|s| s == &sig) {
+            sigs.push(sig);
+        }
+    }
+    sigs.get(idx).cloned()
 }
 
 /// Extract local variables from a function node
@@ -1805,8 +1895,9 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
     };
 
     let mut ref_type = ValueType::Funcref;
-    let mut min_limit = 0;
-    let mut max_limit = None;
+    let mut min_limit: u64 = 0;
+    let mut max_limit: Option<u64> = None;
+    let mut is_table64 = false;
 
     let mut cursor = table_node.walk();
     for child in table_node.children(&mut cursor) {
@@ -1823,7 +1914,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                             for limit_child in type_child.children(&mut limits_cursor) {
                                 if limit_child.kind() == "nat" {
                                     let text = node_text(&limit_child, source);
-                                    if let Some(num) = parse_wat_nat(&text).map(|n| n as u32) {
+                                    if let Some(num) = parse_wat_nat(&text) {
                                         if nat_index == 0 {
                                             min_limit = num;
                                         } else {
@@ -1836,6 +1927,8 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                         } else if type_child.kind() == "ref_type" {
                             // Extract ref type from nested structure
                             ref_type = extract_ref_type(&type_child, source);
+                        } else if type_child.kind() == "table64_type" {
+                            is_table64 = true;
                         }
                     }
                 }
@@ -1850,7 +1943,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                     for limit_child in type_child.children(&mut limits_cursor) {
                         if limit_child.kind() == "nat" {
                             let text = node_text(&limit_child, source);
-                            if let Ok(num) = text.parse::<u32>() {
+                            if let Some(num) = parse_wat_nat(&text) {
                                 if nat_index == 0 {
                                     min_limit = num;
                                 } else {
@@ -1862,6 +1955,8 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                     }
                 } else if type_child.kind() == "ref_type" {
                     ref_type = extract_ref_type(&type_child, source);
+                } else if type_child.kind() == "table64_type" {
+                    is_table64 = true;
                 }
             }
         }
@@ -1872,6 +1967,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
         index,
         ref_type,
         limits: (min_limit, max_limit),
+        is_table64,
         line: table_node.range().start_point.row as u32,
         range: name_range,
     })
@@ -2111,7 +2207,7 @@ fn node_text(node: &Node, source: &str) -> String {
 }
 
 /// Parse a WAT natural number, handling hex (0x...) and underscore separators.
-fn parse_wat_nat(text: &str) -> Option<u64> {
+pub(crate) fn parse_wat_nat(text: &str) -> Option<u64> {
     let text = text.trim().replace('_', "");
     if text.starts_with("0x") || text.starts_with("0X") {
         u64::from_str_radix(&text[2..], 16).ok()
@@ -2304,9 +2400,57 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
             }
             "ref_type_ref" => {
                 // (ref null? kind) or (ref null? $type)
-                // Similar logic
-                return ValueType::Structref; // Fallback
+                // Walk children to extract nullable and index
+                let mut concrete_cursor = child.walk();
+                let mut index_val = None;
+                let mut nullable = false;
+                let mut ref_kind = None;
+
+                for c in child.children(&mut concrete_cursor) {
+                    let ck = c.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ck = ck.as_str();
+                    if ck == "index" {
+                        let idx_text = node_text(&c, source);
+                        if let Ok(idx) = idx_text.parse::<u32>() {
+                            index_val = Some(idx);
+                        }
+                        // Named index: leave index_val as None, fallback to Structref
+                    } else if ck == "null" || node_text(&c, source) == "null" {
+                        nullable = true;
+                    } else if ck == "ref_kind" {
+                        ref_kind = Some(node_text(&c, source));
+                    }
+                }
+
+                // If it's a ref_kind like (ref func), (ref extern), etc.
+                if let Some(kind) = ref_kind {
+                    return match kind.as_str() {
+                        "func" => ValueType::Funcref,
+                        "extern" => ValueType::Externref,
+                        "any" => ValueType::Anyref,
+                        "eq" => ValueType::Eqref,
+                        "i31" => ValueType::I31ref,
+                        "struct" => ValueType::Structref,
+                        "array" => ValueType::Arrayref,
+                        "null" | "none" => ValueType::Nullref,
+                        "nofunc" => ValueType::NullFuncref,
+                        "noextern" => ValueType::NullExternref,
+                        _ => ValueType::Funcref,
+                    };
+                }
+
+                if let Some(idx) = index_val {
+                    return if nullable {
+                        ValueType::RefNull(idx)
+                    } else {
+                        ValueType::Ref(idx)
+                    };
+                }
+                return ValueType::Structref; // Fallback for named types
             }
+            // Handle intermediate ref_type wrapper node (e.g. value_type_ref_type → ref_type)
+            "ref_type" => return extract_ref_type(&child, source),
             _ => {
                 let text = node_text(&child, source);
                 if let Some(vt) = simple_type_from_str(&text) {

@@ -26,6 +26,7 @@ fn test_add_function() {
         end_byte: 100,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
 
     table.add_function(func);
@@ -71,6 +72,7 @@ fn test_add_table() {
         index: 0,
         ref_type: ValueType::Funcref,
         limits: (10, Some(100)),
+        is_table64: false,
         line: 0,
         range: None,
     };
@@ -135,6 +137,7 @@ fn test_get_function_by_index() {
             end_byte: 100,
             range: None,
             doc_comment: None,
+            has_type_use: false,
         };
         table.add_function(func);
     }
@@ -186,6 +189,7 @@ fn test_unnamed_symbols() {
         end_byte: 100,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
     table.add_function(func);
 
@@ -213,6 +217,7 @@ fn test_multiple_symbols_same_type() {
             end_byte: 100,
             range: None,
             doc_comment: None,
+            has_type_use: false,
         };
         table.add_function(func);
     }
@@ -316,6 +321,7 @@ fn test_complex_function() {
         end_byte: 500,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
 
     assert_eq!(func.parameters.len(), 2);

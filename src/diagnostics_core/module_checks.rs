@@ -56,11 +56,15 @@ pub fn validate_module_structure(
         check_global_forward_refs(&module_node, source, symbols, &mut diagnostics);
         check_data_segment_memory_indices(&module_node, source, symbols, &mut diagnostics);
         check_elem_segment_table_indices(&module_node, source, symbols, &mut diagnostics);
+        check_elem_segment_types(&module_node, source, symbols, &mut diagnostics);
         check_ref_func_declarations(&module_node, source, symbols, &mut diagnostics);
         check_unknown_type_refs(&module_node, source, symbols, &mut diagnostics);
+        check_type_forward_refs(&module_node, source, symbols, &mut diagnostics);
         check_block_type_use_mismatches(&module_node, source, symbols, &mut diagnostics);
         check_table_non_nullable_refs(&module_node, source, &mut diagnostics);
         check_implicit_memory_refs(&module_node, source, symbols, &mut diagnostics);
+        check_call_indirect_table_requirements(&module_node, source, symbols, &mut diagnostics);
+        check_inline_elem_func_refs(&module_node, source, symbols, &mut diagnostics);
     }
 
     diagnostics
@@ -795,6 +799,7 @@ fn check_constant_expressions(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let mut global_index = symbols.num_imported_globals;
     for_each_module_field(module, |field| {
         let fk = field.kind();
         #[cfg(all(feature = "wasm", not(feature = "native")))]
@@ -803,7 +808,9 @@ fn check_constant_expressions(
         match fk {
             "module_field_global" => {
                 // Check instructions after global_type
-                check_global_init_expr(field, source, symbols, diagnostics);
+                // In global init: only globals with index < current are available
+                check_global_init_expr(field, source, symbols, global_index, diagnostics);
+                global_index += 1;
             }
             "module_field_data" => {
                 // Check offset expression
@@ -827,6 +834,7 @@ fn check_global_init_expr(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
+    global_index: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Global: (global $id? type init_expr...)
@@ -842,7 +850,8 @@ fn check_global_init_expr(
             continue;
         }
         if past_global_type {
-            check_const_instruction_tree(&child, source, symbols, diagnostics);
+            // In global init: allow imported + earlier module-defined globals
+            check_const_instruction_tree(&child, source, symbols, global_index, diagnostics);
         }
     }
 }
@@ -853,13 +862,15 @@ fn check_offset_expr(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Data/elem offsets: all defined globals are available
+    let max_global = symbols.globals.len();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let ck = child.kind();
         #[cfg(all(feature = "wasm", not(feature = "native")))]
         let ck = ck.as_str();
         if ck == "offset" {
-            check_const_instruction_tree(&child, source, symbols, diagnostics);
+            check_const_instruction_tree(&child, source, symbols, max_global, diagnostics);
         }
     }
 }
@@ -870,13 +881,24 @@ fn check_elem_exprs(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Elem expressions: all defined globals are available
+    let max_global = symbols.globals.len();
+    // elem_expr nodes are inside elem_list, not direct children of module_field_elem
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let ck = child.kind();
         #[cfg(all(feature = "wasm", not(feature = "native")))]
         let ck = ck.as_str();
-        if ck == "elem_expr" {
-            check_const_instruction_tree(&child, source, symbols, diagnostics);
+        if ck == "elem_list" {
+            let mut inner = child.walk();
+            for gc in child.children(&mut inner) {
+                let gk = gc.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let gk = gk.as_str();
+                if gk == "elem_expr" {
+                    check_const_instruction_tree(&gc, source, symbols, max_global, diagnostics);
+                }
+            }
         }
     }
 }
@@ -887,6 +909,8 @@ fn check_table_init_expr(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Table init: only imported globals (tables come before globals in binary format)
+    let max_global = symbols.num_imported_globals;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let ck = child.kind();
@@ -900,7 +924,7 @@ fn check_table_init_expr(
                 #[cfg(all(feature = "wasm", not(feature = "native")))]
                 let gk = gk.as_str();
                 if gk == "expr" {
-                    check_const_instruction_tree(&gc, source, symbols, diagnostics);
+                    check_const_instruction_tree(&gc, source, symbols, max_global, diagnostics);
                 }
             }
         }
@@ -908,10 +932,12 @@ fn check_table_init_expr(
 }
 
 /// Recursively check that all instructions in a tree are constant expressions.
+/// `max_allowed_global`: maximum global index that can be referenced by global.get.
 fn check_const_instruction_tree(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
+    max_allowed_global: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let kind = node.kind();
@@ -929,7 +955,7 @@ fn check_const_instruction_tree(
                     format!("Constant expression required, but found '{}'", first_token),
                 ));
             } else if first_token == "global.get" {
-                check_global_get_in_const(node, source, symbols, diagnostics);
+                check_global_get_in_const(node, source, symbols, max_allowed_global, diagnostics);
             }
             return;
         }
@@ -949,13 +975,33 @@ fn check_const_instruction_tree(
                             format!("Constant expression required, but found '{}'", first_token),
                         ));
                     } else if first_token == "global.get" {
-                        check_global_get_in_const(&child, source, symbols, diagnostics);
+                        check_global_get_in_const(
+                            &child,
+                            source,
+                            symbols,
+                            max_allowed_global,
+                            diagnostics,
+                        );
                     }
                 } else if ck == "expr" {
                     // Check nested expressions for constness too
-                    check_const_instruction_tree(&child, source, symbols, diagnostics);
+                    check_const_instruction_tree(
+                        &child,
+                        source,
+                        symbols,
+                        max_allowed_global,
+                        diagnostics,
+                    );
                 }
             }
+            return;
+        }
+        // call/call_indirect instructions are never valid in const expressions
+        "instr_call" | "expr1_call" | "instr_list_call" => {
+            diagnostics.push(
+                Diagnostic::error(node_to_range(node), "constant expression required")
+                    .with_code("constant-expression-required"),
+            );
             return;
         }
         // block/if/loop instructions are never valid in const expressions
@@ -972,15 +1018,16 @@ fn check_const_instruction_tree(
     // Recurse into children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        check_const_instruction_tree(&child, source, symbols, diagnostics);
+        check_const_instruction_tree(&child, source, symbols, max_allowed_global, diagnostics);
     }
 }
 
-/// Check that global.get in a constant expression references an immutable imported global.
+/// Check that global.get in a constant expression references a valid global.
 fn check_global_get_in_const(
     instr_node: &Node,
     source: &str,
     symbols: &SymbolTable,
+    max_allowed_global: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Find the index/identifier child
@@ -1020,9 +1067,16 @@ fn check_global_get_in_const(
                         node_to_range(instr_node),
                         "constant expression required: global.get of mutable global",
                     ));
+                } else if global.index >= max_allowed_global {
+                    // global.get can only reference globals defined before this point
+                    diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(instr_node),
+                            format!("unknown global {}", global.index),
+                        )
+                        .with_code("unknown-global"),
+                    );
                 }
-                // Note: extended const expressions (now part of the spec) allow
-                // global.get of any immutable global, not just imported ones.
             }
             return;
         }
@@ -1166,6 +1220,300 @@ fn check_elem_segment_table_indices(
 }
 
 // ============================================================================
+// Element segment type validation
+// ============================================================================
+
+/// Validate elem segment item types against declared elem type and target table type.
+fn check_elem_segment_types(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_elem" {
+            return;
+        }
+
+        // Extract declared elem type from elem_list (e.g. funcref, externref)
+        let mut elem_type: Option<ValueType> = None;
+        let mut table_idx: Option<usize> = None;
+        let mut has_offset = false;
+
+        let mut cursor = field.walk();
+        for child in field.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+
+            if ck == "offset" {
+                has_offset = true;
+            }
+            if ck == "table_use" {
+                let mut tc = child.walk();
+                for tc_child in child.children(&mut tc) {
+                    let tk = tc_child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let tk = tk.as_str();
+                    if tk == "index" || tk == "identifier" || tk == "nat" {
+                        let text = node_text(&tc_child, source);
+                        if text.starts_with('$') {
+                            if let Some(tbl) = symbols.get_table_by_name(text.trim()) {
+                                table_idx = Some(tbl.index);
+                            }
+                        } else if let Ok(idx) = text.trim().parse::<usize>() {
+                            table_idx = Some(idx);
+                        }
+                    }
+                }
+            }
+            if ck == "elem_list" {
+                // Extract ref_type from elem_list
+                let mut ec = child.walk();
+                for ec_child in child.children(&mut ec) {
+                    let ek = ec_child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ek = ek.as_str();
+                    if ek == "ref_type" || ek == "value_type" {
+                        let text = node_text(&ec_child, source);
+                        elem_type = ValueType::try_parse(text.trim());
+                    }
+                }
+            }
+            // Also check for ref_type directly on the elem segment node
+            if ck == "ref_type" && elem_type.is_none() {
+                let text = node_text(&child, source);
+                elem_type = ValueType::try_parse(text.trim());
+            }
+        }
+
+        // Old-style elem segments without explicit type default to funcref
+        let elem_type = elem_type.unwrap_or(ValueType::Funcref);
+
+        // Check 1: elem type vs target table type (for active segments)
+        if has_offset {
+            let tbl_idx = table_idx.unwrap_or(0);
+            if let Some(table) = symbols.tables.get(tbl_idx) {
+                if !elem_ref_compatible(&elem_type, &table.ref_type) {
+                    diagnostics.push(
+                        Diagnostic::error(node_to_range(field), "type mismatch")
+                            .with_code("type-mismatch"),
+                    );
+                }
+            }
+        }
+
+        // Check 2: validate each elem expression item against the declared elem type
+        let mut cursor2 = field.walk();
+        for child in field.children(&mut cursor2) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+
+            if ck == "elem_list" {
+                check_elem_list_items(&child, &elem_type, source, symbols, diagnostics);
+            }
+        }
+    });
+}
+
+/// Check if elem ref type is compatible with table element type.
+fn elem_ref_compatible(elem_type: &ValueType, table_type: &ValueType) -> bool {
+    use ValueType::*;
+    if elem_type == table_type {
+        return true;
+    }
+    match (elem_type, table_type) {
+        // funcref subtypes match funcref or non-nullable funcref types
+        (Funcref | NullFuncref | Ref(_) | RefNull(_), Funcref | Ref(_) | RefNull(_)) => true,
+        // externref subtypes match externref
+        (Externref | NullExternref, Externref) => true,
+        // Cross-hierarchy is always incompatible
+        (Funcref | NullFuncref | Ref(_) | RefNull(_), Externref) => false,
+        (Externref | NullExternref, Funcref | Ref(_) | RefNull(_)) => false,
+        // For types we can't resolve (Structref fallback, etc.), be permissive
+        _ => true,
+    }
+}
+
+/// Check items in an elem_list against the declared elem type.
+fn check_elem_list_items(
+    elem_list: &Node,
+    declared_type: &ValueType,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = elem_list.walk();
+    for child in elem_list.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+
+        if ck == "elem_expr" {
+            check_single_elem_expr(&child, declared_type, source, symbols, diagnostics);
+        }
+    }
+}
+
+/// Check a single elem expression against the declared elem type.
+fn check_single_elem_expr(
+    elem_expr: &Node,
+    declared_type: &ValueType,
+    source: &str,
+    _symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Count instruction-producing expressions
+    let mut instr_count = 0;
+    let mut inferred_type: Option<ValueType> = None;
+
+    let mut cursor = elem_expr.walk();
+    for child in elem_expr.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+
+        match ck {
+            "elem_expr_item" => {
+                // (item instr...) — count instructions inside
+                let mut item_instrs = 0;
+                let mut item_type: Option<ValueType> = None;
+                let mut ic = child.walk();
+                for item_child in child.children(&mut ic) {
+                    if let Some(ty) = infer_elem_instr_type(&item_child, source) {
+                        item_instrs += 1;
+                        item_type = Some(ty);
+                    }
+                }
+                if item_instrs > 1 {
+                    diagnostics.push(
+                        Diagnostic::error(node_to_range(elem_expr), "type mismatch")
+                            .with_code("type-mismatch"),
+                    );
+                    return;
+                }
+                if let Some(ref ty) = item_type {
+                    if !ref_type_matches(ty, declared_type) {
+                        diagnostics.push(
+                            Diagnostic::error(node_to_range(elem_expr), "type mismatch")
+                                .with_code("type-mismatch"),
+                        );
+                    }
+                }
+                return;
+            }
+            "elem_expr_expr" | "expr" => {
+                instr_count += 1;
+                inferred_type = infer_elem_expr_type(&child, source);
+            }
+            _ => {}
+        }
+    }
+
+    if instr_count > 1 {
+        diagnostics.push(
+            Diagnostic::error(node_to_range(elem_expr), "type mismatch").with_code("type-mismatch"),
+        );
+        return;
+    }
+    if let Some(ref ty) = inferred_type {
+        if !ref_type_matches(ty, declared_type) {
+            diagnostics.push(
+                Diagnostic::error(node_to_range(elem_expr), "type mismatch")
+                    .with_code("type-mismatch"),
+            );
+        }
+    }
+}
+
+/// Infer the type produced by an instruction in an elem context.
+/// Returns None for non-instruction nodes (parens, keywords, etc.)
+fn infer_elem_instr_type(node: &Node, source: &str) -> Option<ValueType> {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    match kind {
+        "instr_plain" | "expr1_plain" => {
+            let text = node_text(node, source);
+            let first_token = text.split_whitespace().next()?;
+            infer_const_instr_result_type(first_token, &text)
+        }
+        "expr" | "expr1" | "instr" => {
+            // Recurse to find the instruction inside
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(ty) = infer_elem_instr_type(&child, source) {
+                    return Some(ty);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Infer the result type of an elem expression (which is an expr node).
+fn infer_elem_expr_type(node: &Node, source: &str) -> Option<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if let Some(ty) = infer_elem_instr_type(&child, source) {
+            return Some(ty);
+        }
+    }
+    None
+}
+
+/// Infer the result type of a const instruction by its name and full text.
+fn infer_const_instr_result_type(name: &str, full_text: &str) -> Option<ValueType> {
+    match name {
+        "ref.func" => Some(ValueType::Funcref),
+        "ref.null" => {
+            // Determine null type from argument: ref.null func, ref.null extern, etc.
+            let arg = full_text.split_whitespace().nth(1).unwrap_or("func");
+            match arg {
+                "extern" | "noextern" => Some(ValueType::Externref),
+                _ => Some(ValueType::Funcref), // func, nofunc, and concrete types
+            }
+        }
+        "i32.const" => Some(ValueType::I32),
+        "i64.const" => Some(ValueType::I64),
+        "f32.const" => Some(ValueType::F32),
+        "f64.const" => Some(ValueType::F64),
+        _ => None,
+    }
+}
+
+/// Check if a value type matches the declared elem ref type.
+fn ref_type_matches(actual: &ValueType, expected: &ValueType) -> bool {
+    use ValueType::*;
+    if actual == expected {
+        return true;
+    }
+    match (actual, expected) {
+        // funcref (from ref.null or ref.func) matches funcref
+        (Funcref, Funcref) => true,
+        (NullFuncref, Funcref) => true,
+        // externref matches externref
+        (Externref, Externref) => true,
+        (NullExternref, Externref) => true,
+        // funcref subtypes match funcref
+        (Ref(_) | RefNull(_), Funcref) => true,
+        // non-ref types don't match ref types
+        (I32 | I64 | F32 | F64 | V128, _) => false,
+        // funcref doesn't match externref and vice versa
+        (Funcref, Externref) | (Externref, Funcref) => false,
+        // Unknown matches anything
+        (Unknown, _) | (_, Unknown) => true,
+        _ => true, // Be permissive for types we don't fully track
+    }
+}
+
+// ============================================================================
 // ref.func declaration check
 // ============================================================================
 
@@ -1217,8 +1565,94 @@ fn check_ref_func_declarations(
         }
     });
 
+    // Also collect exported functions — per spec, exported functions are considered "declared"
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        match fk {
+            "module_field_export" => {
+                // Standalone export: (export "name" (func $idx))
+                collect_exported_func(field, source, symbols, &mut declared_funcs);
+            }
+            "module_field_func" => {
+                // Inline export: (func $f (export "name") ...)
+                let mut cursor = field.walk();
+                let mut has_export = false;
+                for child in field.children(&mut cursor) {
+                    let ck = child.kind();
+                    #[cfg(all(feature = "wasm", not(feature = "native")))]
+                    let ck = ck.as_str();
+                    if ck == "export" {
+                        has_export = true;
+                        break;
+                    }
+                }
+                if has_export {
+                    // Find the function's index from its identifier or position
+                    let mut cursor2 = field.walk();
+                    for child in field.children(&mut cursor2) {
+                        let ck = child.kind();
+                        #[cfg(all(feature = "wasm", not(feature = "native")))]
+                        let ck = ck.as_str();
+                        if ck == "identifier" {
+                            let name = node_text(&child, source).trim();
+                            if let Some(idx) = resolve_func_index(name, symbols) {
+                                declared_funcs.insert(idx);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
+
     // Step 2: Walk all function bodies to find ref.func usage
     collect_ref_func_errors(module, source, symbols, &declared_funcs, diagnostics);
+}
+
+/// Collect function index from a standalone export node: (export "name" (func $idx))
+fn collect_exported_func(
+    export_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &mut HashSet<usize>,
+) {
+    // Walk recursively to find export_desc_func (nested inside export_desc)
+    find_exported_func_recursive(export_node, source, symbols, declared);
+}
+
+fn find_exported_func_recursive(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &mut HashSet<usize>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+    if kind == "export_desc_func" {
+        // (func $idx) — find the index child
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "index" {
+                let idx_text = node_text(&child, source).trim();
+                if let Some(idx) = resolve_func_index(idx_text, symbols) {
+                    declared.insert(idx);
+                }
+            }
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        find_exported_func_recursive(&child, source, symbols, declared);
+    }
 }
 
 /// Collect function indices referenced by ref.func in a global init expression.
@@ -1602,9 +2036,171 @@ fn check_unknown_type_refs(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Account for implicit types from function/tag declarations
-    let max_type_count = symbols.types.len() + symbols.functions.len();
+    // Compute actual type count: explicit types + unique implicit types from functions.
+    // Functions with a type_use or matching an existing signature don't create new implicit types.
+    let max_type_count = symbols.types.len() + count_unique_implicit_types(symbols);
     walk_for_unknown_type_refs(module, source, max_type_count, diagnostics);
+}
+
+/// Check for forward type references in type definitions.
+/// Outside of `(rec ...)` groups, type definitions can only reference
+/// previously-defined types (no forward or self references).
+fn check_type_forward_refs(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut type_index = 0usize;
+    for_each_module_field(module, |node| {
+        let kind = node.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = kind.as_str();
+
+        if kind == "module_field_type" {
+            check_type_body_for_forward_refs(node, source, symbols, type_index, diagnostics);
+            type_index += 1;
+        } else if kind == "module_field_rec" {
+            // Count types inside rec group but skip forward ref checks
+            // (forward references within rec groups are allowed)
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                let ck = child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ck = ck.as_str();
+                if ck == "module_field_type" {
+                    type_index += 1;
+                }
+            }
+        }
+    });
+}
+
+/// Walk a type definition body and check for forward type references.
+fn check_type_body_for_forward_refs(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    current_type_index: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    // Look for type references in ref_type, _heap_type_or_ref, value_type_ref_type
+    if kind == "ref_type" || kind == "_heap_type_or_ref" || kind == "value_type_ref_type" {
+        check_ref_for_forward_type(node, source, symbols, current_type_index, diagnostics);
+        return; // Don't recurse into children — already checked
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        check_type_body_for_forward_refs(&child, source, symbols, current_type_index, diagnostics);
+    }
+}
+
+/// Check if a ref_type or similar node contains a forward type reference.
+fn check_ref_for_forward_type(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    current_type_index: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+
+        if ck == "identifier" {
+            let name = node_text(&child, source);
+            if let Some(td) = symbols.get_type_by_name(name) {
+                if td.index > current_type_index {
+                    diagnostics.push(
+                        Diagnostic::error(node_to_range(&child), format!("unknown type {}", name))
+                            .with_code("unknown-type"),
+                    );
+                }
+            }
+            return;
+        }
+
+        if ck == "index" {
+            // Check for numeric or identifier children
+            let mut ic = child.walk();
+            for idx_child in child.children(&mut ic) {
+                let ik = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = ik.as_str();
+
+                if ik == "identifier" {
+                    let name = node_text(&idx_child, source);
+                    if let Some(td) = symbols.get_type_by_name(name) {
+                        if td.index > current_type_index {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    node_to_range(&idx_child),
+                                    format!("unknown type {}", name),
+                                )
+                                .with_code("unknown-type"),
+                            );
+                        }
+                    }
+                } else if ik == "nat" || ik == "dec_nat" || ik == "hex_nat" {
+                    if let Ok(idx) = parse_nat(node_text(&idx_child, source)) {
+                        if idx > current_type_index {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    node_to_range(&idx_child),
+                                    format!("unknown type {}", idx),
+                                )
+                                .with_code("unknown-type"),
+                            );
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        // Recurse into children (e.g., nested ref types)
+        check_ref_for_forward_type(&child, source, symbols, current_type_index, diagnostics);
+    }
+}
+
+/// Count unique implicit function types (signatures not matching any explicit type).
+/// Only functions with inline signatures (no type_use) create implicit types.
+fn count_unique_implicit_types(symbols: &SymbolTable) -> usize {
+    // Collect known signatures: (params, results) pairs
+    let mut known_sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
+    for type_def in &symbols.types {
+        if let TypeKind::Func { params, results } = &type_def.kind {
+            known_sigs.push((params.clone(), results.clone()));
+        }
+    }
+
+    let mut implicit_count = 0;
+    for func in &symbols.functions {
+        // Functions with type_use reference an existing type, not create a new one
+        if func.has_type_use {
+            continue;
+        }
+        let params: Vec<ValueType> = func
+            .parameters
+            .iter()
+            .map(|p| p.param_type.clone())
+            .collect();
+        let already_known = known_sigs
+            .iter()
+            .any(|(kp, kr)| kp == &params && kr == &func.results);
+        if !already_known {
+            known_sigs.push((params, func.results.clone()));
+            implicit_count += 1;
+        }
+    }
+    implicit_count
 }
 
 /// Recursively walk the AST looking for numeric type indices in ref types and type_use.
@@ -1769,26 +2365,31 @@ fn parse_nat(text: &str) -> Result<usize, ()> {
 // ============================================================================
 
 fn check_table_limits(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnostic>) {
-    const MAX_TABLE_SIZE: u64 = 0xFFFF_FFFF; // 2^32 - 1
+    const MAX_TABLE32_SIZE: u64 = 0xFFFF_FFFF; // 2^32 - 1
 
     for table in &symbols.tables {
+        // table64 has a much higher limit; skip the 32-bit check
+        if table.is_table64 {
+            continue;
+        }
+
         let range = table
             .range
             .unwrap_or_else(|| Range::from_coords(table.line, 0, table.line, 0));
 
-        if table.limits.0 as u64 > MAX_TABLE_SIZE {
-            diagnostics.push(Diagnostic::error(
-                range,
-                "Size minimum must not be greater than 4294967295",
-            ));
+        if table.limits.0 > MAX_TABLE32_SIZE {
+            diagnostics.push(
+                Diagnostic::error(range, "table size must be at most 2^32-1")
+                    .with_code("table-size"),
+            );
         }
 
         if let Some(max) = table.limits.1 {
-            if max as u64 > MAX_TABLE_SIZE {
-                diagnostics.push(Diagnostic::error(
-                    range,
-                    "Size minimum must not be greater than 4294967295",
-                ));
+            if max > MAX_TABLE32_SIZE {
+                diagnostics.push(
+                    Diagnostic::error(range, "table size must be at most 2^32-1")
+                        .with_code("table-size"),
+                );
             }
         }
     }
@@ -1823,8 +2424,8 @@ fn infer_const_instr_type(
                 Some("struct") | Some("structref") => Some(ValueType::Structref),
                 Some("array") | Some("arrayref") => Some(ValueType::Arrayref),
                 Some("none") | Some("nullref") => Some(ValueType::Nullref),
-                Some("noextern") | Some("nullexternref") => Some(ValueType::Externref),
-                Some("nofunc") | Some("nullfuncref") => Some(ValueType::Funcref),
+                Some("noextern") | Some("nullexternref") => Some(ValueType::NullExternref),
+                Some("nofunc") | Some("nullfuncref") => Some(ValueType::NullFuncref),
                 Some(s) if s.starts_with('$') => {
                     // Named type — resolve to Ref(n)
                     if let Some(t) = symbols.get_type_by_name(s) {
@@ -2206,6 +2807,13 @@ fn const_types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
             | ValueType::Funcref
             | ValueType::Externref,
         ) => true,
+        // NullFuncref is bottom for func hierarchy
+        (
+            ValueType::NullFuncref,
+            ValueType::Funcref | ValueType::RefNull(_) | ValueType::Ref(_),
+        ) => true,
+        // NullExternref is bottom for extern hierarchy
+        (ValueType::NullExternref, ValueType::Externref) => true,
         _ => false,
     }
 }
@@ -2647,6 +3255,8 @@ fn walk_for_block_type_use_mismatches(
             | "instr_block"
             | "instr_loop"
             | "instr_if"
+            | "expr1_block"
+            | "expr1_loop"
     ) {
         check_block_node_type_use(node, source, symbols, diagnostics);
     }
@@ -2930,6 +3540,202 @@ fn walk_for_memory_instrs(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         walk_for_memory_instrs(&child, source, diagnostics);
+    }
+}
+
+// ============================================================================
+// call_indirect / return_call_indirect table requirement checks
+// ============================================================================
+
+/// Check that call_indirect/return_call_indirect instructions have a valid table.
+/// - If no table exists: "unknown table"
+/// - If table exists but is externref: "type mismatch" (needs funcref table)
+fn check_call_indirect_table_requirements(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk == "module_field_func" {
+            walk_for_call_indirect_checks(field, source, symbols, diagnostics);
+        }
+    });
+}
+
+/// Resolve which table a call_indirect node targets.
+/// For multi-table, the first index/identifier child that matches a table name
+/// (or numeric index) is used. Falls back to table 0.
+fn resolve_call_indirect_table_idx(node: &Node, source: &str, symbols: &SymbolTable) -> usize {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "index" || ck == "identifier" {
+            let text = source[child.byte_range()].trim();
+            // Check if this is a table name
+            if text.starts_with('$') {
+                if let Some((i, _)) = symbols
+                    .tables
+                    .iter()
+                    .enumerate()
+                    .find(|(_, t)| t.name.as_deref() == Some(text))
+                {
+                    return i;
+                }
+                // Not a table name — could be a type name, skip
+            } else if let Ok(idx) = parse_nat(text) {
+                // Numeric index — if it's within table count, it's a table index
+                // (For single-table modules, the first numeric index is the type index)
+                if idx < symbols.tables.len() && symbols.tables.len() > 1 {
+                    return idx;
+                }
+            }
+        }
+    }
+    0 // default to table 0
+}
+
+fn check_call_indirect_table(
+    node: &Node,
+    report_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if symbols.tables.is_empty() {
+        diagnostics.push(
+            Diagnostic::error(node_to_range(report_node), "unknown table".to_string())
+                .with_code("unknown-table"),
+        );
+    } else {
+        let table_idx = resolve_call_indirect_table_idx(node, source, symbols);
+        if let Some(table) = symbols.tables.get(table_idx) {
+            if table.ref_type == ValueType::Externref {
+                diagnostics.push(
+                    Diagnostic::error(node_to_range(report_node), "type mismatch".to_string())
+                        .with_code("type-mismatch"),
+                );
+            }
+        }
+    }
+}
+
+fn walk_for_call_indirect_checks(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    if kind == "instr_plain" {
+        let text = node_text(node, source);
+        let first_token = text.split_whitespace().next().unwrap_or("");
+        if first_token == "call_indirect" || first_token == "return_call_indirect" {
+            check_call_indirect_table(node, node, source, symbols, diagnostics);
+        }
+        return;
+    }
+
+    // Also check folded form
+    if kind == "expr1_plain" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "instr_plain" {
+                let text = node_text(&child, source);
+                let first_token = text.split_whitespace().next().unwrap_or("");
+                if first_token == "call_indirect" || first_token == "return_call_indirect" {
+                    check_call_indirect_table(&child, node, source, symbols, diagnostics);
+                }
+            }
+        }
+        return;
+    }
+
+    // Also handle expr1_call and instr_call nodes (grammar-specific for call_indirect)
+    if kind == "expr1_call" || kind == "instr_call" || kind == "instr_list_call" {
+        let text = node_text(node, source);
+        let first_token = text.split_whitespace().next().unwrap_or("");
+        if first_token == "call_indirect" || first_token == "return_call_indirect" {
+            check_call_indirect_table(node, node, source, symbols, diagnostics);
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_call_indirect_checks(&child, source, symbols, diagnostics);
+    }
+}
+
+/// Check inline elem segments for unknown function references.
+/// e.g., (table funcref (elem 0 0)) with no functions defined → "unknown function 0"
+fn check_inline_elem_func_refs(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_table" {
+            return;
+        }
+
+        // Look for inline elem segments: table_fields_elem → (elem index*)
+        let mut cursor = field.walk();
+        for child in field.children(&mut cursor) {
+            let ck = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let ck = ck.as_str();
+            if ck == "table_fields_elem" {
+                check_inline_table_elem_refs(&child, source, symbols, diagnostics);
+            }
+        }
+    });
+}
+
+fn check_inline_table_elem_refs(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+        if ck == "nat" || ck == "index" {
+            let text = node_text(&child, source).trim().to_string();
+            if let Ok(idx) = text.parse::<usize>() {
+                if idx >= symbols.functions.len() {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(&child),
+                            format!("unknown function {}", idx),
+                        )
+                        .with_code("unknown-function"),
+                    );
+                }
+            }
+        }
+        // Also recurse to handle nested structures
+        if ck == "elem_list" || ck == "elem_expr" || ck == "elem_expr_item" {
+            check_inline_table_elem_refs(&child, source, symbols, diagnostics);
+        }
     }
 }
 
@@ -3298,8 +4104,8 @@ mod tests {
     }
 
     #[test]
-    fn test_global_get_const_non_imported_ok() {
-        // Extended const expressions allow global.get of any immutable global
+    fn test_global_get_const_earlier_global_ok() {
+        // global.get of earlier immutable module-defined global is valid
         let source = r#"(module
             (global $g i32 (i32.const 0))
             (global $h i32 (global.get $g))
@@ -3307,7 +4113,37 @@ mod tests {
         let diags = get_diagnostics(source);
         assert!(
             diags.is_empty(),
-            "Expected no errors for immutable global.get in const, got: {:?}",
+            "Expected no errors for global.get of earlier global, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_global_get_const_forward_ref_error() {
+        // global.get of later-defined global is an error (forward reference)
+        let source = r#"(module
+            (global $g1 i32 (global.get $g2))
+            (global $g2 i32 (i32.const 0))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(
+            diags.iter().any(|d| d.message.contains("unknown global")),
+            "Expected 'unknown global' for forward ref, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_table_init_non_imported_global_error() {
+        // Table init can only use imported globals
+        let source = r#"(module
+            (global $g funcref (ref.null func))
+            (table $t 10 funcref (global.get $g))
+        )"#;
+        let diags = get_diagnostics(source);
+        assert!(
+            diags.iter().any(|d| d.message.contains("unknown global")),
+            "Expected 'unknown global' for non-imported global in table init, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
