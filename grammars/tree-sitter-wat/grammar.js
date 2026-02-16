@@ -379,8 +379,8 @@ module.exports = grammar({
         seq("br_on_cast", $.index, $._heap_type_or_ref, $._heap_type_or_ref),
         seq("br_on_cast_fail", $.index, $._heap_type_or_ref, $._heap_type_or_ref),
         // typed function references
-        seq("call_ref", choice($.type_use, $.index)),
-        seq("return_call_ref", choice($.type_use, $.index)),
+        seq("call_ref", $.index),
+        seq("return_call_ref", $.index),
       ),
 
     _instruction_exception: $ =>

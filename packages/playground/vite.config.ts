@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [vue()],
   base: './',
   optimizeDeps: {
-    include: ['monaco-editor', 'wabt', 'web-tree-sitter'],
+    include: ['monaco-editor', 'web-tree-sitter'],
     exclude: ['@emnudge/wat-lsp'],
   },
   resolve: {

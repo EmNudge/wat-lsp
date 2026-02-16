@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { examples, getDefaultExample } from '../../examples';
-import wabtInit from 'wabt';
+import init, { parseWat } from 'js-wasm-tools';
 
 export interface OpenFile {
     id: string;
@@ -26,13 +26,13 @@ export const usePlaygroundStore = defineStore('playground', () => {
     const isCompiling = ref(false);
     const recentlyUsedIds = ref<string[]>([]);
 
-    let wabt: any = null;
+    let wasmToolsReady = false;
 
-    async function initWabt() {
-        if (!wabt) {
-            wabt = await (wabtInit as any)();
+    async function ensureWasmTools() {
+        if (!wasmToolsReady) {
+            await init();
+            wasmToolsReady = true;
         }
-        return wabt;
     }
 
     const currentFile = computed(() =>
@@ -135,34 +135,18 @@ export const usePlaygroundStore = defineStore('playground', () => {
         log(`Starting compilation of ${currentFile.value.filename}...`, 'info');
 
         try {
-            const wabt = await initWabt();
-            const module = wabt.parseWat(currentFile.value.filename, currentFile.value.code, {
-                bulk_memory: true,
-                exceptions: true,
-                gc: true,
-                multi_value: true,
-                mutable_globals: true,
-                reference_types: true,
-                saturating_float_to_int: true,
-                sign_extension: true,
-                simd: true,
-                tail_call: true,
-            });
+            await ensureWasmTools();
+            const bytes = parseWat(currentFile.value.code);
+            wasmBytes.value = bytes;
 
-            module.validate();
-            const result = module.toBinary({ log: false, write_debug_names: true });
-            wasmBytes.value = result.buffer;
+            log(`Compiled successfully (${bytes.byteLength} bytes)`, 'success');
+            const compiledModule = await WebAssembly.compile(bytes.buffer as ArrayBuffer);
+            wasmModule.value = compiledModule;
 
-            if (wasmBytes.value) {
-                log(`Compiled successfully (${wasmBytes.value.byteLength} bytes)`, 'success');
-                const compiledModule = await WebAssembly.compile(wasmBytes.value.buffer as ArrayBuffer);
-                wasmModule.value = compiledModule;
+            // Extract imports/exports
+            moduleImports.value = WebAssembly.Module.imports(compiledModule);
+            moduleExports.value = WebAssembly.Module.exports(compiledModule);
 
-                // Extract imports/exports
-                moduleImports.value = WebAssembly.Module.imports(compiledModule);
-                moduleExports.value = WebAssembly.Module.exports(compiledModule);
-            }
-            module.destroy();
             return true;
         } catch (e: any) {
             log(`Compilation failed: ${e.message}`, 'error');

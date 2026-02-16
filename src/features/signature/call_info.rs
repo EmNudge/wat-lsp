@@ -70,6 +70,7 @@ pub fn find_function_call_ast(node: &Node, document: &str) -> Option<CallInfo> {
                             arg_count += 1;
                         }
                     }
+                    // call_indirect uses type_use (type $t), extract index from it
                     if child_kind == "type_use" && name.is_none() {
                         let mut inner_cursor = child.walk();
                         for inner_child in child.children(&mut inner_cursor) {
@@ -181,18 +182,6 @@ pub fn find_function_call(line_prefix: &str) -> Option<CallInfo> {
 
 /// Extract the function/type name from text after a call keyword.
 pub fn extract_name_from_call(after_call: &str) -> Option<String> {
-    let trimmed = after_call.trim_start();
-    // Handle (type $t) annotation form
-    if trimmed.starts_with("(type ") || trimmed.starts_with("(type\t") {
-        let inner = &trimmed[6..]; // skip "(type "
-        let name_end = inner
-            .find(|c: char| c == ')' || c.is_whitespace())
-            .unwrap_or(inner.len());
-        let name = inner[..name_end].trim().to_string();
-        if !name.is_empty() {
-            return Some(name);
-        }
-    }
     let name_end = after_call
         .find(|c: char| c.is_whitespace() || c == '(')
         .unwrap_or(after_call.len());
