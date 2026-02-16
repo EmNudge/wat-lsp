@@ -91,16 +91,15 @@
   (func $strchr (param $str i32) (param $char i32) (result i32)
     (local $i i32)
     (local $c i32)
-    (block $not_found (result i32)
-      (block $found (result i32)
-        (loop $loop
-          (local.set $c (i32.load8_u (i32.add (local.get $str) (local.get $i))))
-          (br_if $found (local.get $i) (i32.eq (local.get $c) (local.get $char)))
-          (br_if $not_found (i32.const -1) (i32.eqz (local.get $c)))
-          (local.set $i (i32.add (local.get $i) (i32.const 1)))
-          (br $loop))
-        (i32.const -1))
-      (i32.const -1)))
+    (block $done
+      (loop $loop
+        (local.set $c (i32.load8_u (i32.add (local.get $str) (local.get $i))))
+        (if (i32.eq (local.get $c) (local.get $char))
+          (then (return (local.get $i))))
+        (br_if $done (i32.eqz (local.get $c)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)))
+    (i32.const -1))
 
   ;; Convert string to uppercase (in place)
   (func $strupr (param $str i32)

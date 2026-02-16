@@ -139,6 +139,51 @@ jobs:
           fi
           echo "All examples validated correctly"
 
+  validate-wasm-tools:
+    name: Validate Examples (wasm-tools)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install wasm-tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo bytecodealliance/wasm-tools --pattern '*x86_64-linux*' --output wasm-tools.tar.gz
+          tar xzf wasm-tools.tar.gz
+          sudo cp wasm-tools-*/wasm-tools /usr/local/bin/
+          wasm-tools --version
+
+      - name: Validate valid examples with wasm-tools
+        shell: bash
+        run: |
+          wrong=()
+
+          echo "Valid examples (wasm-tools validate):"
+          for file in packages/playground/examples/*.wat; do
+            base=$(basename "$file")
+            if wasm-tools validate "$file" > /dev/null 2>&1; then
+              echo "  ok    $base"
+            else
+              echo "  FAIL  $base"
+              wasm-tools validate "$file" 2>&1 || true
+              wrong+=("$base")
+            fi
+          done
+
+          echo ""
+          if [ ${#wrong[@]} -gt 0 ]; then
+            echo "Failures (${#wrong[@]}):"
+            for entry in "${wrong[@]}"; do
+              echo "  - $entry"
+            done
+            exit 1
+          fi
+          echo "All valid examples pass wasm-tools validate"
+
   clippy:
     name: Clippy
     needs: changes

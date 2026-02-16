@@ -7,6 +7,9 @@
   (type $unary (func (param i32) (result i32)))
   (type $binary (func (param i32 i32) (result i32)))
 
+  ;; Declare functions used with ref.func (required by the spec)
+  (elem declare func $double $add)
+
   ;; --- Basic functions ---
 
   (func $double (param $x i32) (result i32)

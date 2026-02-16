@@ -14,7 +14,7 @@
 
 #![allow(clippy::needless_borrow, clippy::borrow_deref_ref)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::types::{Diagnostic, Range};
 use crate::symbols::{SymbolTable, TypeKind};
@@ -53,6 +53,7 @@ pub fn validate_module_structure(
         check_constant_expressions(&module_node, source, symbols, &mut diagnostics);
         check_data_segment_memory_indices(&module_node, source, symbols, &mut diagnostics);
         check_elem_segment_table_indices(&module_node, source, symbols, &mut diagnostics);
+        check_ref_func_declarations(&module_node, source, symbols, &mut diagnostics);
     }
 
     diagnostics
@@ -1158,6 +1159,218 @@ fn check_elem_segment_table_indices(
             diagnostics.push(Diagnostic::error(range, format!("unknown table {}", idx)));
         }
     });
+}
+
+// ============================================================================
+// ref.func declaration check
+// ============================================================================
+
+/// Check that all functions referenced by `ref.func` are declared in an element segment.
+///
+/// Per the WebAssembly spec, any function used with `ref.func` must appear in:
+/// - A declarative element segment: `(elem declare func $f ...)`
+/// - An active or passive element segment that lists the function
+///
+/// Functions used with `ref.func` but not declared in any element segment cause
+/// an "undeclared function reference" validation error.
+fn check_ref_func_declarations(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Step 1: Collect all functions declared in element segments
+    let mut declared_funcs: HashSet<usize> = HashSet::new();
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_elem" {
+            return;
+        }
+        collect_elem_declared_funcs(field, source, symbols, &mut declared_funcs);
+    });
+
+    // Also collect functions referenced in inline elem expressions on tables
+    for_each_module_field(module, |field| {
+        let fk = field.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let fk = fk.as_str();
+        if fk != "module_field_table" {
+            return;
+        }
+        collect_inline_table_elem_funcs(field, source, symbols, &mut declared_funcs);
+    });
+
+    // Step 2: Walk all function bodies to find ref.func usage
+    collect_ref_func_errors(module, source, symbols, &declared_funcs, diagnostics);
+}
+
+/// Collect function indices declared in an element segment.
+fn collect_elem_declared_funcs(
+    elem_field: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &mut HashSet<usize>,
+) {
+    collect_func_refs_recursive(elem_field, source, symbols, declared);
+}
+
+/// Recursively collect function references from element segment nodes.
+/// Walks the entire subtree, picking up any identifier/index/nat that resolves
+/// to a function index.
+fn collect_func_refs_recursive(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &mut HashSet<usize>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+
+        if ck == "identifier" || ck == "index" {
+            let text = node_text(&child, source).trim();
+            if let Some(idx) = resolve_func_index(text, symbols) {
+                declared.insert(idx);
+            }
+        } else if ck == "nat" {
+            let text = node_text(&child, source).trim();
+            if let Ok(idx) = text.parse::<usize>() {
+                if idx < symbols.functions.len() {
+                    declared.insert(idx);
+                }
+            }
+        } else {
+            // Recurse into all other nodes to find nested identifiers
+            collect_func_refs_recursive(&child, source, symbols, declared);
+        }
+    }
+}
+
+/// Collect functions from inline table elem expressions.
+fn collect_inline_table_elem_funcs(
+    table_field: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &mut HashSet<usize>,
+) {
+    // Tables can have inline elem: (table funcref (elem $f1 $f2))
+    let text = node_text(table_field, source);
+    if !text.contains("elem") {
+        return;
+    }
+    collect_func_refs_recursive(table_field, source, symbols, declared);
+}
+
+/// Resolve a function reference (name or numeric index) to an index.
+fn resolve_func_index(text: &str, symbols: &SymbolTable) -> Option<usize> {
+    if text.starts_with('$') {
+        symbols.get_function_by_name(text).map(|f| f.index)
+    } else {
+        text.parse::<usize>()
+            .ok()
+            .filter(|&idx| idx < symbols.functions.len())
+    }
+}
+
+/// Walk all function bodies to find ref.func instructions and check they're declared.
+fn collect_ref_func_errors(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &HashSet<usize>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Walk the entire module AST looking for ref.func instructions
+    walk_for_ref_func(module, source, symbols, declared, diagnostics);
+}
+
+/// Recursively walk a node tree looking for ref.func instructions.
+fn walk_for_ref_func(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    declared: &HashSet<usize>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    // Check if this is a ref.func instruction
+    if kind == "instr_plain" || kind == "op_index" || kind == "op_nullary" {
+        let text = node_text(node, source).trim();
+        if text.starts_with("ref.func") {
+            // Find the function reference argument
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                let ck = child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ck = ck.as_str();
+
+                // Look inside op_ nodes for the index
+                if ck.starts_with("op_") {
+                    let mut inner_cursor = child.walk();
+                    for inner in child.children(&mut inner_cursor) {
+                        let ik = inner.kind();
+                        #[cfg(all(feature = "wasm", not(feature = "native")))]
+                        let ik = ik.as_str();
+                        if ik == "identifier" || ik == "index" || ik == "nat" {
+                            check_ref_func_target(
+                                &inner,
+                                node_text(&inner, source).trim(),
+                                symbols,
+                                declared,
+                                diagnostics,
+                            );
+                        }
+                    }
+                }
+                if ck == "identifier" || ck == "index" || ck == "nat" {
+                    check_ref_func_target(
+                        &child,
+                        node_text(&child, source).trim(),
+                        symbols,
+                        declared,
+                        diagnostics,
+                    );
+                }
+            }
+        }
+    }
+
+    // Skip element segments (don't flag ref.func inside elem expressions)
+    if kind == "module_field_elem" {
+        return;
+    }
+
+    // Recurse into children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_ref_func(&child, source, symbols, declared, diagnostics);
+    }
+}
+
+/// Check a single ref.func target against the declared set.
+fn check_ref_func_target(
+    node: &Node,
+    func_ref: &str,
+    symbols: &SymbolTable,
+    declared: &HashSet<usize>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(idx) = resolve_func_index(func_ref, symbols) {
+        if !declared.contains(&idx) {
+            let range = node_to_range(node);
+            diagnostics.push(
+                Diagnostic::error(range, format!("undeclared function reference {}", func_ref))
+                    .with_code("undeclared-func-ref"),
+            );
+        }
+    }
 }
 
 // ============================================================================

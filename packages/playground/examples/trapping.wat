@@ -100,12 +100,16 @@
   ;; Nested blocks with breaks
   (func $nested_blocks (param $x i32) (result i32)
     (block $outer (result i32)
-      (block $middle (result i32)
-        (block $inner (result i32)
-          (br_if $outer (i32.const 100) (i32.eq (local.get $x) (i32.const 0)))
-          (br_if $middle (i32.const 200) (i32.eq (local.get $x) (i32.const 1)))
-          (br_if $inner (i32.const 300) (i32.eq (local.get $x) (i32.const 2)))
-          (i32.const 999)))))
+      (block $case2
+        (block $case1
+          (block $case0
+            (br_if $case0 (i32.eq (local.get $x) (i32.const 0)))
+            (br_if $case1 (i32.eq (local.get $x) (i32.const 1)))
+            (br_if $case2 (i32.eq (local.get $x) (i32.const 2)))
+            (br $outer (i32.const 999)))
+          (br $outer (i32.const 100)))
+        (br $outer (i32.const 200)))
+      (i32.const 300)))
 
   ;; Block with typed result
   (func $typed_block (param $cond i32) (result i32 i32)
@@ -139,14 +143,13 @@
 
   ;; br_table (switch statement)
   (func $switch (param $selector i32) (result i32)
-    (block $default (result i32)
-      (block $case3 (result i32)
-        (block $case2 (result i32)
-          (block $case1 (result i32)
-            (block $case0 (result i32)
+    (block $default
+      (block $case3
+        (block $case2
+          (block $case1
+            (block $case0
               (br_table $case0 $case1 $case2 $case3 $default
-                (local.get $selector))
-              (i32.const -1))  ;; never reached
+                (local.get $selector)))
             (return (i32.const 100)))
           (return (i32.const 200)))
         (return (i32.const 300)))
