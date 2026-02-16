@@ -16,7 +16,7 @@ use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
     infer_simd_instruction_arity, is_terminating_instruction, lookup_instruction_arity, OperandMode,
 };
-use crate::symbols::{SymbolTable, TypeKind, ValueType};
+use crate::symbols::{SymbolTable, TypeDef, TypeKind, ValueType};
 use crate::utils::node_to_range;
 
 use super::sequence_always_terminates;
@@ -148,8 +148,8 @@ fn process_block_node(node: &Node, source: &str, symbols: &SymbolTable, checker:
     }
 
     let label = get_block_label(node, source);
-    let params = get_block_param_types(node, source);
-    let results = get_block_result_types(node, source);
+    let params = get_block_param_types(node, source, symbols);
+    let results = get_block_result_types(node, source, symbols);
 
     let opcode = if is_if {
         CtrlOpcode::If
@@ -187,8 +187,8 @@ fn process_if_node(node: &Node, source: &str, symbols: &SymbolTable, checker: &m
     checker.pop_expect(&ValueType::I32, node);
 
     let label = get_block_label(node, source);
-    let params = get_block_param_types(node, source);
-    let results = get_block_result_types(node, source);
+    let params = get_block_param_types(node, source, symbols);
+    let results = get_block_result_types(node, source, symbols);
 
     // Pop param types from outer stack
     if !params.is_empty() {
@@ -614,10 +614,74 @@ fn process_instruction(
         return;
     }
 
+    // Validate bare select operand types before popping
+    if instr_name == "select" && get_select_result_type(node, source).is_none() {
+        // Bare select (no type annotation): first two operands must be same numeric type
+        // Stack: [val1, val2, i32_cond] — peek(0)=cond, peek(1)=val2, peek(2)=val1
+        if let (Some(val2), Some(val1)) = (checker.peek(1), checker.peek(2)) {
+            let is_numeric = |t: &ValueType| {
+                matches!(
+                    t,
+                    ValueType::I32
+                        | ValueType::I64
+                        | ValueType::F32
+                        | ValueType::F64
+                        | ValueType::V128
+                        | ValueType::Unknown
+                )
+            };
+            if !is_numeric(val1) || !is_numeric(val2) {
+                checker.diagnostics.push(
+                    Diagnostic::error(
+                        node_to_range(node),
+                        "type mismatch: select without type annotation requires numeric operands"
+                            .to_string(),
+                    )
+                    .with_code("type-mismatch"),
+                );
+            } else if val1 != &ValueType::Unknown
+                && val2 != &ValueType::Unknown
+                && !types_compatible(val1, val2)
+            {
+                checker.diagnostics.push(
+                    Diagnostic::error(
+                        node_to_range(node),
+                        format!(
+                            "type mismatch: select operands have different types ({:?} vs {:?})",
+                            val1, val2
+                        ),
+                    )
+                    .with_code("type-mismatch"),
+                );
+            }
+        }
+    }
+
     // Regular instructions: consume typed operands, produce typed results
     let consumed = get_instruction_consumed_types(node, instr_name, symbols, source);
     if !consumed.is_empty() {
         checker.pop_vals_for_instr(&consumed, node, instr_name);
+    }
+
+    // Check global.set targets a mutable global
+    if instr_name == "global.set" {
+        if let Some(index) = get_index_from_node(node, source) {
+            let is_immutable = if let Some(global) = symbols.get_global_by_name(&index) {
+                !global.is_mutable
+            } else if let Ok(idx) = index.parse::<usize>() {
+                symbols
+                    .get_global_by_index(idx)
+                    .is_some_and(|g| !g.is_mutable)
+            } else {
+                false
+            };
+            if is_immutable {
+                checker.diagnostics.push(
+                    Diagnostic::error(node_to_range(node), "global is immutable".to_string())
+                        .with_code("immutable-global"),
+                );
+            }
+        }
     }
 
     let produced = infer_instruction_result_types(instr_name, node, symbols, source);
@@ -861,6 +925,14 @@ fn derive_consumed_types_from_name(
         "f32.reinterpret_i32" => Some(vec![ValueType::I32]),
         "f64.reinterpret_i64" => Some(vec![ValueType::I64]),
 
+        // SIMD lane load/store — consume address (i32) + v128 vector
+        name if name.contains("_lane") && name.starts_with("v128.load") => {
+            Some(vec![ValueType::I32, ValueType::V128])
+        }
+        name if name.contains("_lane") && name.starts_with("v128.store") => {
+            Some(vec![ValueType::I32, ValueType::V128])
+        }
+
         // Memory load — consume address (i32 for memory32)
         name if name.contains(".load") => Some(vec![ValueType::I32]),
 
@@ -935,14 +1007,26 @@ fn derive_consumed_types_from_name(
         "memory.init" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I32]),
         "data.drop" | "elem.drop" => Some(vec![]),
 
-        // Table operations
-        "table.get" => Some(vec![ValueType::I32]),
-        "table.set" => Some(vec![ValueType::I32, ValueType::Unknown]),
+        // Table operations (use Unknown for index type to support table64)
+        "table.get" => Some(vec![ValueType::Unknown]),
+        "table.set" => Some(vec![ValueType::Unknown, ValueType::Unknown]),
         "table.size" => Some(vec![]),
-        "table.grow" => Some(vec![ValueType::Unknown, ValueType::I32]),
-        "table.fill" => Some(vec![ValueType::I32, ValueType::Unknown, ValueType::I32]),
-        "table.copy" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I32]),
-        "table.init" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I32]),
+        "table.grow" => Some(vec![ValueType::Unknown, ValueType::Unknown]),
+        "table.fill" => Some(vec![
+            ValueType::Unknown,
+            ValueType::Unknown,
+            ValueType::Unknown,
+        ]),
+        "table.copy" => Some(vec![
+            ValueType::Unknown,
+            ValueType::Unknown,
+            ValueType::Unknown,
+        ]),
+        "table.init" => Some(vec![
+            ValueType::Unknown,
+            ValueType::Unknown,
+            ValueType::Unknown,
+        ]),
 
         // Atomic fence — no operands
         "atomic.fence" => Some(vec![]),
@@ -980,40 +1064,53 @@ fn derive_consumed_types_from_name(
 /// Get consumed types for call_indirect/return_call_indirect
 fn get_call_indirect_consumed_types(
     node: &Node,
-    instr_name: &str,
+    _instr_name: &str,
     symbols: &SymbolTable,
     source: &str,
 ) -> Vec<ValueType> {
-    // call_indirect consumes: param_types... + i32 (table index)
-    let type_ref = get_index_from_node(node, source);
-    if let Some(ref type_ref) = type_ref {
-        let type_def = symbols.get_type_by_name(type_ref).or_else(|| {
-            type_ref
-                .parse::<usize>()
-                .ok()
-                .and_then(|idx| symbols.get_type_by_index(idx))
-        });
-        if let Some(type_def) = type_def {
-            if let TypeKind::Func { params, .. } = &type_def.kind {
-                let mut types = params.clone();
-                types.push(ValueType::I32); // table index
-                return types;
-            }
+    // call_indirect consumes: param_types... + table index (i32 or i64 for table64)
+    // Use Unknown for table index to support both table32 and table64
+    // First, try to resolve from type_use (handles multi-table where first index is table ref)
+    if let Some(td) = resolve_call_indirect_type(node, source, symbols) {
+        if let TypeKind::Func { params, .. } = &td.kind {
+            let mut types = params.clone();
+            types.push(ValueType::Unknown); // table index (i32 or i64)
+            return types;
         }
     }
-    // Fallback: use dynamic operand count with Unknown types
-    let count = get_dynamic_operand_count(node, instr_name, symbols, source);
-    vec![ValueType::Unknown; count]
+    // Check for explicit func_type_params_many (inline params without type_use)
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "func_type_params_many" {
+            params.extend(parse_func_type_results(&child, source));
+        }
+    }
+    params.push(ValueType::Unknown); // table index (i32 or i64)
+    params
 }
 
-/// Get branch target depth from a br/br_if instruction node
-fn get_branch_depth(node: &Node, source: &str, checker: &TypeChecker) -> Option<usize> {
+/// Get branch target depth from a br/br_if instruction node.
+/// Emits "unknown label" diagnostic for numeric depths that exceed the control stack.
+/// Named label resolution failure is handled by the reference checker.
+fn get_branch_depth(node: &Node, source: &str, checker: &mut TypeChecker) -> Option<usize> {
     let index = get_index_from_node(node, source)?;
     // Try as numeric index first
     if let Ok(depth) = index.parse::<usize>() {
         if depth < checker.ctrl_depth() {
             return Some(depth);
         }
+        // Out-of-range label depth
+        checker.diagnostics.push(
+            Diagnostic::error(node_to_range(node), format!("unknown label {}", depth))
+                .with_code("unknown-label"),
+        );
+        return None;
     }
     // Try named label resolution
     if index.starts_with('$') {
@@ -1022,8 +1119,9 @@ fn get_branch_depth(node: &Node, source: &str, checker: &TypeChecker) -> Option<
     None
 }
 
-/// Get all branch depths from a br_table instruction (last one is the default)
-fn get_all_branch_depths(node: &Node, source: &str, checker: &TypeChecker) -> Vec<usize> {
+/// Get all branch depths from a br_table instruction (last one is the default).
+/// Emits "unknown label" diagnostics for out-of-range depths.
+fn get_all_branch_depths(node: &Node, source: &str, checker: &mut TypeChecker) -> Vec<usize> {
     let mut indices = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -1049,15 +1147,22 @@ fn get_all_branch_depths(node: &Node, source: &str, checker: &TypeChecker) -> Ve
             }
         }
     }
-    indices
-        .iter()
-        .filter_map(|idx_str| {
-            idx_str
-                .parse::<usize>()
-                .ok()
-                .filter(|&depth| depth < checker.ctrl_depth())
-        })
-        .collect()
+
+    let ctrl_depth = checker.ctrl_depth();
+    let mut result = Vec::new();
+    for idx_str in &indices {
+        if let Ok(depth) = idx_str.parse::<usize>() {
+            if depth < ctrl_depth {
+                result.push(depth);
+            } else {
+                checker.diagnostics.push(
+                    Diagnostic::error(node_to_range(node), format!("unknown label {}", depth))
+                        .with_code("unknown-label"),
+                );
+            }
+        }
+    }
+    result
 }
 
 /// Check if two value types are compatible for br_table target consistency
@@ -1087,7 +1192,7 @@ fn get_select_result_type(node: &Node, source: &str) -> Option<ValueType> {
                 let inner_kind = inner_child.kind();
 
                 if inner_kind == "func_type_results" {
-                    // Look for value_type children inside (result T)
+                    // Look for value_type or ref_type children inside (result T)
                     let mut vt_cursor = inner_child.walk();
                     for vt_child in inner_child.children(&mut vt_cursor) {
                         #[cfg(feature = "native")]
@@ -1095,9 +1200,9 @@ fn get_select_result_type(node: &Node, source: &str) -> Option<ValueType> {
                         #[cfg(all(feature = "wasm", not(feature = "native")))]
                         let vt_kind = vt_child.kind();
 
-                        if vt_kind == "value_type" {
+                        if vt_kind == "value_type" || vt_kind == "ref_type" {
                             let text = &source[vt_child.byte_range()];
-                            return ValueType::try_parse(text.trim());
+                            return ValueType::try_parse(text.trim()).or(Some(ValueType::Unknown));
                         }
                     }
                 }
@@ -1522,12 +1627,56 @@ pub fn get_call_ref_result_types(
     vec![]
 }
 
+/// Resolve the function type for a call_indirect instruction.
+/// Handles both multi-table (index + type_use) and single-table (just type_use or bare index) forms.
+fn resolve_call_indirect_type<'a>(
+    node: &Node,
+    source: &str,
+    symbols: &'a SymbolTable,
+) -> Option<&'a TypeDef> {
+    let mut cursor = node.walk();
+    let mut first_index: Option<String> = None;
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        // type_use is authoritative — use it directly
+        if kind == "type_use" {
+            return resolve_type_use_node(&child, source, symbols);
+        }
+        // Track first index (could be table ref in multi-table or type ref in single-table)
+        if kind == "index" && first_index.is_none() {
+            first_index = Some(source[child.byte_range()].trim().to_string());
+        }
+    }
+    // No type_use found — try first index as a type reference (single-table mode)
+    if let Some(ref idx_text) = first_index {
+        if let Some(td) = symbols.get_type_by_name(idx_text) {
+            return Some(td);
+        }
+        if let Ok(idx) = idx_text.parse::<usize>() {
+            return symbols.get_type_by_index(idx);
+        }
+    }
+    None
+}
+
 /// Get result types for a call_indirect instruction
 pub fn get_call_indirect_result_types(
     node: &Node,
     symbols: &SymbolTable,
     source: &str,
 ) -> Vec<ValueType> {
+    // Try to resolve from type_use (preferred — handles multi-table correctly)
+    if let Some(td) = resolve_call_indirect_type(node, source, symbols) {
+        if let TypeKind::Func { results: res, .. } = &td.kind {
+            return res.clone();
+        }
+    }
+    // Check for explicit func_type_results (inline result types without type_use)
+    let mut results = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -1535,46 +1684,11 @@ pub fn get_call_indirect_result_types(
         #[cfg(all(feature = "wasm", not(feature = "native")))]
         let kind = child.kind();
 
-        if kind == "type_use" {
-            let mut type_cursor = child.walk();
-            for type_child in child.children(&mut type_cursor) {
-                #[cfg(feature = "native")]
-                let type_child_kind = type_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let type_child_kind = type_child.kind();
-
-                if type_child_kind == "index" || type_child_kind == "identifier" {
-                    let type_ref = source[type_child.byte_range()].trim();
-                    if let Some(type_def) = symbols.get_type_by_name(type_ref) {
-                        if let TypeKind::Func { results, .. } = &type_def.kind {
-                            return results.clone();
-                        }
-                    } else if let Ok(idx) = type_ref.parse::<usize>() {
-                        if let Some(type_def) = symbols.get_type_by_index(idx) {
-                            if let TypeKind::Func { results, .. } = &type_def.kind {
-                                return results.clone();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if kind == "index" {
-            let type_ref = source[child.byte_range()].trim();
-            if let Some(type_def) = symbols.get_type_by_name(type_ref) {
-                if let TypeKind::Func { results, .. } = &type_def.kind {
-                    return results.clone();
-                }
-            } else if let Ok(idx) = type_ref.parse::<usize>() {
-                if let Some(type_def) = symbols.get_type_by_index(idx) {
-                    if let TypeKind::Func { results, .. } = &type_def.kind {
-                        return results.clone();
-                    }
-                }
-            }
+        if kind == "func_type_results" {
+            results.extend(parse_func_type_results(&child, source));
         }
     }
-    vec![ValueType::Unknown]
+    results
 }
 
 /// Find the instr_plain node inside a folded expression (for branch depth resolution).
@@ -1860,8 +1974,8 @@ fn process_folded_block_expr(
     };
 
     let label = get_block_label(block_node, source);
-    let params = get_block_param_types(block_node, source);
-    let results = get_block_result_types(block_node, source);
+    let params = get_block_param_types(block_node, source, symbols);
+    let results = get_block_result_types(block_node, source, symbols);
 
     // For folded if, the condition sub-expressions are inside if_block.
     // Process them on the outer stack first, then pop the i32 condition.
@@ -2077,7 +2191,79 @@ fn process_folded_if_bodies(
     }
 }
 
-/// Process a folded expression: consume implicit stack operands, produce results
+/// Process sub-expression children of a folded expression.
+/// Finds the expr1_* node and recursively processes each `expr` child,
+/// pushing their typed results onto the type checker's stack.
+fn process_folded_sub_exprs(
+    expr: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    let child_count = expr.child_count();
+    for i in 0..child_count {
+        if let Some(child) = expr.child(i) {
+            #[cfg(feature = "native")]
+            let kind = child.kind();
+            #[cfg(all(feature = "wasm", not(feature = "native")))]
+            let kind = child.kind();
+
+            // Navigate to the expr1_* node
+            let found = if kind == "expr1" {
+                // Find inner expr1_* wrapper
+                let inner_count = child.child_count();
+                let mut inner_found = false;
+                for j in 0..inner_count {
+                    if let Some(inner) = child.child(j) {
+                        if inner.kind().starts_with("expr1_") {
+                            // Process expr children of the inner expr1_* node
+                            let sub_count = inner.child_count();
+                            for k in 0..sub_count {
+                                if let Some(sub) = inner.child(k) {
+                                    if sub.kind() == "expr" {
+                                        process_folded_expr(&sub, source, symbols, checker);
+                                    }
+                                }
+                            }
+                            inner_found = true;
+                            break;
+                        }
+                    }
+                }
+                if !inner_found {
+                    // Process expr children of expr1 directly
+                    for j in 0..inner_count {
+                        if let Some(inner) = child.child(j) {
+                            if inner.kind() == "expr" {
+                                process_folded_expr(&inner, source, symbols, checker);
+                            }
+                        }
+                    }
+                }
+                true
+            } else if kind.starts_with("expr1_") {
+                // Process expr children directly
+                let sub_count = child.child_count();
+                for j in 0..sub_count {
+                    if let Some(sub) = child.child(j) {
+                        if sub.kind() == "expr" {
+                            process_folded_expr(&sub, source, symbols, checker);
+                        }
+                    }
+                }
+                true
+            } else {
+                false
+            };
+            if found {
+                return;
+            }
+        }
+    }
+}
+
+/// Process a folded expression: recursively process sub-expressions, then
+/// type-check the instruction's operands against the values on the stack.
 fn process_folded_expr(
     expr: &Node,
     source: &str,
@@ -2091,106 +2277,53 @@ fn process_folded_expr(
         return;
     }
 
-    if let Some((instr_name, explicit_operands)) = get_folded_expr_info(expr, source) {
-        // Handle tail call instructions
+    // Step 1: Recursively process all sub-expression children.
+    // This pushes their typed results onto the value stack.
+    process_folded_sub_exprs(expr, source, symbols, checker);
+
+    // Step 2: Process the instruction itself with typed operand checking.
+    // process_instruction handles all cases: branches, terminators, regular instructions.
+    if let Some(instr_node) = find_instr_plain_in_expr(expr) {
+        if let Some(instr_name) = get_instruction_name(&instr_node, source) {
+            process_instruction(&instr_node, &instr_name, checker, symbols, source);
+            return;
+        }
+    }
+
+    // Fallback for call_indirect/return_call_indirect (expr1_call nodes).
+    // The grammar uses string literals for "call_indirect", so there's no named
+    // call_indirect child — the expr1_call node itself holds type_use/index.
+    if let Some((instr_name, _)) = get_folded_expr_info(expr, source) {
         if matches!(
             instr_name.as_str(),
-            "return_call" | "return_call_ref" | "return_call_indirect"
+            "call_indirect" | "return_call_indirect"
         ) {
-            let expected = get_expected_operands_by_name(&instr_name, symbols, source, expr);
-            let from_stack = expected.saturating_sub(explicit_operands);
-            if from_stack > 0 {
-                let consumed = vec![ValueType::Unknown; from_stack];
-                checker.pop_vals_for_instr(&consumed, expr, &instr_name);
-            }
-            if let Some(diag) =
-                validate_tail_call_in_folded_expr(expr, &instr_name, symbols, source)
-            {
-                checker.diagnostics.push(diag);
-            }
-            checker.mark_unreachable();
-            return;
-        }
-
-        // Handle other terminating instructions (br, unreachable, return, throw, throw_ref)
-        if is_terminating_instruction(&instr_name) {
-            // For folded br: (br $label values...)
-            // Need to consume label types from sub-expressions
-            if instr_name == "br" {
-                if let Some(instr_node) = find_instr_plain_in_expr(expr) {
-                    if let Some(depth) = get_branch_depth(&instr_node, source, checker) {
-                        if let Some(label_types) = checker.label_types(depth) {
-                            let label_count = label_types.len();
-                            // Sub-expressions provide label values; check if we need more from stack
-                            let from_stack = label_count.saturating_sub(explicit_operands);
-                            if from_stack > 0 {
-                                let consumed = vec![ValueType::Unknown; from_stack];
-                                checker.pop_vals_for_instr(&consumed, expr, &instr_name);
-                            }
-                        }
-                    }
+            if let Some(expr1_call_node) = find_expr1_call_in_expr(expr) {
+                let consumed = get_call_indirect_consumed_types(
+                    &expr1_call_node,
+                    &instr_name,
+                    symbols,
+                    source,
+                );
+                if !consumed.is_empty() {
+                    checker.pop_vals_for_instr(&consumed, expr, &instr_name);
                 }
-            }
-            checker.mark_unreachable();
-            return;
-        }
 
-        // Handle folded branch instructions with label types
-        if instr_name == "br_if" {
-            // (br_if $label value... condition)
-            // Consumes: label_types + i32 condition
-            // Produces: label_types (pushed back on fall-through)
-            if let Some(instr_node) = find_instr_plain_in_expr(expr) {
-                if let Some(depth) = get_branch_depth(&instr_node, source, checker) {
-                    if let Some(label_types) = checker.label_types(depth) {
-                        let label_types = label_types.to_vec();
-                        let total_expected = label_types.len() + 1; // label types + condition
-                        let from_stack = total_expected.saturating_sub(explicit_operands);
-                        if from_stack > 0 {
-                            let consumed = vec![ValueType::Unknown; from_stack];
-                            checker.pop_vals_for_instr(&consumed, expr, &instr_name);
-                        }
-                        // Push label types back for fall-through path
-                        checker.push_vals(&label_types);
-                        return;
+                if is_terminating_instruction(&instr_name) {
+                    if let Some(diag) =
+                        validate_tail_call_in_folded_expr(expr, &instr_name, symbols, source)
+                    {
+                        checker.diagnostics.push(diag);
                     }
+                    checker.mark_unreachable();
+                    return;
                 }
-            }
-            // Fallback: no label resolution, treat as consuming 1 (condition) producing 0
-            let from_stack = 1usize.saturating_sub(explicit_operands);
-            if from_stack > 0 {
-                checker.pop_vals_for_instr(&[ValueType::I32], expr, &instr_name);
-            }
-            return;
-        }
 
-        if instr_name == "br_table" {
-            // (br_table 0 1 2 default condition) — consumes label_types + i32 index
-            if let Some(instr_node) = find_instr_plain_in_expr(expr) {
-                let depths = get_all_branch_depths(&instr_node, source, checker);
-                if let Some(&default_depth) = depths.last() {
-                    if let Some(label_types) = checker.label_types(default_depth) {
-                        let label_count = label_types.len();
-                        let total_expected = label_count + 1; // label types + index
-                        let from_stack = total_expected.saturating_sub(explicit_operands);
-                        if from_stack > 0 {
-                            let consumed = vec![ValueType::Unknown; from_stack];
-                            checker.pop_vals_for_instr(&consumed, expr, &instr_name);
-                        }
-                    }
-                }
+                let result_types =
+                    get_call_indirect_result_types(&expr1_call_node, symbols, source);
+                checker.push_vals(&result_types);
+                return;
             }
-            checker.mark_unreachable();
-            return;
-        }
-
-        // Calculate operands needed from the stack
-        let expected = get_expected_operands_by_name(&instr_name, symbols, source, expr);
-        let from_stack = expected.saturating_sub(explicit_operands);
-
-        if from_stack > 0 {
-            let consumed = vec![ValueType::Unknown; from_stack];
-            checker.pop_vals_for_instr(&consumed, expr, &instr_name);
         }
     }
 
@@ -2203,6 +2336,58 @@ fn process_folded_expr(
     // Produce result values with actual types
     let result_types = get_expr_result_types(expr, source, symbols);
     checker.push_vals(&result_types);
+}
+
+/// Find the expr1_call node inside a folded expression.
+/// The grammar uses string literals for "call_indirect", so the expr1_call node
+/// itself holds type_use/index children needed for type resolution.
+#[cfg(feature = "native")]
+fn find_expr1_call_in_expr<'a>(expr: &'a Node) -> Option<Node<'a>> {
+    let child_count = expr.child_count();
+    for i in 0..child_count {
+        if let Some(child) = expr.child(i) {
+            let kind = child.kind();
+            if kind == "expr1_call" {
+                return Some(child);
+            }
+            if kind == "expr1" {
+                let inner_count = child.child_count();
+                for j in 0..inner_count {
+                    if let Some(inner) = child.child(j) {
+                        if inner.kind() == "expr1_call" {
+                            return Some(inner);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Find the expr1_call node inside a folded expression.
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn find_expr1_call_in_expr(expr: &Node) -> Option<Node> {
+    let child_count = expr.child_count();
+    for i in 0..child_count {
+        if let Some(child) = expr.child(i) {
+            let kind = child.kind();
+            if kind == "expr1_call" {
+                return Some(child);
+            }
+            if kind == "expr1" {
+                let inner_count = child.child_count();
+                for j in 0..inner_count {
+                    if let Some(inner) = child.child(j) {
+                        if inner.kind() == "expr1_call" {
+                            return Some(inner);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Get result types from a folded expression
@@ -2263,9 +2448,9 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
             }
             vec![ValueType::Unknown]
         }
-        "expr1_block" | "expr1_loop" => get_block_result_types(expr1, source),
-        "expr1_if" => get_block_result_types(expr1, source),
-        "expr1_try" | "expr1_try_table" => get_block_result_types(expr1, source),
+        "expr1_block" | "expr1_loop" => get_block_result_types(expr1, source, symbols),
+        "expr1_if" => get_block_result_types(expr1, source, symbols),
+        "expr1_try" | "expr1_try_table" => get_block_result_types(expr1, source, symbols),
         "expr1_call" => {
             let mut cursor = expr1.walk();
             for child in expr1.children(&mut cursor) {
@@ -2309,8 +2494,79 @@ pub fn get_index_from_expr1_call(node: &Node, source: &str) -> Option<String> {
     None
 }
 
+/// Resolve a type_use reference in a node's children to its TypeDef.
+/// Looks for type_use nodes at the top level and inside block_block/loop_block/etc.
+fn resolve_block_type_use<'a>(
+    block_node: &Node,
+    source: &str,
+    symbols: &'a SymbolTable,
+) -> Option<&'a TypeDef> {
+    let mut cursor = block_node.walk();
+    for child in block_node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "type_use" {
+            return resolve_type_use_node(&child, source, symbols);
+        }
+        if kind == "block_block"
+            || kind == "loop_block"
+            || kind == "if_block"
+            || kind == "block_if"
+            || kind == "block_try_table"
+            || kind == "block_try"
+        {
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                #[cfg(feature = "native")]
+                let inner_kind = inner_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let inner_kind = inner_child.kind();
+
+                if inner_kind == "type_use" {
+                    return resolve_type_use_node(&inner_child, source, symbols);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve a type_use node to a TypeDef via the symbol table.
+fn resolve_type_use_node<'a>(
+    type_use_node: &Node,
+    source: &str,
+    symbols: &'a SymbolTable,
+) -> Option<&'a TypeDef> {
+    let mut cursor = type_use_node.walk();
+    for child in type_use_node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "index" || kind == "identifier" {
+            let index_text = source[child.byte_range()].trim();
+            if let Some(td) = symbols.get_type_by_name(index_text) {
+                return Some(td);
+            }
+            if let Ok(idx) = index_text.parse::<usize>() {
+                return symbols.get_type_by_index(idx);
+            }
+        }
+    }
+    None
+}
+
 /// Get result types from a block/loop/if node
-pub fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType> {
+pub fn get_block_result_types(
+    block_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Vec<ValueType> {
+    let mut types = Vec::new();
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -2319,7 +2575,7 @@ pub fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType>
         let kind = child.kind();
 
         if kind == "func_type_results" {
-            return parse_func_type_results(&child, source);
+            types.extend(parse_func_type_results(&child, source));
         }
         if kind == "block_type" {
             return parse_result_types(&child, source);
@@ -2339,18 +2595,31 @@ pub fn get_block_result_types(block_node: &Node, source: &str) -> Vec<ValueType>
                 let inner_kind = inner_child.kind();
 
                 if inner_kind == "func_type_results" {
-                    return parse_func_type_results(&inner_child, source);
+                    types.extend(parse_func_type_results(&inner_child, source));
                 }
             }
+        }
+    }
+    if !types.is_empty() {
+        return types;
+    }
+    // If no explicit results, try resolving from type_use
+    if let Some(td) = resolve_block_type_use(block_node, source, symbols) {
+        if let TypeKind::Func { results, .. } = &td.kind {
+            return results.clone();
         }
     }
     vec![]
 }
 
-/// Get block param types from a folded expression (expr node)
 /// Get param types from a block/loop/if node
-pub fn get_block_param_types(block_node: &Node, source: &str) -> Vec<ValueType> {
+pub fn get_block_param_types(
+    block_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Vec<ValueType> {
     let mut types = Vec::new();
+    let mut has_explicit_params = false;
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
         #[cfg(feature = "native")]
@@ -2359,6 +2628,7 @@ pub fn get_block_param_types(block_node: &Node, source: &str) -> Vec<ValueType> 
         let kind = child.kind();
 
         if kind == "func_type_params_many" {
+            has_explicit_params = true;
             types.extend(parse_func_type_results(&child, source));
         }
         if kind == "block_block"
@@ -2376,8 +2646,17 @@ pub fn get_block_param_types(block_node: &Node, source: &str) -> Vec<ValueType> 
                 let inner_kind = inner_child.kind();
 
                 if inner_kind == "func_type_params_many" {
+                    has_explicit_params = true;
                     types.extend(parse_func_type_results(&inner_child, source));
                 }
+            }
+        }
+    }
+    // If no explicit params, try resolving from type_use
+    if !has_explicit_params && types.is_empty() {
+        if let Some(td) = resolve_block_type_use(block_node, source, symbols) {
+            if let TypeKind::Func { params, .. } = &td.kind {
+                return params.clone();
             }
         }
     }

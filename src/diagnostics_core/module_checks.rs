@@ -54,6 +54,7 @@ pub fn validate_module_structure(
         check_data_segment_memory_indices(&module_node, source, symbols, &mut diagnostics);
         check_elem_segment_table_indices(&module_node, source, symbols, &mut diagnostics);
         check_ref_func_declarations(&module_node, source, symbols, &mut diagnostics);
+        check_unknown_type_refs(&module_node, source, symbols, &mut diagnostics);
     }
 
     diagnostics
@@ -1013,12 +1014,9 @@ fn check_global_get_in_const(
                         node_to_range(instr_node),
                         "constant expression required: global.get of mutable global",
                     ));
-                } else if global.index >= symbols.num_imported_globals {
-                    diagnostics.push(Diagnostic::error(
-                        node_to_range(instr_node),
-                        "constant expression required: global.get of non-imported global",
-                    ));
                 }
+                // Note: extended const expressions (now part of the spec) allow
+                // global.get of any immutable global, not just imported ones.
             }
             return;
         }
@@ -1539,6 +1537,180 @@ fn check_duplicate_locals(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnosti
 }
 
 // ============================================================================
+// Unknown type references (heap type indices)
+// ============================================================================
+
+/// Validate that numeric type indices in ref types are within bounds.
+/// Catches: `(ref N)`, `(ref null N)` where N >= number of types defined.
+fn check_unknown_type_refs(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Account for implicit types from function/tag declarations
+    let max_type_count = symbols.types.len() + symbols.functions.len();
+    walk_for_unknown_type_refs(module, source, max_type_count, diagnostics);
+}
+
+/// Recursively walk the AST looking for numeric type indices in ref types and type_use.
+fn walk_for_unknown_type_refs(
+    node: &Node,
+    source: &str,
+    max_type_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let kind = node.kind();
+    #[cfg(all(feature = "wasm", not(feature = "native")))]
+    let kind = kind.as_str();
+
+    // Check ref_type nodes for numeric heap type indices
+    if kind == "ref_type" || kind == "_heap_type_or_ref" {
+        check_heap_type_index(node, source, max_type_count, diagnostics);
+    }
+
+    // Also check value_type_ref_type which can contain heap types
+    if kind == "value_type_ref_type" {
+        check_heap_type_index(node, source, max_type_count, diagnostics);
+    }
+
+    // Check type_use nodes (e.g., call_indirect (type N))
+    // Use max_type_count to account for implicit types from functions
+    if kind == "type_use" {
+        check_type_use_index(node, source, max_type_count, diagnostics);
+    }
+
+    // Recurse into children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_unknown_type_refs(&child, source, max_type_count, diagnostics);
+    }
+}
+
+/// Check if a ref_type node contains an out-of-bounds numeric type index.
+/// Recursively searches for nat nodes within the ref_type's children.
+fn check_heap_type_index(
+    ref_type_node: &Node,
+    source: &str,
+    type_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    find_type_index_in_ref(
+        ref_type_node,
+        ref_type_node,
+        source,
+        type_count,
+        diagnostics,
+    );
+}
+
+/// Recursively search for numeric type indices within a ref_type subtree.
+fn find_type_index_in_ref(
+    root: &Node,
+    node: &Node,
+    source: &str,
+    type_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+
+        // A nat/dec_nat/hex_nat inside a ref type is a numeric type index
+        if ck == "nat" || ck == "dec_nat" || ck == "hex_nat" {
+            let text = node_text(&child, source);
+            if let Ok(idx) = parse_nat(text) {
+                if idx >= type_count {
+                    diagnostics.push(
+                        Diagnostic::error(node_to_range(root), format!("unknown type {}", idx))
+                            .with_code("unknown-type"),
+                    );
+                }
+            }
+            return;
+        }
+
+        // Skip identifier nodes (named type references are valid)
+        if ck == "identifier" {
+            return;
+        }
+
+        // Recurse into intermediate nodes (ref_type_ref, index, heap_type, etc.)
+        find_type_index_in_ref(root, &child, source, type_count, diagnostics);
+    }
+}
+
+/// Check if a type_use node contains an out-of-bounds numeric type index.
+fn check_type_use_index(
+    type_use_node: &Node,
+    source: &str,
+    type_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = type_use_node.walk();
+    for child in type_use_node.children(&mut cursor) {
+        let ck = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let ck = ck.as_str();
+
+        if ck == "index" {
+            // Check the index node's children for a numeric value
+            let mut idx_cursor = child.walk();
+            for idx_child in child.children(&mut idx_cursor) {
+                let ick = idx_child.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ick = ick.as_str();
+
+                if ick == "nat" || ick == "dec_nat" || ick == "hex_nat" {
+                    let text = node_text(&idx_child, source);
+                    if let Ok(idx) = parse_nat(text) {
+                        if idx >= type_count {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    node_to_range(type_use_node),
+                                    format!("unknown type {}", idx),
+                                )
+                                .with_code("unknown-type"),
+                            );
+                        }
+                    }
+                    return;
+                }
+                // Named type references: skip (handled by reference checker)
+                if ick == "identifier" {
+                    return;
+                }
+            }
+            // The index node might directly contain the numeric text
+            let text = node_text(&child, source);
+            if let Ok(idx) = parse_nat(text) {
+                if idx >= type_count {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(type_use_node),
+                            format!("unknown type {}", idx),
+                        )
+                        .with_code("unknown-type"),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Parse a nat (natural number) from text, handling hex prefix.
+fn parse_nat(text: &str) -> Result<usize, ()> {
+    let text = text.trim().replace('_', "");
+    if text.starts_with("0x") || text.starts_with("0X") {
+        usize::from_str_radix(&text[2..], 16).map_err(|_| ())
+    } else {
+        text.parse::<usize>().map_err(|_| ())
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1903,14 +2075,18 @@ mod tests {
     }
 
     #[test]
-    fn test_global_get_const_non_imported_error() {
+    fn test_global_get_const_non_imported_ok() {
+        // Extended const expressions allow global.get of any immutable global
         let source = r#"(module
             (global $g i32 (i32.const 0))
             (global $h i32 (global.get $g))
         )"#;
         let diags = get_diagnostics(source);
-        assert!(!diags.is_empty());
-        assert!(diags.iter().any(|d| d.message.contains("non-imported")));
+        assert!(
+            diags.is_empty(),
+            "Expected no errors for immutable global.get in const, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
     }
 
     // ======================================================================
