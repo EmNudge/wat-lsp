@@ -82,8 +82,15 @@ fn is_ref_subtype(sub: &ValueType, sup: &ValueType) -> bool {
         // Ref(n) / RefNull(n) — without symbol table, assume func hierarchy only
         (Ref(_), Funcref) => true,
         (RefNull(_), Funcref) => true,
+        // NullFuncref is bottom of func hierarchy — subtype of all func refs
+        (NullFuncref, RefNull(_) | Ref(_) | Structref) => true,
         // Non-null <: nullable for same index
         (Ref(a), RefNull(b)) if a == b => true,
+        // Structref is used as placeholder for unresolved named ref types (e.g., (ref $mytype))
+        // in the parser (extract_ref_type can't resolve named indices without SymbolTable).
+        // Treat as compatible with concrete indexed refs to avoid false positives.
+        (Structref, Ref(_) | RefNull(_)) => true,
+        (Ref(_) | RefNull(_), Structref) => true,
         _ => false,
     }
 }
@@ -507,6 +514,14 @@ impl TypeChecker {
         }
     }
 
+    /// Check if the current frame is in an unreachable state (polymorphic stack).
+    pub fn is_unreachable(&self) -> bool {
+        self.ctrl_stack
+            .last()
+            .map(|f| f.unreachable)
+            .unwrap_or(false)
+    }
+
     /// Get the label types for a frame at the given depth.
     /// For loops, label types are start_types (br restarts with params).
     /// For everything else, label types are end_types.
@@ -722,9 +737,12 @@ mod tests {
     }
 
     #[test]
-    fn test_concrete_func_ref_not_subtype_of_structref() {
+    fn test_concrete_ref_compatible_with_structref_placeholder() {
+        // Structref is used as a placeholder for unresolved named ref types in the parser,
+        // so Ref(n) <-> Structref is treated as compatible (see is_ref_subtype).
+        // This means we can't distinguish "real" structref from unresolved named refs.
         let symbols = make_symbols_with_types(vec![func_type(0, Some("$f"))]);
-        assert!(!types_compatible_with_symbols(
+        assert!(types_compatible_with_symbols(
             &ValueType::Ref(0),
             &ValueType::Structref,
             &symbols

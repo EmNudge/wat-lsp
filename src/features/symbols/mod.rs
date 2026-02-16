@@ -164,6 +164,8 @@ pub struct Function {
     pub end_byte: usize,
     pub range: Option<Range>,
     pub doc_comment: Option<String>,
+    /// True if this function uses `(type N)` — such functions don't create implicit types
+    pub has_type_use: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -182,7 +184,8 @@ pub struct Table {
     pub name: Option<String>,
     pub index: usize,
     pub ref_type: ValueType,
-    pub limits: (u32, Option<u32>),
+    pub limits: (u64, Option<u64>),
+    pub is_table64: bool,
     pub line: u32,
     pub range: Option<Range>,
 }

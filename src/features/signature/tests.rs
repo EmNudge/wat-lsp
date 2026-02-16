@@ -168,6 +168,7 @@ fn test_format_function_signature_simple() {
         end_byte: 100,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
 
     let sig = format_function_signature(&func);
@@ -194,6 +195,7 @@ fn test_format_function_signature_with_params() {
         end_byte: 100,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
 
     let sig = format_function_signature(&func);
@@ -217,6 +219,7 @@ fn test_format_function_signature_with_results() {
         end_byte: 100,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
 
     let sig = format_function_signature(&func);
@@ -245,6 +248,7 @@ fn test_format_function_signature_unnamed_params() {
         end_byte: 100,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
 
     let sig = format_function_signature(&func);

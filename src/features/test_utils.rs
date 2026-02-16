@@ -67,6 +67,7 @@ pub fn create_test_symbols() -> SymbolTable {
         end_byte: 300,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
     table.add_function(func);
 
@@ -88,6 +89,7 @@ pub fn create_test_symbols() -> SymbolTable {
         index: 0,
         ref_type: ValueType::Funcref,
         limits: (10, None),
+        is_table64: false,
         line: 0,
         range: None,
     };
@@ -149,6 +151,7 @@ pub fn create_signature_test_symbols() -> SymbolTable {
         end_byte: 300,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
     table.add_function(multi_param_func);
 

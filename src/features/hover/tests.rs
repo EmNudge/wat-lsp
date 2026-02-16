@@ -318,6 +318,7 @@ fn test_format_function_signature() {
         end_byte: 150,
         range: None,
         doc_comment: None,
+        has_type_use: false,
     };
 
     let sig = format_function_signature(&func);

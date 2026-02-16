@@ -63,6 +63,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                             end_byte: import.span.offset(),
                             range,
                             doc_comment: None, // Imported functions don't have doc comments
+                            has_type_use: false,
                         });
                         func_index += 1;
                     }
@@ -84,6 +85,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                             index: table_index,
                             ref_type: ValueType::Funcref,
                             limits: (0, None),
+                            is_table64: false,
                             line,
                             range,
                         });
@@ -138,6 +140,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                     end_byte: func.span.offset(),
                     range: func.id.map(|id| id_to_range(id, source)),
                     doc_comment: None, // wast parser doesn't extract comments
+                    has_type_use: false,
                 });
                 func_index += 1;
             }
@@ -159,6 +162,7 @@ fn extract_symbols(wat: &wast::Wat, source: &str) -> Result<SymbolTable, String>
                     index: table_index,
                     ref_type: ValueType::Funcref,
                     limits: (0, None),
+                    is_table64: false,
                     line: span_to_line(table.span, source),
                     range: table.id.map(|id| id_to_range(id, source)),
                 });

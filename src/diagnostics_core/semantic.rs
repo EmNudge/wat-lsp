@@ -16,11 +16,12 @@ use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
     infer_simd_instruction_arity, is_terminating_instruction, lookup_instruction_arity, OperandMode,
 };
-use crate::symbols::{SymbolTable, TypeDef, TypeKind, ValueType};
+use crate::symbols::{SymbolTable, Table, TypeDef, TypeKind, ValueType};
 use crate::utils::node_to_range;
 
 use super::sequence_always_terminates;
-use super::type_check::{CtrlOpcode, TypeChecker};
+use super::type_check::{types_compatible_with_symbols, CtrlOpcode, TypeChecker};
+use crate::parser::parse_wat_nat;
 
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
@@ -501,7 +502,10 @@ fn process_instruction(
     source: &str,
 ) {
     // Handle tail call instructions
-    if matches!(instr_name, "return_call" | "return_call_ref") {
+    if matches!(
+        instr_name,
+        "return_call" | "return_call_ref" | "return_call_indirect"
+    ) {
         let consumed = get_instruction_consumed_types(node, instr_name, symbols, source);
         if !consumed.is_empty() {
             checker.pop_vals_for_instr(&consumed, node, instr_name);
@@ -542,6 +546,7 @@ fn process_instruction(
     if instr_name == "br_table" {
         // Pop i32 index
         checker.pop_expect(&ValueType::I32, node);
+        let is_unreachable = checker.is_unreachable();
         let depths = get_all_branch_depths(node, source, checker);
         if let Some(&default_depth) = depths.last() {
             // Type-check using the default (last) label
@@ -549,7 +554,9 @@ fn process_instruction(
                 let label_types = label_types.to_vec();
                 checker.pop_vals_for_instr(&label_types, node, instr_name);
             }
-            // Validate all non-default labels have consistent types with default
+            // Validate all non-default labels have consistent arity with default.
+            // Arity must always match. Type compatibility is only checked when reachable
+            // (after unreachable, the polymorphic stack bottom satisfies any type).
             if let Some(default_types) = checker.label_types(default_depth) {
                 let default_types = default_types.to_vec();
                 let default_arity = default_types.len();
@@ -570,7 +577,7 @@ fn process_instruction(
                                 .with_code("type-mismatch"),
                             );
                             reported = true;
-                        } else {
+                        } else if !is_unreachable {
                             for (t, d) in target_types.iter().zip(default_types.iter()) {
                                 if !types_compatible(t, d) {
                                     checker.diagnostics.push(
@@ -618,43 +625,78 @@ fn process_instruction(
     if instr_name == "select" && get_select_result_type(node, source).is_none() {
         // Bare select (no type annotation): first two operands must be same numeric type
         // Stack: [val1, val2, i32_cond] — peek(0)=cond, peek(1)=val2, peek(2)=val1
-        if let (Some(val2), Some(val1)) = (checker.peek(1), checker.peek(2)) {
-            let is_numeric = |t: &ValueType| {
-                matches!(
-                    t,
-                    ValueType::I32
-                        | ValueType::I64
-                        | ValueType::F32
-                        | ValueType::F64
-                        | ValueType::V128
-                        | ValueType::Unknown
-                )
-            };
-            if !is_numeric(val1) || !is_numeric(val2) {
-                checker.diagnostics.push(
-                    Diagnostic::error(
-                        node_to_range(node),
-                        "type mismatch: select without type annotation requires numeric operands"
-                            .to_string(),
-                    )
-                    .with_code("type-mismatch"),
-                );
-            } else if val1 != &ValueType::Unknown
-                && val2 != &ValueType::Unknown
-                && !types_compatible(val1, val2)
-            {
-                checker.diagnostics.push(
-                    Diagnostic::error(
-                        node_to_range(node),
-                        format!(
-                            "type mismatch: select operands have different types ({:?} vs {:?})",
-                            val1, val2
-                        ),
-                    )
-                    .with_code("type-mismatch"),
-                );
+        let val2 = checker.peek(1).map(|v| (*v).clone());
+        let val1 = checker.peek(2).map(|v| (*v).clone());
+        let is_numeric = |t: &ValueType| {
+            matches!(
+                t,
+                ValueType::I32
+                    | ValueType::I64
+                    | ValueType::F32
+                    | ValueType::F64
+                    | ValueType::V128
+                    | ValueType::Unknown
+            )
+        };
+        // Determine result type from peeked operands
+        let result_type = match (&val1, &val2) {
+            (Some(v1), Some(v2)) => {
+                if !is_numeric(v1) || !is_numeric(v2) {
+                    checker.diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(node),
+                            "type mismatch: select without type annotation requires numeric operands"
+                                .to_string(),
+                        )
+                        .with_code("type-mismatch"),
+                    );
+                    ValueType::Unknown
+                } else if *v1 != ValueType::Unknown
+                    && *v2 != ValueType::Unknown
+                    && !types_compatible(v1, v2)
+                {
+                    checker.diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(node),
+                            format!(
+                                "type mismatch: select operands have different types ({:?} vs {:?})",
+                                v1, v2
+                            ),
+                        )
+                        .with_code("type-mismatch"),
+                    );
+                    ValueType::Unknown
+                } else if *v1 != ValueType::Unknown {
+                    v1.clone()
+                } else {
+                    v2.clone()
+                }
             }
-        }
+            (None, Some(v2)) => {
+                // Only val2 available (val1 is in unreachable bottom).
+                if !is_numeric(v2) {
+                    checker.diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(node),
+                            "type mismatch: select without type annotation requires numeric operands"
+                                .to_string(),
+                        )
+                        .with_code("type-mismatch"),
+                    );
+                }
+                v2.clone()
+            }
+            _ => ValueType::Unknown,
+        };
+        // Pop: i32 condition + two operands (typed as Unknown to avoid double-reporting)
+        checker.pop_vals_for_instr(
+            &[ValueType::Unknown, ValueType::Unknown, ValueType::I32],
+            node,
+            instr_name,
+        );
+        // Push the actual result type (not Unknown)
+        checker.push_val(result_type);
+        return;
     }
 
     // Regular instructions: consume typed operands, produce typed results
@@ -876,21 +918,20 @@ fn derive_consumed_types_from_name(
             None // fall back to untyped
         }
 
-        // Call_ref — consume param types + typed funcref
-        // Use Unknown for the funcref operand to be lenient (exact ref type varies)
+        // Call_ref — consume param types + typed funcref (ref null $type)
         "call_ref" | "return_call_ref" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
                 if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
                     if let TypeKind::Func { params, .. } = &type_def.kind {
                         let mut types: Vec<ValueType> = params.clone();
-                        types.push(ValueType::Unknown); // typed funcref (lenient)
+                        types.push(ValueType::RefNull(type_def.index as u32));
                         return Some(types);
                     }
-                } else if let Ok(idx) = type_ref.parse::<usize>() {
-                    if let Some(type_def) = symbols.get_type_by_index(idx) {
+                } else if let Some(idx) = parse_wat_nat(&type_ref) {
+                    if let Some(type_def) = symbols.get_type_by_index(idx as usize) {
                         if let TypeKind::Func { params, .. } = &type_def.kind {
                             let mut types: Vec<ValueType> = params.clone();
-                            types.push(ValueType::Unknown);
+                            types.push(ValueType::RefNull(type_def.index as u32));
                             return Some(types);
                         }
                     }
@@ -1007,16 +1048,27 @@ fn derive_consumed_types_from_name(
         "memory.init" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I32]),
         "data.drop" | "elem.drop" => Some(vec![]),
 
-        // Table operations (use Unknown for index type to support table64)
-        "table.get" => Some(vec![ValueType::Unknown]),
-        "table.set" => Some(vec![ValueType::Unknown, ValueType::Unknown]),
+        // Table operations — resolve element type and index type from symbol table
+        "table.get" => {
+            let idx_type = get_table_index_type(node, symbols, source);
+            Some(vec![idx_type])
+        }
+        "table.set" => {
+            let idx_type = get_table_index_type(node, symbols, source);
+            let elem_type = get_table_elem_type(node, symbols, source);
+            Some(vec![idx_type, elem_type])
+        }
         "table.size" => Some(vec![]),
-        "table.grow" => Some(vec![ValueType::Unknown, ValueType::Unknown]),
-        "table.fill" => Some(vec![
-            ValueType::Unknown,
-            ValueType::Unknown,
-            ValueType::Unknown,
-        ]),
+        "table.grow" => {
+            let idx_type = get_table_index_type(node, symbols, source);
+            let elem_type = get_table_elem_type(node, symbols, source);
+            Some(vec![elem_type, idx_type])
+        }
+        "table.fill" => {
+            let idx_type = get_table_index_type(node, symbols, source);
+            let elem_type = get_table_elem_type(node, symbols, source);
+            Some(vec![idx_type.clone(), elem_type, idx_type])
+        }
         "table.copy" => Some(vec![
             ValueType::Unknown,
             ValueType::Unknown,
@@ -1069,14 +1121,20 @@ fn get_call_indirect_consumed_types(
     source: &str,
 ) -> Vec<ValueType> {
     // call_indirect consumes: param_types... + table index (i32 or i64 for table64)
-    // Use Unknown for table index to support both table32 and table64
+    let table_idx_type = get_table_index_type(node, symbols, source);
     // First, try to resolve from type_use (handles multi-table where first index is table ref)
     if let Some(td) = resolve_call_indirect_type(node, source, symbols) {
         if let TypeKind::Func { params, .. } = &td.kind {
             let mut types = params.clone();
-            types.push(ValueType::Unknown); // table index (i32 or i64)
+            types.push(table_idx_type);
             return types;
         }
+    }
+    // Try implicit type resolution (for modules without explicit type declarations)
+    if let Some(sig) = resolve_call_indirect_type_implicit(node, source, symbols) {
+        let mut types = sig.0;
+        types.push(table_idx_type);
+        return types;
     }
     // Check for explicit func_type_params_many (inline params without type_use)
     let mut params = Vec::new();
@@ -1091,7 +1149,7 @@ fn get_call_indirect_consumed_types(
             params.extend(parse_func_type_results(&child, source));
         }
     }
-    params.push(ValueType::Unknown); // table index (i32 or i64)
+    params.push(table_idx_type);
     params
 }
 
@@ -1100,17 +1158,20 @@ fn get_call_indirect_consumed_types(
 /// Named label resolution failure is handled by the reference checker.
 fn get_branch_depth(node: &Node, source: &str, checker: &mut TypeChecker) -> Option<usize> {
     let index = get_index_from_node(node, source)?;
-    // Try as numeric index first
-    if let Ok(depth) = index.parse::<usize>() {
-        if depth < checker.ctrl_depth() {
-            return Some(depth);
+    // Try as numeric index first (supports hex like 0x10000001 and underscore separators)
+    if !index.starts_with('$') {
+        if let Some(depth) = parse_wat_nat(&index) {
+            let depth = depth as usize;
+            if depth < checker.ctrl_depth() {
+                return Some(depth);
+            }
+            // Out-of-range label depth
+            checker.diagnostics.push(
+                Diagnostic::error(node_to_range(node), format!("unknown label {}", depth))
+                    .with_code("unknown-label"),
+            );
+            return None;
         }
-        // Out-of-range label depth
-        checker.diagnostics.push(
-            Diagnostic::error(node_to_range(node), format!("unknown label {}", depth))
-                .with_code("unknown-label"),
-        );
-        return None;
     }
     // Try named label resolution
     if index.starts_with('$') {
@@ -1151,7 +1212,12 @@ fn get_all_branch_depths(node: &Node, source: &str, checker: &mut TypeChecker) -
     let ctrl_depth = checker.ctrl_depth();
     let mut result = Vec::new();
     for idx_str in &indices {
-        if let Ok(depth) = idx_str.parse::<usize>() {
+        if idx_str.starts_with('$') {
+            if let Some(depth) = checker.resolve_label_depth(idx_str) {
+                result.push(depth);
+            }
+        } else if let Some(depth) = parse_wat_nat(idx_str) {
+            let depth = depth as usize;
             if depth < ctrl_depth {
                 result.push(depth);
             } else {
@@ -1489,10 +1555,13 @@ pub fn infer_instruction_result_types(
             get_call_indirect_result_types(node, symbols, source)
         }
 
+        "table.get" => vec![get_table_elem_type(node, symbols, source)],
+        "table.grow" | "table.size" => vec![get_table_index_type(node, symbols, source)],
+
         "drop" | "local.set" | "global.set" | "return" | "br" | "unreachable" | "nop" => vec![],
 
         "ref.null" => vec![ValueType::Unknown],
-        "ref.func" => vec![ValueType::Funcref],
+        "ref.func" => get_ref_func_result_type(node, symbols, source),
         "ref.extern" => vec![ValueType::Externref],
         "ref.is_null" => vec![ValueType::I32],
 
@@ -1591,6 +1660,73 @@ pub fn get_global_type_from_node(
     None
 }
 
+/// Get the element type of the table referenced by a table instruction node.
+/// Falls back to table 0 if no explicit index.
+fn resolve_table<'a>(node: &Node, symbols: &'a SymbolTable, source: &str) -> Option<&'a Table> {
+    if let Some(index) = get_index_from_node(node, source) {
+        if let Some(table) = symbols.get_table_by_name(&index) {
+            return Some(table);
+        }
+        if let Some(idx) = parse_wat_nat(&index) {
+            if let Some(table) = symbols.tables.get(idx as usize) {
+                return Some(table);
+            }
+        }
+    }
+    symbols.tables.first()
+}
+
+fn get_table_elem_type(node: &Node, symbols: &SymbolTable, source: &str) -> ValueType {
+    resolve_table(node, symbols, source)
+        .map(|t| t.ref_type.clone())
+        .unwrap_or(ValueType::Funcref)
+}
+
+/// Get the index type for table operations (i32 for regular tables, i64 for table64)
+fn get_table_index_type(node: &Node, symbols: &SymbolTable, source: &str) -> ValueType {
+    resolve_table(node, symbols, source)
+        .map(|t| {
+            if t.is_table64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            }
+        })
+        .unwrap_or(ValueType::I32)
+}
+
+/// Get result type for ref.func instruction.
+/// Returns Ref(type_index) when the function's type can be resolved, otherwise Funcref.
+fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
+    if let Some(func_ref) = get_index_from_node(node, source) {
+        // Look up the function to find its type
+        let func = if let Some(f) = symbols.get_function_by_name(&func_ref) {
+            Some(f)
+        } else if let Ok(idx) = func_ref.parse::<usize>() {
+            symbols.get_function_by_index(idx)
+        } else {
+            None
+        };
+
+        if let Some(func) = func {
+            // Find a matching type definition for this function's signature
+            let func_params: Vec<ValueType> = func
+                .parameters
+                .iter()
+                .map(|p| p.param_type.clone())
+                .collect();
+            for type_def in &symbols.types {
+                if let TypeKind::Func { params, results } = &type_def.kind {
+                    if *params == func_params && *results == func.results {
+                        return vec![ValueType::Ref(type_def.index as u32)];
+                    }
+                }
+            }
+        }
+    }
+    vec![ValueType::Funcref]
+}
+
 /// Get result types for a call instruction
 pub fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(func_ref) = get_index_from_node(node, source) {
@@ -1675,6 +1811,10 @@ pub fn get_call_indirect_result_types(
             return res.clone();
         }
     }
+    // Try implicit type resolution
+    if let Some(sig) = resolve_call_indirect_type_implicit(node, source, symbols) {
+        return sig.1;
+    }
     // Check for explicit func_type_results (inline result types without type_use)
     let mut results = Vec::new();
     let mut cursor = node.walk();
@@ -1689,6 +1829,39 @@ pub fn get_call_indirect_result_types(
         }
     }
     results
+}
+
+/// Try to resolve call_indirect type via implicit function types.
+/// Falls back to implicit types when explicit type lookup fails.
+fn resolve_call_indirect_type_implicit(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Option<(Vec<ValueType>, Vec<ValueType>)> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        #[cfg(feature = "native")]
+        let kind = child.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let kind = child.kind();
+
+        if kind == "type_use" {
+            // Extract index from type_use
+            let mut inner_cursor = child.walk();
+            for inner in child.children(&mut inner_cursor) {
+                let ik = inner.kind();
+                #[cfg(all(feature = "wasm", not(feature = "native")))]
+                let ik = ik.as_str();
+                if ik == "index" || ik == "identifier" {
+                    let idx_text = source[inner.byte_range()].trim();
+                    if let Ok(idx) = idx_text.parse::<usize>() {
+                        return resolve_type_index_to_func_sig(idx, symbols);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Find the instr_plain node inside a folded expression (for branch depth resolution).
@@ -2560,6 +2733,49 @@ fn resolve_type_use_node<'a>(
     None
 }
 
+/// Resolve a numeric type index to a function signature, including implicit types.
+///
+/// WebAssembly modules can have implicit types created from function signatures.
+/// When a function uses `(type N)` where N >= explicit type count, the index may
+/// refer to an implicit type derived from function signatures.
+///
+/// Returns (params, results) for function types, None for non-function types.
+fn resolve_type_index_to_func_sig(
+    idx: usize,
+    symbols: &SymbolTable,
+) -> Option<(Vec<ValueType>, Vec<ValueType>)> {
+    // First, try explicit types
+    if let Some(td) = symbols.get_type_by_index(idx) {
+        if let TypeKind::Func { params, results } = &td.kind {
+            return Some((params.clone(), results.clone()));
+        }
+        return None;
+    }
+
+    // Build implicit type table: explicit type sigs + unique function sigs
+    let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
+    for type_def in &symbols.types {
+        if let TypeKind::Func { params, results } = &type_def.kind {
+            sigs.push((params.clone(), results.clone()));
+        }
+    }
+    for func in &symbols.functions {
+        if func.has_type_use {
+            continue;
+        }
+        let params: Vec<ValueType> = func
+            .parameters
+            .iter()
+            .map(|p| p.param_type.clone())
+            .collect();
+        let sig = (params, func.results.clone());
+        if !sigs.iter().any(|s| s == &sig) {
+            sigs.push(sig);
+        }
+    }
+    sigs.get(idx).cloned()
+}
+
 /// Get result types from a block/loop/if node
 pub fn get_block_result_types(
     block_node: &Node,
@@ -2839,11 +3055,17 @@ fn validate_tail_call_return_types(
         _ => return None,
     };
 
-    if callee_results.is_empty() || callee_results.contains(&ValueType::Unknown) {
+    if callee_results.contains(&ValueType::Unknown) {
         return None;
     }
 
-    if callee_results != *enclosing_results {
+    // Check result type compatibility using subtyping
+    let types_mismatch = callee_results.len() != enclosing_results.len()
+        || callee_results
+            .iter()
+            .zip(enclosing_results.iter())
+            .any(|(callee, enclosing)| !types_compatible_with_symbols(callee, enclosing, symbols));
+    if types_mismatch {
         let callee_name = get_index_from_node(node, source).unwrap_or_default();
         let label = if callee_name.is_empty() {
             instr_name.to_string()
@@ -2855,13 +3077,13 @@ fn validate_tail_call_return_types(
             Diagnostic::error(
                 range,
                 format!(
-                    "Tail call return type mismatch: '{}' returns {} but enclosing function returns {}",
+                    "type mismatch: '{}' returns {} but enclosing function returns {}",
                     label,
                     format_types(&callee_results),
                     format_types(enclosing_results),
                 ),
             )
-            .with_code("tail-call-type-mismatch"),
+            .with_code("type-mismatch"),
         );
     }
 
