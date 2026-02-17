@@ -761,6 +761,37 @@ pub fn format_function_signature(func: &Function) -> String {
     sig
 }
 
+// ============================================================================
+// Node child search helpers
+// ============================================================================
+
+/// Find the first child node of a given kind.
+/// Shared between parser and diagnostics modules to avoid duplication.
+#[cfg(feature = "native")]
+#[allow(clippy::manual_find)]
+pub fn find_child_by_kind<'a>(node: &'a Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == kind {
+            return Some(child);
+        }
+    }
+    None
+}
+
+/// Find the first child node of a given kind (WASM version).
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+pub fn find_child_by_kind(node: &Node, kind: &str) -> Option<Node> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(ck = child);
+        if ck == kind {
+            return Some(child.clone());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 #[cfg(feature = "native")]
 mod tests {

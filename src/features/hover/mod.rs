@@ -565,10 +565,7 @@ fn provide_annotation_hover(
     // Walk up the tree to find if we're inside an annotation
     let mut current = node;
     loop {
-        #[cfg(feature = "native")]
-        let kind = current.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = current.kind();
+        node_kind!(kind = current);
 
         if kind == "annotation" {
             // Found annotation - extract the name from identifier_pattern child
@@ -581,10 +578,7 @@ fn provide_annotation_hover(
             let children_iter = (0..current.child_count()).filter_map(|i| current.child(i));
 
             for child in children_iter {
-                #[cfg(feature = "native")]
-                let child_kind = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let child_kind = child.kind();
+                node_kind!(child_kind = child);
 
                 if child_kind == "identifier_pattern" {
                     #[cfg(feature = "native")]

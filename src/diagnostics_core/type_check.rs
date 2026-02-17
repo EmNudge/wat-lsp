@@ -180,13 +180,13 @@ fn is_type_subtype(child_idx: usize, parent_idx: usize, symbols: &SymbolTable) -
         };
 
         let parent_ref = match &type_def.parent {
-            Some(p) => p.clone(),
+            Some(p) => p.as_str(),
             None => return false,
         };
 
         // Resolve parent reference to index
         let resolved_idx = if parent_ref.starts_with('$') {
-            match symbols.get_type_by_name(&parent_ref) {
+            match symbols.get_type_by_name(parent_ref) {
                 Some(td) => td.index,
                 None => return false,
             }
@@ -280,9 +280,7 @@ impl TypeChecker {
 
     /// Push multiple values onto the stack.
     pub fn push_vals(&mut self, types: &[ValueType]) {
-        for ty in types {
-            self.push_val(ty.clone());
-        }
+        self.val_stack.extend_from_slice(types);
     }
 
     /// Pop multiple values and check types (in reverse order, as per spec).
@@ -410,16 +408,16 @@ impl TypeChecker {
         label: Option<String>,
     ) {
         let height = self.val_stack.len();
+        // Push start_types onto val_stack first, then move into frame (avoids clone)
+        self.push_vals(&start_types);
         self.ctrl_stack.push(CtrlFrame {
             opcode,
-            start_types: start_types.clone(),
+            start_types,
             end_types,
             height,
             unreachable: false,
             label,
         });
-        // Push start_types onto val_stack (block params become initial stack)
-        self.push_vals(&start_types);
     }
 
     /// Exit a control frame. Validates that end_types match the stack.

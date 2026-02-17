@@ -9,7 +9,15 @@ use crate::symbols::*;
 
 /// Produce a hierarchical outline of all symbols in the document.
 pub fn provide_document_symbols_core(symbols: &SymbolTable) -> Vec<DocumentSymbolInfo> {
-    let mut result = Vec::new();
+    let total = symbols.types.len()
+        + symbols.functions.len()
+        + symbols.globals.len()
+        + symbols.tables.len()
+        + symbols.memories.len()
+        + symbols.tags.len()
+        + symbols.data_segments.len()
+        + symbols.elem_segments.len();
+    let mut result = Vec::with_capacity(total);
 
     for type_def in &symbols.types {
         result.push(type_to_symbol(type_def));
@@ -116,7 +124,8 @@ fn function_to_symbol(func: &Function) -> DocumentSymbolInfo {
         .range
         .unwrap_or_else(|| Range::from_coords(func.line, 0, func.end_line, 0));
 
-    let mut children = Vec::new();
+    let child_count = func.parameters.len() + func.locals.len() + func.blocks.len();
+    let mut children = Vec::with_capacity(child_count);
     for param in &func.parameters {
         children.push(param_to_symbol(param));
     }

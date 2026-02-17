@@ -35,10 +35,7 @@ pub fn check_catch_clause_references(
     let indices: Vec<_> = node
         .children(&mut cursor)
         .filter(|c| {
-            #[cfg(feature = "native")]
-            let kind = c.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let kind = c.kind();
+            node_kind!(kind = c);
             kind == "index"
         })
         .collect();
@@ -68,10 +65,7 @@ pub fn check_try_catch_clause_references(
 ) -> Vec<Diagnostic> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" {
             return find_undefined_identifiers(&child, source, symbols, &InstructionContext::Tag);
@@ -90,10 +84,7 @@ pub fn check_try_delegate_clause_references(
 ) -> Vec<Diagnostic> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" {
             return find_undefined_identifiers(
@@ -113,10 +104,7 @@ pub fn check_try_delegate_clause_references(
 pub fn check_start_references(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<Diagnostic> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" {
             return find_undefined_identifiers(&child, source, symbols, &InstructionContext::Call);
@@ -138,10 +126,7 @@ pub fn find_first_index_identifier(
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" {
             // Found the first index, check its identifier
@@ -166,10 +151,7 @@ pub fn find_undefined_identifiers(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    #[cfg(feature = "native")]
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = node.kind();
+    node_kind!(kind = node);
 
     if kind == "identifier" {
         let identifier_name = &source[node.byte_range()];
@@ -454,10 +436,7 @@ pub fn check_module_level_references(
     source: &str,
     symbols: &SymbolTable,
 ) -> Vec<Diagnostic> {
-    #[cfg(feature = "native")]
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = node.kind();
+    node_kind!(kind = node);
 
     let context = match &*kind {
         "export_desc_func" => InstructionContext::Call,
@@ -478,10 +457,7 @@ pub fn check_module_level_references(
             let is_field = &*kind == "module_field_elem";
             let mut seen_offset = false;
             for child in node.children(&mut cursor) {
-                #[cfg(feature = "native")]
-                let child_kind = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let child_kind = child.kind();
+                node_kind!(child_kind = child);
 
                 if is_field {
                     // Track when we pass the offset — only index nodes after
@@ -514,10 +490,7 @@ pub fn check_module_level_references(
     // and validate its identifier
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let child_kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let child_kind = child.kind();
+        node_kind!(child_kind = child);
 
         if child_kind == "index" {
             return find_undefined_identifiers(&child, source, symbols, &context);
@@ -531,18 +504,12 @@ pub fn check_module_level_references(
 pub fn is_nested_in_expr(node: &Node) -> bool {
     let mut current = node.parent();
     while let Some(parent) = current {
-        #[cfg(feature = "native")]
-        let kind = parent.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = parent.kind();
+        node_kind!(kind = parent);
 
         if kind == "expr" {
             // Found parent expr, check if its parent is also expr
             if let Some(grandparent) = parent.parent() {
-                #[cfg(feature = "native")]
-                let gp_kind = grandparent.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let gp_kind = grandparent.kind();
+                node_kind!(gp_kind = grandparent);
 
                 if gp_kind == "expr" || gp_kind.starts_with("expr1_") {
                     return true;

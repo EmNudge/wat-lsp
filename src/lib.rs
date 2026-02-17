@@ -1,5 +1,26 @@
 // Library exports for testing and WASM builds
 
+// ============================================================================
+// Macros for native/WASM platform abstraction (must be before module declarations)
+// ============================================================================
+
+/// Bind `node.kind()` to a `&str` variable, handling the native (`&str`) vs
+/// WASM (`String` → `.as_str()`) difference in one line.
+///
+/// Usage: `node_kind!(ck = child);` expands to the equivalent of:
+/// ```ignore
+/// let ck = child.kind();
+/// #[cfg(all(feature = "wasm", not(feature = "native")))]
+/// let ck = ck.as_str();
+/// ```
+macro_rules! node_kind {
+    ($name:ident = $node:expr) => {
+        let $name = $node.kind();
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        let $name = $name.as_str();
+    };
+}
+
 // Core types (protocol-independent) - must be first as other modules depend on it
 pub mod core;
 

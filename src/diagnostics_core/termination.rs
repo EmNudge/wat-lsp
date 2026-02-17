@@ -21,10 +21,7 @@ use crate::ts_facade::Node;
 /// pushed onto the stack - if the block always terminates, it doesn't produce
 /// values via fall-through.
 pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
-    #[cfg(feature = "native")]
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = node.kind();
+    node_kind!(kind = node);
 
     match kind.as_ref() {
         // An instruction list terminates if ANY child instruction terminates
@@ -94,10 +91,7 @@ pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
         "expr1_block" | "expr1_loop" => {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                #[cfg(feature = "native")]
-                let child_kind = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let child_kind = child.kind();
+                node_kind!(child_kind = child);
 
                 // Check the body expressions/instructions
                 if (child_kind == "expr" || child_kind == "instr" || child_kind == "instr_list")
@@ -126,10 +120,7 @@ pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
 
 /// Extract the instruction name from a node (handles instr, instr_plain, etc.)
 fn get_instruction_name_from_node(node: &Node, source: &str) -> Option<String> {
-    #[cfg(feature = "native")]
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = node.kind();
+    node_kind!(kind = node);
 
     if kind == "instr" {
         // instr wraps other instruction types
@@ -145,10 +136,7 @@ fn get_instruction_name_from_node(node: &Node, source: &str) -> Option<String> {
     if kind == "instr_plain" {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            #[cfg(feature = "native")]
-            let child_kind = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let child_kind = child.kind();
+            node_kind!(child_kind = child);
 
             if child_kind.starts_with("op_") {
                 let text = &source[child.byte_range()];
@@ -167,10 +155,7 @@ fn get_instruction_name_from_node(node: &Node, source: &str) -> Option<String> {
 fn block_body_always_terminates(node: &Node, source: &str) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let child_kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let child_kind = child.kind();
+        node_kind!(child_kind = child);
 
         if child_kind == "instr_list" {
             return sequence_always_terminates(&child, source);
@@ -215,10 +200,7 @@ fn try_table_always_terminates(node: &Node, source: &str) -> bool {
     // Check if this try_table has any catch clauses
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let child_kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let child_kind = child.kind();
+        node_kind!(child_kind = child);
 
         // If we find any catch clause, the try_table doesn't "always terminate"
         // because the catch can branch to an outer label
@@ -234,10 +216,7 @@ fn try_table_always_terminates(node: &Node, source: &str) -> bool {
 
 /// Check if an if/if_block always terminates (both branches must exist and terminate)
 fn if_always_terminates(node: &Node, source: &str) -> bool {
-    #[cfg(feature = "native")]
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = node.kind();
+    node_kind!(kind = node);
 
     // For folded if (expr1_if), we need to find then and else expressions
     if kind == "expr1_if" {
@@ -247,10 +226,7 @@ fn if_always_terminates(node: &Node, source: &str) -> bool {
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            #[cfg(feature = "native")]
-            let child_kind = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let child_kind = child.kind();
+            node_kind!(child_kind = child);
 
             // In folded if, the structure is:
             // (if (result ...) condition (then ...) (else ...))
@@ -274,10 +250,7 @@ fn if_always_terminates(node: &Node, source: &str) -> bool {
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let child_kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let child_kind = child.kind();
+        node_kind!(child_kind = child);
 
         if child_kind == "if_block" {
             // Recurse into if_block
@@ -301,10 +274,7 @@ fn if_always_terminates(node: &Node, source: &str) -> bool {
             // Find the instr_list inside the else
             let mut else_cursor = child.walk();
             for else_child in child.children(&mut else_cursor) {
-                #[cfg(feature = "native")]
-                let else_kind = else_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let else_kind = else_child.kind();
+                node_kind!(else_kind = else_child);
 
                 if else_kind == "instr_list" {
                     else_terminates = sequence_always_terminates(&else_child, source);

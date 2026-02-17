@@ -5,7 +5,7 @@ use crate::core::types::Range;
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValueType {
     I32,
     I64,
