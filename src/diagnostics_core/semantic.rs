@@ -483,10 +483,7 @@ fn process_instruction(
     if instr_name == "br" {
         // Pop label types then mark unreachable
         if let Some(depth) = get_branch_depth(node, source, checker) {
-            if let Some(label_types) = checker.label_types(depth) {
-                let label_types = label_types.to_vec();
-                checker.pop_vals_for_instr(&label_types, node, instr_name);
-            }
+            checker.pop_label_types_for_instr(depth, node, instr_name);
         }
         checker.mark_unreachable();
         return;
@@ -496,9 +493,7 @@ fn process_instruction(
         // Pop i32 condition first, then pop+push label types
         checker.pop_expect(&ValueType::I32, node);
         if let Some(depth) = get_branch_depth(node, source, checker) {
-            if let Some(label_types) = checker.label_types(depth) {
-                let label_types = label_types.to_vec();
-                checker.pop_vals_for_instr(&label_types, node, instr_name);
+            if let Some(label_types) = checker.pop_label_types_for_instr(depth, node, instr_name) {
                 checker.push_vals(&label_types);
             }
         }
@@ -512,15 +507,11 @@ fn process_instruction(
         let depths = get_all_branch_depths(node, source, checker);
         if let Some(&default_depth) = depths.last() {
             // Type-check using the default (last) label
-            if let Some(label_types) = checker.label_types(default_depth) {
-                let label_types = label_types.to_vec();
-                checker.pop_vals_for_instr(&label_types, node, instr_name);
-            }
+            checker.pop_label_types_for_instr(default_depth, node, instr_name);
             // Validate all non-default labels have consistent arity with default.
             // Arity must always match. Type compatibility is only checked when reachable
             // (after unreachable, the polymorphic stack bottom satisfies any type).
-            if let Some(default_types) = checker.label_types(default_depth) {
-                let default_types = default_types.to_vec();
+            if let Some(default_types) = checker.label_types_vec(default_depth) {
                 let default_arity = default_types.len();
                 let mut reported = false;
                 for &depth in depths.iter().take(depths.len().saturating_sub(1)) {
@@ -528,7 +519,6 @@ fn process_instruction(
                         break;
                     }
                     if let Some(target_types) = checker.label_types(depth) {
-                        let target_types = target_types.to_vec();
                         if target_types.len() != default_arity {
                             checker.diagnostics.push(
                                 Diagnostic::error(
@@ -567,10 +557,7 @@ fn process_instruction(
     if is_terminating_instruction(instr_name) {
         // For 'return', pop function result types
         if instr_name == "return" {
-            if let Some(frame) = checker.function_frame() {
-                let end_types = frame.end_types.clone();
-                checker.pop_vals_for_instr(&end_types, node, instr_name);
-            }
+            checker.pop_function_return_types(node, instr_name);
         }
         // For 'throw', pop tag parameter types
         if instr_name == "throw" {
@@ -1776,62 +1763,41 @@ fn resolve_call_indirect_type_implicit(
 }
 
 /// Find the instr_plain node inside a folded expression (for branch depth resolution).
+/// Note: separate native/WASM signatures required due to Node<'a> lifetime differences.
+macro_rules! find_instr_plain_in_expr_body {
+    ($expr:ident) => {{
+        let mut cursor = $expr.walk();
+        for child in $expr.children(&mut cursor) {
+            node_kind!(kind = child);
+            if kind == "expr1" || kind.starts_with("expr1_") {
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    node_kind!(ik = inner);
+                    if ik == "instr_plain" {
+                        return Some(node_copy!(&inner));
+                    }
+                    if ik.starts_with("expr1_") {
+                        let mut deep_cursor = inner.walk();
+                        for deep in inner.children(&mut deep_cursor) {
+                            node_kind!(dk = deep);
+                            if dk == "instr_plain" {
+                                return Some(node_copy!(&deep));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }};
+}
 #[cfg(feature = "native")]
 fn find_instr_plain_in_expr<'a>(expr: &'a Node) -> Option<Node<'a>> {
-    let mut cursor = expr.walk();
-    for child in expr.children(&mut cursor) {
-        node_kind!(kind = child);
-
-        if kind == "expr1" || kind.starts_with("expr1_") {
-            let mut inner_cursor = child.walk();
-            for inner in child.children(&mut inner_cursor) {
-                node_kind!(ik = inner);
-
-                if ik == "instr_plain" {
-                    return Some(inner);
-                }
-                // Check inside nested expr1 wrapper
-                if ik.starts_with("expr1_") {
-                    let mut deep_cursor = inner.walk();
-                    for deep in inner.children(&mut deep_cursor) {
-                        if deep.kind() == "instr_plain" {
-                            return Some(deep);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    find_instr_plain_in_expr_body!(expr)
 }
-
-/// Find the instr_plain node inside a folded expression (for branch depth resolution).
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 fn find_instr_plain_in_expr(expr: &Node) -> Option<Node> {
-    let mut cursor = expr.walk();
-    for child in expr.children(&mut cursor) {
-        let kind = child.kind();
-
-        if kind == "expr1" || kind.starts_with("expr1_") {
-            let mut inner_cursor = child.walk();
-            for inner in child.children(&mut inner_cursor) {
-                let ik = inner.kind();
-
-                if ik == "instr_plain" {
-                    return Some(inner);
-                }
-                if ik.starts_with("expr1_") {
-                    let mut deep_cursor = inner.walk();
-                    for deep in inner.children(&mut deep_cursor) {
-                        if deep.kind() == "instr_plain" {
-                            return Some(deep);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    find_instr_plain_in_expr_body!(expr)
 }
 
 /// Get instruction info from a folded expression
@@ -1945,70 +1911,51 @@ fn get_dynamic_operand_count_from_expr(
 }
 
 /// Check if a folded expression is a block-type (block, loop, if, try_table).
-/// Returns the expr1_* node if found.
-#[cfg(feature = "native")]
-fn find_folded_block_child<'a>(expr: &'a Node, source: &str) -> Option<(Node<'a>, &'static str)> {
-    let _ = source;
-    let mut cursor = expr.walk();
-    for child in expr.children(&mut cursor) {
-        node_kind!(kind = child);
-
-        match kind.as_ref() {
-            "expr1_block" => return Some((child, "block")),
-            "expr1_loop" => return Some((child, "loop")),
-            "expr1_if" => return Some((child, "if")),
-            "expr1_try_table" => return Some((child, "try_table")),
-            "expr1" => {
-                // Check inside expr1 wrapper
+/// Returns the expr1_* node and its block kind if found.
+macro_rules! find_folded_block_child_body {
+    ($expr:ident) => {{
+        let mut cursor = $expr.walk();
+        for child in $expr.children(&mut cursor) {
+            node_kind!(kind = child);
+            let block_kind = match kind.as_ref() {
+                "expr1_block" => Some("block"),
+                "expr1_loop" => Some("loop"),
+                "expr1_if" => Some("if"),
+                "expr1_try_table" => Some("try_table"),
+                _ => None,
+            };
+            if let Some(bk) = block_kind {
+                return Some((node_copy!(&child), bk));
+            }
+            if kind == "expr1" {
                 let mut inner_cursor = child.walk();
                 for inner in child.children(&mut inner_cursor) {
                     node_kind!(ik = inner);
-                    match ik.as_ref() {
-                        "expr1_block" => return Some((inner, "block")),
-                        "expr1_loop" => return Some((inner, "loop")),
-                        "expr1_if" => return Some((inner, "if")),
-                        "expr1_try_table" => return Some((inner, "try_table")),
-                        _ => {}
+                    let inner_block_kind = match ik.as_ref() {
+                        "expr1_block" => Some("block"),
+                        "expr1_loop" => Some("loop"),
+                        "expr1_if" => Some("if"),
+                        "expr1_try_table" => Some("try_table"),
+                        _ => None,
+                    };
+                    if let Some(bk) = inner_block_kind {
+                        return Some((node_copy!(&inner), bk));
                     }
                 }
             }
-            _ => {}
         }
-    }
-    None
+        None
+    }};
 }
-
-/// Check if a folded expression is a block-type (block, loop, if, try_table).
-/// Returns the expr1_* node if found.
+#[cfg(feature = "native")]
+fn find_folded_block_child<'a>(expr: &'a Node, source: &str) -> Option<(Node<'a>, &'static str)> {
+    let _ = source;
+    find_folded_block_child_body!(expr)
+}
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 fn find_folded_block_child(expr: &Node, source: &str) -> Option<(Node, &'static str)> {
     let _ = source;
-    let mut cursor = expr.walk();
-    for child in expr.children(&mut cursor) {
-        let kind = child.kind();
-
-        match kind.as_ref() {
-            "expr1_block" => return Some((child, "block")),
-            "expr1_loop" => return Some((child, "loop")),
-            "expr1_if" => return Some((child, "if")),
-            "expr1_try_table" => return Some((child, "try_table")),
-            "expr1" => {
-                let mut inner_cursor = child.walk();
-                for inner in child.children(&mut inner_cursor) {
-                    let ik = inner.kind();
-                    match ik.as_ref() {
-                        "expr1_block" => return Some((inner, "block")),
-                        "expr1_loop" => return Some((inner, "loop")),
-                        "expr1_if" => return Some((inner, "if")),
-                        "expr1_try_table" => return Some((inner, "try_table")),
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+    find_folded_block_child_body!(expr)
 }
 
 /// Process a folded block expression (block, loop, if, try_table) with control frames.
@@ -2364,53 +2311,34 @@ fn process_folded_expr(
 /// Find the expr1_call node inside a folded expression.
 /// The grammar uses string literals for "call_indirect", so the expr1_call node
 /// itself holds type_use/index children needed for type resolution.
+macro_rules! find_expr1_call_in_expr_body {
+    ($expr:ident) => {{
+        let mut cursor = $expr.walk();
+        for child in $expr.children(&mut cursor) {
+            node_kind!(kind = child);
+            if kind == "expr1_call" {
+                return Some(node_copy!(&child));
+            }
+            if kind == "expr1" {
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    node_kind!(ik = inner);
+                    if ik == "expr1_call" {
+                        return Some(node_copy!(&inner));
+                    }
+                }
+            }
+        }
+        None
+    }};
+}
 #[cfg(feature = "native")]
 fn find_expr1_call_in_expr<'a>(expr: &'a Node) -> Option<Node<'a>> {
-    let child_count = expr.child_count();
-    for i in 0..child_count {
-        if let Some(child) = expr.child(i) {
-            let kind = child.kind();
-            if kind == "expr1_call" {
-                return Some(child);
-            }
-            if kind == "expr1" {
-                let inner_count = child.child_count();
-                for j in 0..inner_count {
-                    if let Some(inner) = child.child(j) {
-                        if inner.kind() == "expr1_call" {
-                            return Some(inner);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    find_expr1_call_in_expr_body!(expr)
 }
-
-/// Find the expr1_call node inside a folded expression.
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 fn find_expr1_call_in_expr(expr: &Node) -> Option<Node> {
-    let child_count = expr.child_count();
-    for i in 0..child_count {
-        if let Some(child) = expr.child(i) {
-            let kind = child.kind();
-            if kind == "expr1_call" {
-                return Some(child);
-            }
-            if kind == "expr1" {
-                let inner_count = child.child_count();
-                for j in 0..inner_count {
-                    if let Some(inner) = child.child(j) {
-                        if inner.kind() == "expr1_call" {
-                            return Some(inner);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    find_expr1_call_in_expr_body!(expr)
 }
 
 /// Get result types from a folded expression

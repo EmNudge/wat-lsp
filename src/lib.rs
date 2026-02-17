@@ -21,6 +21,34 @@ macro_rules! node_kind {
     };
 }
 
+/// Copy a node value: native Node is Copy (`*node`), WASM Node requires `.clone()`.
+macro_rules! node_copy {
+    ($node:expr) => {{
+        #[cfg(feature = "native")]
+        {
+            *$node
+        }
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        {
+            $node.clone()
+        }
+    }};
+}
+
+/// Clone a node for storage: native Node is Copy (no-op), WASM Node requires `.clone()`.
+macro_rules! node_clone {
+    ($node:expr) => {{
+        #[cfg(feature = "native")]
+        {
+            $node
+        }
+        #[cfg(all(feature = "wasm", not(feature = "native")))]
+        {
+            $node.clone()
+        }
+    }};
+}
+
 // Core types (protocol-independent) - must be first as other modules depend on it
 pub mod core;
 

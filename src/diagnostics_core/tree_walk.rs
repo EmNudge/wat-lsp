@@ -127,8 +127,11 @@ pub fn walk_tree_for_diagnostics(
     // Special handling for legacy try catch clause
     if kind_str == "try_catch_clause" {
         diagnostics.extend(
-            crate::diagnostics_core::references::check_try_catch_clause_references(
-                &node, source, symbols,
+            crate::diagnostics_core::references::check_first_index_reference(
+                &node,
+                source,
+                symbols,
+                &InstructionContext::Tag,
             ),
         );
         // Continue recursing to check nested instructions
@@ -136,9 +139,14 @@ pub fn walk_tree_for_diagnostics(
 
     // Special handling for start directive
     if kind_str == "module_field_start" {
-        diagnostics.extend(crate::diagnostics_core::references::check_start_references(
-            &node, source, symbols,
-        ));
+        diagnostics.extend(
+            crate::diagnostics_core::references::check_first_index_reference(
+                &node,
+                source,
+                symbols,
+                &InstructionContext::Call,
+            ),
+        );
         return;
     }
 
@@ -158,8 +166,11 @@ pub fn walk_tree_for_diagnostics(
     // Special handling for try_delegate_clause (legacy try): index is a label reference
     if kind_str == "try_delegate_clause" {
         diagnostics.extend(
-            crate::diagnostics_core::references::check_try_delegate_clause_references(
-                &node, source, symbols,
+            crate::diagnostics_core::references::check_first_index_reference(
+                &node,
+                source,
+                symbols,
+                &InstructionContext::Branch,
             ),
         );
         return;
@@ -406,6 +417,25 @@ fn collect_local_uses(
     }
 }
 
+/// Resolve a text reference (name or numeric index) to a local index.
+fn resolve_local_text(text: &str, func: &crate::symbols::Function) -> Option<usize> {
+    if text.starts_with('$') {
+        for param in &func.parameters {
+            if param.name.as_deref() == Some(text) {
+                return Some(param.index);
+            }
+        }
+        for local in &func.locals {
+            if local.name.as_deref() == Some(text) {
+                return Some(func.parameters.len() + local.index);
+            }
+        }
+    } else if let Ok(idx) = text.parse::<usize>() {
+        return Some(idx);
+    }
+    None
+}
+
 /// Resolve the local index referenced by a local.get/set/tee instruction.
 fn resolve_local_index(
     node: &Node,
@@ -420,19 +450,7 @@ fn resolve_local_index(
 
         if ck == "index" || ck == "identifier" || ck == "nat" {
             let text = source[child.byte_range()].trim();
-            if text.starts_with('$') {
-                // Named reference — find the param or local
-                for param in &func.parameters {
-                    if param.name.as_deref() == Some(text) {
-                        return Some(param.index);
-                    }
-                }
-                for local in &func.locals {
-                    if local.name.as_deref() == Some(text) {
-                        return Some(func.parameters.len() + local.index);
-                    }
-                }
-            } else if let Ok(idx) = text.parse::<usize>() {
+            if let Some(idx) = resolve_local_text(text, func) {
                 return Some(idx);
             }
             // Check inside index node for identifier/nat children
@@ -441,20 +459,9 @@ fn resolve_local_index(
                 let ik = idx_child.kind();
                 #[cfg(all(feature = "wasm", not(feature = "native")))]
                 let ik = &*ik;
-                if ik == "identifier" {
+                if ik == "identifier" || ik == "nat" {
                     let id_text = source[idx_child.byte_range()].trim();
-                    for param in &func.parameters {
-                        if param.name.as_deref() == Some(id_text) {
-                            return Some(param.index);
-                        }
-                    }
-                    for local in &func.locals {
-                        if local.name.as_deref() == Some(id_text) {
-                            return Some(func.parameters.len() + local.index);
-                        }
-                    }
-                } else if ik == "nat" {
-                    if let Ok(idx) = source[idx_child.byte_range()].trim().parse::<usize>() {
+                    if let Some(idx) = resolve_local_text(id_text, func) {
                         return Some(idx);
                     }
                 }

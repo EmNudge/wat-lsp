@@ -74,39 +74,32 @@ pub fn validate_module_structure(
 // Helper: find the module node
 // ============================================================================
 
+macro_rules! find_module_node_body {
+    ($root:ident) => {{
+        node_kind!(rk = $root);
+        if rk == "module" {
+            return Some(node_copy!($root));
+        }
+        let mut cursor = $root.walk();
+        for child in $root.children(&mut cursor) {
+            node_kind!(ck = child);
+            if ck == "module" {
+                return Some(node_copy!(&child));
+            }
+            if ck == "module_field" {
+                return Some(node_copy!($root));
+            }
+        }
+        None
+    }};
+}
 #[cfg(feature = "native")]
 fn find_module_node<'a>(root: &Node<'a>) -> Option<Node<'a>> {
-    if root.kind() == "module" {
-        return Some(*root);
-    }
-    let mut cursor = root.walk();
-    for child in root.children(&mut cursor) {
-        if child.kind() == "module" {
-            return Some(child);
-        }
-        if child.kind() == "module_field" {
-            return Some(*root);
-        }
-    }
-    None
+    find_module_node_body!(root)
 }
-
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 fn find_module_node(root: &Node) -> Option<Node> {
-    let kind = root.kind();
-    if kind == "module" {
-        return Some(root.clone());
-    }
-    let mut cursor = root.walk();
-    for child in root.children(&mut cursor) {
-        if child.kind() == "module" {
-            return Some(child);
-        }
-        if child.kind() == "module_field" {
-            return Some(root.clone());
-        }
-    }
-    None
+    find_module_node_body!(root)
 }
 
 /// Helper: iterate module_field children of a module or root node.
