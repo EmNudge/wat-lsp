@@ -530,6 +530,25 @@ impl TypeChecker {
         })
     }
 
+    /// Look up label types at depth, copy them, and pop them for the given instruction.
+    /// Returns the label types if found (owned, for callers that need to push them back).
+    pub fn pop_label_types_for_instr(
+        &mut self,
+        depth: usize,
+        node: &Node,
+        instr_name: &str,
+    ) -> Option<Vec<ValueType>> {
+        let label_types = self.label_types(depth)?.to_vec();
+        self.pop_vals_for_instr(&label_types, node, instr_name);
+        Some(label_types)
+    }
+
+    /// Get an owned copy of label types at the given depth.
+    /// Useful when the caller needs both the types and a mutable borrow on self.
+    pub fn label_types_vec(&self, depth: usize) -> Option<Vec<ValueType>> {
+        self.label_types(depth).map(|t| t.to_vec())
+    }
+
     /// Get the current control frame's height.
     fn current_frame_height(&self) -> usize {
         self.ctrl_stack.last().map(|f| f.height).unwrap_or(0)
@@ -589,6 +608,14 @@ impl TypeChecker {
     /// Get the function-level frame (bottom of control stack).
     pub fn function_frame(&self) -> Option<&CtrlFrame> {
         self.ctrl_stack.first()
+    }
+
+    /// Pop the function's return types for a `return` instruction.
+    /// Copies end_types from the function frame and pops them from the stack.
+    pub fn pop_function_return_types(&mut self, node: &Node, instr_name: &str) {
+        if let Some(end_types) = self.ctrl_stack.first().map(|f| f.end_types.clone()) {
+            self.pop_vals_for_instr(&end_types, node, instr_name);
+        }
     }
 
     /// Take all collected diagnostics out of the checker.

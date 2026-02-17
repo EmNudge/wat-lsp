@@ -12,38 +12,6 @@ use crate::ts_facade::{Node, Tree};
 use tower_lsp::lsp_types::Range as LspRange;
 
 // ============================================================================
-// Macros to eliminate native/wasm code duplication
-// ============================================================================
-
-/// Macro to copy a node (handles Copy vs Clone difference between native and wasm)
-macro_rules! node_copy {
-    ($node:expr) => {{
-        #[cfg(feature = "native")]
-        {
-            *$node
-        }
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        {
-            $node.clone()
-        }
-    }};
-}
-
-/// Macro to clone a node for storage
-macro_rules! node_clone {
-    ($node:expr) => {{
-        #[cfg(feature = "native")]
-        {
-            $node
-        }
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        {
-            $node.clone()
-        }
-    }};
-}
-
-// ============================================================================
 // Block type constants - centralized to prevent sync issues
 // ============================================================================
 
@@ -746,29 +714,26 @@ pub fn format_function_signature(func: &Function) -> String {
 
 /// Find the first child node of a given kind.
 /// Shared between parser and diagnostics modules to avoid duplication.
+macro_rules! find_child_by_kind_body {
+    ($node:ident, $kind:ident) => {{
+        let mut cursor = $node.walk();
+        for child in $node.children(&mut cursor) {
+            node_kind!(ck = child);
+            if ck == $kind {
+                return Some(node_copy!(&child));
+            }
+        }
+        None
+    }};
+}
 #[cfg(feature = "native")]
 #[allow(clippy::manual_find)]
 pub fn find_child_by_kind<'a>(node: &'a Node<'a>, kind: &str) -> Option<Node<'a>> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == kind {
-            return Some(child);
-        }
-    }
-    None
+    find_child_by_kind_body!(node, kind)
 }
-
-/// Find the first child node of a given kind (WASM version).
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 pub fn find_child_by_kind(node: &Node, kind: &str) -> Option<Node> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(ck = child);
-        if ck == kind {
-            return Some(child.clone());
-        }
-    }
-    None
+    find_child_by_kind_body!(node, kind)
 }
 
 #[cfg(test)]

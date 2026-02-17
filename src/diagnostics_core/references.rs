@@ -56,61 +56,21 @@ pub fn check_catch_clause_references(
     diagnostics
 }
 
-/// Check references in a try_catch_clause node (legacy try syntax)
-/// For (catch $tag instr*): the index is a tag reference
-pub fn check_try_catch_clause_references(
+/// Check the first index child of a node against the given instruction context.
+/// Used for nodes that contain a single index reference (start, try_catch, try_delegate).
+pub fn check_first_index_reference(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
+    context: &InstructionContext,
 ) -> Vec<Diagnostic> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
-
         if kind == "index" {
-            return find_undefined_identifiers(&child, source, symbols, &InstructionContext::Tag);
+            return find_undefined_identifiers(&child, source, symbols, context);
         }
     }
-
-    vec![]
-}
-
-/// Check references in a try_delegate_clause node (legacy try syntax)
-/// For (delegate $label): the index is a label reference
-pub fn check_try_delegate_clause_references(
-    node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-) -> Vec<Diagnostic> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(kind = child);
-
-        if kind == "index" {
-            return find_undefined_identifiers(
-                &child,
-                source,
-                symbols,
-                &InstructionContext::Branch,
-            );
-        }
-    }
-
-    vec![]
-}
-
-/// Check the function reference in a module_field_start node.
-/// The start directive takes a single function index: (start $func) or (start 0)
-pub fn check_start_references(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<Diagnostic> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(kind = child);
-
-        if kind == "index" {
-            return find_undefined_identifiers(&child, source, symbols, &InstructionContext::Call);
-        }
-    }
-
     vec![]
 }
 
