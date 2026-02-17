@@ -420,7 +420,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
                     for limit_child in type_child.children(&mut limits_cursor) {
                         if limit_child.kind() == "nat" {
                             let text = node_text(&limit_child, source);
-                            if let Some(num) = parse_wat_nat(&text) {
+                            if let Some(num) = parse_wat_nat(text) {
                                 if nat_index == 0 {
                                     min_limit = num;
                                 } else {
@@ -548,7 +548,7 @@ fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<
 fn extract_identifier_info(node: &Node, source: &str) -> (Option<String>, Option<Range>) {
     if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
         (
-            Some(node_text(&id_node, source)),
+            Some(node_text(&id_node, source).to_string()),
             Some(node_to_range(&id_node)),
         )
     } else {
@@ -806,7 +806,7 @@ fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
                     let mut one_cursor = param_child.walk();
                     for one_child in param_child.children(&mut one_cursor) {
                         if one_child.kind() == "identifier" {
-                            name_opt = Some(node_text(&one_child, source));
+                            name_opt = Some(node_text(&one_child, source).to_string());
                             range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
                             type_opt = Some(extract_value_type(&one_child, source));
@@ -990,7 +990,7 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                     let mut one_cursor = locals_child.walk();
                     for one_child in locals_child.children(&mut one_cursor) {
                         if one_child.kind() == "identifier" {
-                            name_opt = Some(node_text(&one_child, source));
+                            name_opt = Some(node_text(&one_child, source).to_string());
                             range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
                             type_opt = Some(extract_value_type(&one_child, source));
@@ -1048,7 +1048,7 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
     if BLOCK_KINDS_STATEMENT.contains(&kind_str) || BLOCK_KINDS_EXPR.contains(&kind_str) {
         // Check if it has a label
         if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
-            let label = node_text(&id_node, source);
+            let label = node_text(&id_node, source).to_string();
             let block_type = block_type_from_kind(kind_str).to_string();
 
             blocks.push(BlockLabel {
@@ -1226,7 +1226,7 @@ fn extract_rec_types(
                     let id_node = &children_vec[i];
                     i += 1;
                     (
-                        Some(node_text(id_node, source)),
+                        Some(node_text(id_node, source).to_string()),
                         Some(node_to_range(id_node)),
                     )
                 } else {
@@ -1292,7 +1292,7 @@ fn extract_type_from_single_node(
 
                 match sub_kind {
                     "index" => {
-                        parent_ref = Some(node_text(&sub_child, source));
+                        parent_ref = Some(node_text(&sub_child, source).to_string());
                     }
                     "def_type" => {
                         let mut def_cursor = sub_child.walk();
@@ -1426,7 +1426,7 @@ fn extract_field_types(field_node: &Node, source: &str) -> Vec<(Option<String>, 
         node_kind!(ck = child);
         match ck {
             "identifier" => {
-                field_name = Some(node_text(&child, source));
+                field_name = Some(node_text(&child, source).to_string());
             }
             "storage_type" => {
                 let (ft, mutable) = extract_storage_type_with_mut(&child, source);
@@ -1456,7 +1456,7 @@ fn extract_field_types(field_node: &Node, source: &str) -> Vec<(Option<String>, 
                 }
                 "packed_type" => {
                     let text = node_text(&child, source);
-                    field_type = match text.as_str() {
+                    field_type = match text {
                         "i8" => ValueType::I8,
                         "i16" => ValueType::I16,
                         _ => ValueType::Unknown,
@@ -1497,7 +1497,7 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
 
                 match sub_kind {
                     "index" => {
-                        parent_ref = Some(node_text(&sub_child, source));
+                        parent_ref = Some(node_text(&sub_child, source).to_string());
                     }
                     "def_type" => {
                         // Process the inner type definition
@@ -1614,7 +1614,7 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
 
                         match sub_kind {
                             "index" => {
-                                parent_ref = Some(node_text(&sub_child, source));
+                                parent_ref = Some(node_text(&sub_child, source).to_string());
                             }
                             "def_type" => {
                                 let mut def_cursor = sub_child.walk();
@@ -1770,7 +1770,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                             for limit_child in type_child.children(&mut limits_cursor) {
                                 if limit_child.kind() == "nat" {
                                     let text = node_text(&limit_child, source);
-                                    if let Some(num) = parse_wat_nat(&text) {
+                                    if let Some(num) = parse_wat_nat(text) {
                                         if nat_index == 0 {
                                             min_limit = num;
                                         } else {
@@ -1799,7 +1799,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                     for limit_child in type_child.children(&mut limits_cursor) {
                         if limit_child.kind() == "nat" {
                             let text = node_text(&limit_child, source);
-                            if let Some(num) = parse_wat_nat(&text) {
+                            if let Some(num) = parse_wat_nat(text) {
                                 if nat_index == 0 {
                                     min_limit = num;
                                 } else {
@@ -1891,7 +1891,7 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
             for limit_child in limits_node.children(&mut limits_cursor) {
                 if limit_child.kind() == "nat" {
                     let text = node_text(&limit_child, source);
-                    if let Some(num) = parse_wat_nat(&text) {
+                    if let Some(num) = parse_wat_nat(text) {
                         if nat_index == 0 {
                             *min = num;
                         } else {
@@ -2044,8 +2044,8 @@ fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
 }
 
 /// Helper: Extract text from a node
-fn node_text(node: &Node, source: &str) -> String {
-    source[node.byte_range()].to_string()
+fn node_text<'a>(node: &Node, source: &'a str) -> &'a str {
+    &source[node.byte_range()]
 }
 
 /// Parse a WAT natural number, handling hex (0x...) and underscore separators.
@@ -2062,7 +2062,7 @@ pub(crate) fn parse_wat_nat(text: &str) -> Option<u64> {
 fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
     // Check strict match first (for direct children like "i32" in some contexts)
     let text = node_text(value_type_node, source);
-    if let Some(vt) = ValueType::try_parse(&text) {
+    if let Some(vt) = ValueType::try_parse(text) {
         return vt;
     }
 
@@ -2109,7 +2109,7 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
             _ => {
                 // Check if child itself is a type keyword
                 let text = node_text(&child, source);
-                if let Some(vt) = simple_type_from_str(&text) {
+                if let Some(vt) = simple_type_from_str(text) {
                     return vt;
                 }
             }
@@ -2129,7 +2129,7 @@ fn extract_storage_type_with_mut(storage_node: &Node, source: &str) -> (ValueTyp
             "value_type" => return (extract_value_type(&child, source), false),
             "packed_type" => {
                 let text = node_text(&child, source);
-                let vt = match text.as_str() {
+                let vt = match text {
                     "i8" => ValueType::I8,
                     "i16" => ValueType::I16,
                     _ => ValueType::Unknown,
@@ -2145,7 +2145,7 @@ fn extract_storage_type_with_mut(storage_node: &Node, source: &str) -> (ValueTyp
                         "value_type" => return (extract_value_type(&inner_child, source), true),
                         "packed_type" => {
                             let text = node_text(&inner_child, source);
-                            let vt = match text.as_str() {
+                            let vt = match text {
                                 "i8" => ValueType::I8,
                                 "i16" => ValueType::I16,
                                 _ => ValueType::Unknown,
@@ -2174,7 +2174,7 @@ fn simple_type_from_str(s: &str) -> Option<ValueType> {
 fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
     // Check strict match first
     let text = node_text(ref_type_node, source);
-    if let Some(vt) = simple_type_from_str(&text) {
+    if let Some(vt) = simple_type_from_str(text) {
         return vt;
     }
 
@@ -2255,7 +2255,7 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
 
                 // If it's a ref_kind like (ref func), (ref extern), etc.
                 if let Some(kind) = ref_kind {
-                    return match kind.as_str() {
+                    return match kind {
                         "func" => ValueType::Funcref,
                         "extern" => ValueType::Externref,
                         "any" => ValueType::Anyref,
@@ -2283,7 +2283,7 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
             "ref_type" => return extract_ref_type(&child, source),
             _ => {
                 let text = node_text(&child, source);
-                if let Some(vt) = simple_type_from_str(&text) {
+                if let Some(vt) = simple_type_from_str(text) {
                     return vt;
                 }
             }
@@ -2293,7 +2293,7 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
     // Check for direct string matches in children (e.g. "anyref")
     for child in ref_type_node.children(&mut cursor) {
         let text = node_text(&child, source);
-        if let Some(vt) = simple_type_from_str(&text) {
+        if let Some(vt) = simple_type_from_str(text) {
             return vt;
         }
     }
@@ -2458,7 +2458,10 @@ fn find_identifier_in_data_or_elem(node: &Node, source: &str) -> (Option<String>
     for child in node.children(&mut cursor) {
         // Direct identifier (shouldn't happen, but handle it)
         if child.kind() == "identifier" {
-            return (Some(node_text(&child, source)), Some(node_to_range(&child)));
+            return (
+                Some(node_text(&child, source).to_string()),
+                Some(node_to_range(&child)),
+            );
         }
         // Index node that contains the identifier
         if child.kind() == "index" {
@@ -2466,7 +2469,7 @@ fn find_identifier_in_data_or_elem(node: &Node, source: &str) -> (Option<String>
             for index_child in child.children(&mut index_cursor) {
                 if index_child.kind() == "identifier" {
                     return (
-                        Some(node_text(&index_child, source)),
+                        Some(node_text(&index_child, source).to_string()),
                         Some(node_to_range(&index_child)),
                     );
                 }

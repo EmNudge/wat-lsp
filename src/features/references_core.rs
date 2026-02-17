@@ -636,7 +636,7 @@ fn find_reference_identifiers(
     if matches!(&*kind, "nat" | "dec_nat" | "hex_nat" | "index") {
         let text = &ctx.document[node.byte_range()];
         if !text.trim().starts_with('$') {
-            if let Ok(index) = parse_nat(text.trim()) {
+            if let Some(index) = crate::parser::parse_wat_nat(text).map(|v| v as usize) {
                 if matches_target_index(
                     index,
                     target,
@@ -1030,13 +1030,4 @@ fn is_in_same_function_by_line(
     symbols
         .find_function_containing_line(line)
         .is_some_and(|func| func.start_byte == target_function_start_byte)
-}
-
-/// Parse a natural number (decimal or hex)
-fn parse_nat(text: &str) -> Result<usize, std::num::ParseIntError> {
-    if text.starts_with("0x") || text.starts_with("0X") {
-        usize::from_str_radix(&text[2..], 16)
-    } else {
-        text.parse::<usize>()
-    }
 }

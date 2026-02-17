@@ -318,19 +318,7 @@ fn is_value_type_context(node: &Node) -> bool {
     }
 }
 
-/// Check if a function node has an inline import
-fn has_inline_import(node: &Node) -> bool {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = &*ck;
-        if ck == "import" {
-            return true;
-        }
-    }
-    false
-}
+use super::module_checks::has_inline_import;
 
 /// Check for unused locals and parameters in a function.
 fn check_unused_locals(

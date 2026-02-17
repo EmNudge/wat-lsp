@@ -130,8 +130,10 @@ pub fn find_undefined_identifiers(
                 // Check if label exists in containing function
                 if let Some(func) = find_containing_function(symbols, position) {
                     func.blocks.iter().any(|block| {
-                        format!("${}", block.label) == identifier_name
-                            || block.label == identifier_name
+                        block.label == identifier_name
+                            || identifier_name
+                                .strip_prefix('$')
+                                .is_some_and(|s| s == block.label)
                     })
                 } else {
                     false
