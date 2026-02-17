@@ -543,24 +543,10 @@ fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<
     })
 }
 
-/// Find identifier child node (returns the node itself, not just text).
-/// Delegates to shared `find_child_by_kind` in utils.
-#[cfg(feature = "native")]
-#[inline]
-fn find_identifier_node<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
-    crate::utils::find_child_by_kind(node, "identifier")
-}
-
-#[cfg(all(feature = "wasm", not(feature = "native")))]
-#[inline]
-fn find_identifier_node(node: &Node) -> Option<Node> {
-    crate::utils::find_child_by_kind(node, "identifier")
-}
-
 /// Extract name and name_range from a node's identifier child.
 /// This pattern is used across all symbol extraction functions.
 fn extract_identifier_info(node: &Node, source: &str) -> (Option<String>, Option<Range>) {
-    if let Some(id_node) = find_identifier_node(node) {
+    if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
         (
             Some(node_text(&id_node, source)),
             Some(node_to_range(&id_node)),
@@ -586,70 +572,57 @@ fn extract_functions_with_offset(
     let mut seen_ranges: std::collections::HashSet<(usize, usize)> =
         std::collections::HashSet::new();
 
+    let mut try_add_func =
+        |field_child: &Node,
+         func_index: &mut usize,
+         seen_names: &mut std::collections::HashSet<String>,
+         seen_ranges: &mut std::collections::HashSet<(usize, usize)>| {
+            if field_child.kind() == "module_field_func" && !node_has_import_child(field_child) {
+                if let Some(func) = extract_function(field_child, source, *func_index, symbol_table)
+                {
+                    let is_duplicate = func.name.as_ref().map_or(
+                        seen_ranges.contains(&(func.start_byte, func.end_byte)),
+                        |n| seen_names.contains(n),
+                    );
+                    if !is_duplicate {
+                        if let Some(ref name) = func.name {
+                            seen_names.insert(name.clone());
+                        } else {
+                            seen_ranges.insert((func.start_byte, func.end_byte));
+                        }
+                        symbol_table.add_function(func);
+                        *func_index += 1;
+                    }
+                }
+            }
+        };
+
     // Walk through all children of root (could be module or direct module_field)
     for child in root.children(&mut cursor) {
         if child.kind() == "module" {
-            // Inside module, look for module_field children
             let mut module_cursor = child.walk();
             for module_child in child.children(&mut module_cursor) {
                 if module_child.kind() == "module_field" {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
-                        if field_child.kind() == "module_field_func"
-                            && !node_has_import_child(&field_child)
-                        {
-                            if let Some(func) =
-                                extract_function(&field_child, source, func_index, symbol_table)
-                            {
-                                // Skip duplicates from error recovery
-                                let is_duplicate = if let Some(ref name) = func.name {
-                                    seen_names.contains(name)
-                                } else {
-                                    let range = (func.start_byte, func.end_byte);
-                                    seen_ranges.contains(&range)
-                                };
-
-                                if !is_duplicate {
-                                    if let Some(ref name) = func.name {
-                                        seen_names.insert(name.clone());
-                                    } else {
-                                        seen_ranges.insert((func.start_byte, func.end_byte));
-                                    }
-                                    symbol_table.add_function(func);
-                                    func_index += 1;
-                                }
-                            }
-                        }
+                        try_add_func(
+                            &field_child,
+                            &mut func_index,
+                            &mut seen_names,
+                            &mut seen_ranges,
+                        );
                     }
                 }
             }
         } else if child.kind() == "module_field" {
-            // Direct module_field (for standalone functions)
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
-                if field_child.kind() == "module_field_func" && !node_has_import_child(&field_child)
-                {
-                    if let Some(func) =
-                        extract_function(&field_child, source, func_index, symbol_table)
-                    {
-                        let is_duplicate = if let Some(ref name) = func.name {
-                            seen_names.contains(name)
-                        } else {
-                            let range = (func.start_byte, func.end_byte);
-                            seen_ranges.contains(&range)
-                        };
-
-                        if !is_duplicate {
-                            if let Some(ref name) = func.name {
-                                seen_names.insert(name.clone());
-                            } else {
-                                seen_ranges.insert((func.start_byte, func.end_byte));
-                            }
-                            symbol_table.add_function(func);
-                            func_index += 1;
-                        }
-                    }
-                }
+                try_add_func(
+                    &field_child,
+                    &mut func_index,
+                    &mut seen_names,
+                    &mut seen_ranges,
+                );
             }
         }
     }
@@ -1074,7 +1047,7 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
     // Check both statement form (block_block) and expression form (expr1_block)
     if BLOCK_KINDS_STATEMENT.contains(&kind_str) || BLOCK_KINDS_EXPR.contains(&kind_str) {
         // Check if it has a label
-        if let Some(id_node) = find_identifier_node(node) {
+        if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
             let label = node_text(&id_node, source);
             let block_type = block_type_from_kind(kind_str).to_string();
 
