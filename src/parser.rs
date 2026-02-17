@@ -125,21 +125,19 @@ fn process_import_field(
             }
         }
         "module_field_global" if node_has_import_child(field_child) => {
-            if let Some(global) = extract_inline_import_global(field_child, source, counts.globals)
-            {
+            if let Some(global) = extract_global(field_child, source, counts.globals) {
                 symbol_table.add_global(global);
                 counts.globals += 1;
             }
         }
         "module_field_table" if node_has_import_child(field_child) => {
-            if let Some(table) = extract_inline_import_table(field_child, source, counts.tables) {
+            if let Some(table) = extract_table(field_child, source, counts.tables) {
                 symbol_table.add_table(table);
                 counts.tables += 1;
             }
         }
         "module_field_memory" if node_has_import_child(field_child) => {
-            if let Some(memory) = extract_inline_import_memory(field_child, source, counts.memories)
-            {
+            if let Some(memory) = extract_memory(field_child, source, counts.memories) {
                 symbol_table.add_memory(memory);
                 counts.memories += 1;
             }
@@ -173,14 +171,7 @@ fn extract_inline_import_func(
     index: usize,
     symbol_table: &SymbolTable,
 ) -> Option<Function> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(func_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(func_node, source);
 
     let mut parameters = extract_parameters(func_node, source);
     let mut results = extract_results(func_node, source);
@@ -211,22 +202,6 @@ fn extract_inline_import_func(
         doc_comment: None,
         has_type_use: has_type_use_child(func_node),
     })
-}
-
-/// Extract a global from inline import syntax: `(global $name (import "M" "g") i32)`
-fn extract_inline_import_global(global_node: &Node, source: &str, index: usize) -> Option<Global> {
-    // Reuse the existing extract_global which already handles the global_type child
-    extract_global(global_node, source, index)
-}
-
-/// Extract a table from inline import syntax: `(table $name (import "M" "t") 10 20 funcref)`
-fn extract_inline_import_table(table_node: &Node, source: &str, index: usize) -> Option<Table> {
-    extract_table(table_node, source, index)
-}
-
-/// Extract a memory from inline import syntax: `(memory $name (import "M" "m") 1 2)`
-fn extract_inline_import_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memory> {
-    extract_memory(memory_node, source, index)
 }
 
 /// Extract a single import declaration
@@ -306,14 +281,7 @@ fn extract_imported_function(
     index: usize,
     symbol_table: &SymbolTable,
 ) -> Option<Function> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(desc_node, source);
 
     // For imports, parameters and results can be in multiple func_type nodes:
     // import_desc_func_type -> func_type (params) + func_type (results)
@@ -392,14 +360,7 @@ fn extract_imported_function(
 
 /// Extract an imported global
 fn extract_imported_global(desc_node: &Node, source: &str, index: usize) -> Option<Global> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut is_mutable = false;
     let mut var_type = ValueType::Unknown;
@@ -441,14 +402,7 @@ fn extract_imported_global(desc_node: &Node, source: &str, index: usize) -> Opti
 
 /// Extract an imported table
 fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Option<Table> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut ref_type = ValueType::Funcref;
     let mut min_limit: u64 = 0;
@@ -498,14 +452,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
 
 /// Extract an imported memory
 fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Option<Memory> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut min_limit: u64 = 0;
     let mut max_limit: Option<u64> = None;
@@ -560,14 +507,7 @@ fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Opti
 
 /// Extract an imported tag
 fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<Tag> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(desc_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut params = Vec::new();
 
@@ -615,6 +555,19 @@ fn find_identifier_node<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
 #[inline]
 fn find_identifier_node(node: &Node) -> Option<Node> {
     crate::utils::find_child_by_kind(node, "identifier")
+}
+
+/// Extract name and name_range from a node's identifier child.
+/// This pattern is used across all symbol extraction functions.
+fn extract_identifier_info(node: &Node, source: &str) -> (Option<String>, Option<Range>) {
+    if let Some(id_node) = find_identifier_node(node) {
+        (
+            Some(node_text(&id_node, source)),
+            Some(node_to_range(&id_node)),
+        )
+    } else {
+        (None, None)
+    }
 }
 
 /// Extract function symbols using tree-sitter AST traversal (with offset for imports)
@@ -819,14 +772,7 @@ fn extract_function(
     let range = func_node.range();
 
     // Try to find function name and its range
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(func_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(func_node, source);
 
     // Extract parameters, results, locals, and blocks
     let mut parameters = extract_parameters(func_node, source);
@@ -1033,8 +979,9 @@ fn resolve_implicit_type(
     let mut seen = std::collections::HashSet::new();
     for type_def in &symbol_table.types {
         if let TypeKind::Func { params, results } = &type_def.kind {
-            seen.insert((params.clone(), results.clone()));
-            sigs.push((params.clone(), results.clone()));
+            let sig = (params.clone(), results.clone());
+            seen.insert(sig.clone());
+            sigs.push(sig);
         }
     }
     for func in &symbol_table.functions {
@@ -1194,14 +1141,7 @@ fn extract_globals_with_offset(
 
 /// Extract a single global from a global node
 fn extract_global(global_node: &Node, source: &str, index: usize) -> Option<Global> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(global_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(global_node, source);
 
     let mut is_mutable = false;
     let mut var_type = ValueType::Unknown;
@@ -1564,14 +1504,7 @@ fn extract_field_types(field_node: &Node, source: &str) -> Vec<(Option<String>, 
 
 /// Extract a single type definition from a type node
 fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(type_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(type_node, source);
 
     let mut parameters = Vec::new();
     let mut results = Vec::new();
@@ -1842,14 +1775,7 @@ fn extract_tables_with_offset(
 
 /// Extract a single table from a table node
 fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(table_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(table_node, source);
 
     let mut ref_type = ValueType::Funcref;
     let mut min_limit: u64 = 0;
@@ -1977,14 +1903,7 @@ fn extract_memories_with_offset(
 
 /// Extract a single memory from a memory node
 fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memory> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(memory_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(memory_node, source);
 
     let mut min_limit: u64 = 0;
     let mut max_limit: Option<u64> = None;
@@ -2118,14 +2037,7 @@ fn extract_tags_with_offset(
 
 /// Extract a single tag from a tag node
 fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
-    let (name, name_range) = if let Some(id_node) = find_identifier_node(tag_node) {
-        (
-            Some(node_text(&id_node, source)),
-            Some(node_to_range(&id_node)),
-        )
-    } else {
-        (None, None)
-    };
+    let (name, name_range) = extract_identifier_info(tag_node, source);
 
     let mut params = Vec::new();
 
