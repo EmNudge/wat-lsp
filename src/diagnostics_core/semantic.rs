@@ -59,10 +59,7 @@ pub fn track_stack_in_instr_list(
     // Process all children
     let mut cursor = instr_list.walk();
     for child in instr_list.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         match kind.as_ref() {
             "instr" => {
@@ -107,10 +104,7 @@ fn process_instr_node(
 ) {
     let mut cursor = instr_node.walk();
     for child in instr_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         match kind.as_ref() {
             "instr_plain" => {
@@ -208,20 +202,14 @@ fn process_if_node(node: &Node, source: &str, symbols: &SymbolTable, checker: &m
 fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker: &mut TypeChecker) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         match kind.as_ref() {
             "instr_list" => {
                 // Process all instructions in the list
                 let mut list_cursor = child.walk();
                 for list_child in child.children(&mut list_cursor) {
-                    #[cfg(feature = "native")]
-                    let list_kind = list_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let list_kind = list_child.kind();
+                    node_kind!(list_kind = list_child);
 
                     match list_kind.as_ref() {
                         "instr" => {
@@ -312,10 +300,7 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
 fn get_block_label(node: &Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "identifier" {
             return Some(source[child.byte_range()].trim().to_string());
@@ -330,10 +315,7 @@ fn get_block_label(node: &Node, source: &str) -> Option<String> {
         if is_inner_block {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let ik = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = inner_child.kind();
+                node_kind!(ik = inner_child);
                 if ik == "identifier" {
                     return Some(source[inner_child.byte_range()].trim().to_string());
                 }
@@ -345,20 +327,14 @@ fn get_block_label(node: &Node, source: &str) -> Option<String> {
 
 /// Check if a node is a loop (instr_loop or contains loop_block)
 fn is_loop_node(node: &Node) -> bool {
-    #[cfg(feature = "native")]
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = node.kind();
+    node_kind!(kind = node);
 
     if kind == "instr_loop" {
         return true;
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = child.kind();
+        node_kind!(ck = child);
         if ck == "loop_block" {
             return true;
         }
@@ -370,10 +346,7 @@ fn is_loop_node(node: &Node) -> bool {
 fn contains_block_if(node: &Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "block_if" {
             return true;
@@ -384,10 +357,7 @@ fn contains_block_if(node: &Node) -> bool {
 
 /// Check if a node is or contains a try_table block
 fn is_try_table_node(node: &Node) -> bool {
-    #[cfg(feature = "native")]
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = node.kind();
+    node_kind!(kind = node);
 
     if kind == "block_try_table" {
         return true;
@@ -405,10 +375,7 @@ fn is_try_table_node(node: &Node) -> bool {
 pub fn get_instruction_name(instr_node: &Node, source: &str) -> Option<String> {
     let mut cursor = instr_node.walk();
     for child in instr_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         // Handle different instruction types
         if kind.starts_with("op_") {
@@ -416,10 +383,7 @@ pub fn get_instruction_name(instr_node: &Node, source: &str) -> Option<String> {
             if kind == "op_const" {
                 let mut inner_cursor = child.walk();
                 for inner_child in child.children(&mut inner_cursor) {
-                    #[cfg(feature = "native")]
-                    let inner_kind = inner_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let inner_kind = inner_child.kind();
+                    node_kind!(inner_kind = inner_child);
 
                     // pat01 contains "i32.const", "i64.const", etc.
                     if inner_kind == "pat01" || inner_kind.contains("const") {
@@ -482,10 +446,7 @@ fn process_instr_call_node(
     // Find and process the trailing instr child (the swallowed instruction)
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "instr" {
             process_instr_node(&child, source, symbols, checker);
@@ -625,8 +586,8 @@ fn process_instruction(
     if instr_name == "select" && get_select_result_type(node, source).is_none() {
         // Bare select (no type annotation): first two operands must be same numeric type
         // Stack: [val1, val2, i32_cond] — peek(0)=cond, peek(1)=val2, peek(2)=val1
-        let val2 = checker.peek(1).map(|v| (*v).clone());
-        let val1 = checker.peek(2).map(|v| (*v).clone());
+        let val2 = checker.peek(1).copied();
+        let val1 = checker.peek(2).copied();
         let is_numeric = |t: &ValueType| {
             matches!(
                 t,
@@ -667,9 +628,9 @@ fn process_instruction(
                     );
                     ValueType::Unknown
                 } else if *v1 != ValueType::Unknown {
-                    v1.clone()
+                    *v1
                 } else {
-                    v2.clone()
+                    *v2
                 }
             }
             (None, Some(v2)) => {
@@ -684,7 +645,7 @@ fn process_instruction(
                         .with_code("type-mismatch"),
                     );
                 }
-                v2.clone()
+                *v2
             }
             _ => ValueType::Unknown,
         };
@@ -870,7 +831,7 @@ fn derive_consumed_types_from_name(
         // Typed select: (select (result T)) uses declared type for operands
         "select" => {
             let ty = get_select_result_type(node, source).unwrap_or(ValueType::Unknown);
-            Some(vec![ty.clone(), ty, ValueType::I32])
+            Some(vec![ty, ty, ValueType::I32])
         }
 
         // Local/global get — consume nothing
@@ -898,20 +859,10 @@ fn derive_consumed_types_from_name(
         "call" | "return_call" => {
             if let Some(func_ref) = get_index_from_node(node, source) {
                 if let Some(func) = symbols.get_function_by_name(&func_ref) {
-                    return Some(
-                        func.parameters
-                            .iter()
-                            .map(|p| p.param_type.clone())
-                            .collect(),
-                    );
+                    return Some(func.parameters.iter().map(|p| p.param_type).collect());
                 } else if let Ok(idx) = func_ref.parse::<usize>() {
                     if let Some(func) = symbols.get_function_by_index(idx) {
-                        return Some(
-                            func.parameters
-                                .iter()
-                                .map(|p| p.param_type.clone())
-                                .collect(),
-                        );
+                        return Some(func.parameters.iter().map(|p| p.param_type).collect());
                     }
                 }
             }
@@ -1067,7 +1018,7 @@ fn derive_consumed_types_from_name(
         "table.fill" => {
             let idx_type = get_table_index_type(node, symbols, source);
             let elem_type = get_table_elem_type(node, symbols, source);
-            Some(vec![idx_type.clone(), elem_type, idx_type])
+            Some(vec![idx_type, elem_type, idx_type])
         }
         "table.copy" => Some(vec![
             ValueType::Unknown,
@@ -1094,7 +1045,7 @@ fn derive_consumed_types_from_name(
         // Scalar binary operations — 2 operands of prefix type
         name if is_binary_scalar(name) => {
             if let Some(ty) = type_from_prefix(name) {
-                Some(vec![ty.clone(), ty])
+                Some(vec![ty, ty])
             } else {
                 None
             }
@@ -1140,10 +1091,7 @@ fn get_call_indirect_consumed_types(
     let mut params = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "func_type_params_many" {
             params.extend(parse_func_type_results(&child, source));
@@ -1186,10 +1134,7 @@ fn get_all_branch_depths(node: &Node, source: &str, checker: &mut TypeChecker) -
     let mut indices = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" || kind == "identifier" || kind == "nat" {
             indices.push(source[child.byte_range()].trim().to_string());
@@ -1197,10 +1142,7 @@ fn get_all_branch_depths(node: &Node, source: &str, checker: &mut TypeChecker) -
         if kind.starts_with("op_") {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "index" || inner_kind == "identifier" || inner_kind == "nat" {
                     indices.push(source[inner_child.byte_range()].trim().to_string());
@@ -1244,27 +1186,18 @@ fn types_compatible(a: &ValueType, b: &ValueType) -> bool {
 fn get_select_result_type(node: &Node, source: &str) -> Option<ValueType> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "op_select" {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "func_type_results" {
                     // Look for value_type or ref_type children inside (result T)
                     let mut vt_cursor = inner_child.walk();
                     for vt_child in inner_child.children(&mut vt_cursor) {
-                        #[cfg(feature = "native")]
-                        let vt_kind = vt_child.kind();
-                        #[cfg(all(feature = "wasm", not(feature = "native")))]
-                        let vt_kind = vt_child.kind();
+                        node_kind!(vt_kind = vt_child);
 
                         if vt_kind == "value_type" || vt_kind == "ref_type" {
                             let text = &source[vt_child.byte_range()];
@@ -1373,10 +1306,7 @@ pub fn get_dynamic_operand_count(
 pub fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" || kind == "identifier" {
             return Some(source[child.byte_range()].trim().to_string());
@@ -1384,10 +1314,7 @@ pub fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
         if kind == "type_use" {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "index" || inner_kind == "identifier" {
                     return Some(source[inner_child.byte_range()].trim().to_string());
@@ -1397,10 +1324,7 @@ pub fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
         if kind.starts_with("op_") {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "index" || inner_kind == "identifier" {
                     return Some(source[inner_child.byte_range()].trim().to_string());
@@ -1614,7 +1538,7 @@ pub fn get_local_type_from_node(
         if let Some(param_name) = &param.name {
             let param_name_stripped = param_name.strip_prefix('$').unwrap_or(param_name);
             if param_name_stripped == name_to_check || param_name == &index {
-                return Some(param.param_type.clone());
+                return Some(param.param_type);
             }
         }
     }
@@ -1623,18 +1547,18 @@ pub fn get_local_type_from_node(
         if let Some(local_name) = &local.name {
             let local_name_stripped = local_name.strip_prefix('$').unwrap_or(local_name);
             if local_name_stripped == name_to_check || local_name == &index {
-                return Some(local.var_type.clone());
+                return Some(local.var_type);
             }
         }
     }
 
     if let Ok(idx) = index.parse::<usize>() {
         if idx < func.parameters.len() {
-            return Some(func.parameters[idx].param_type.clone());
+            return Some(func.parameters[idx].param_type);
         }
         let local_idx = idx - func.parameters.len();
         if local_idx < func.locals.len() {
-            return Some(func.locals[local_idx].var_type.clone());
+            return Some(func.locals[local_idx].var_type);
         }
     }
 
@@ -1650,11 +1574,11 @@ pub fn get_global_type_from_node(
     let index = get_index_from_node(node, source)?;
 
     if let Some(global) = symbols.get_global_by_name(&index) {
-        return Some(global.var_type.clone());
+        return Some(global.var_type);
     }
     if let Ok(idx) = index.parse::<usize>() {
         if let Some(global) = symbols.get_global_by_index(idx) {
-            return Some(global.var_type.clone());
+            return Some(global.var_type);
         }
     }
     None
@@ -1678,7 +1602,7 @@ fn resolve_table<'a>(node: &Node, symbols: &'a SymbolTable, source: &str) -> Opt
 
 fn get_table_elem_type(node: &Node, symbols: &SymbolTable, source: &str) -> ValueType {
     resolve_table(node, symbols, source)
-        .map(|t| t.ref_type.clone())
+        .map(|t| t.ref_type)
         .unwrap_or(ValueType::Funcref)
 }
 
@@ -1710,11 +1634,8 @@ fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) ->
 
         if let Some(func) = func {
             // Find a matching type definition for this function's signature
-            let func_params: Vec<ValueType> = func
-                .parameters
-                .iter()
-                .map(|p| p.param_type.clone())
-                .collect();
+            let func_params: Vec<ValueType> =
+                func.parameters.iter().map(|p| p.param_type).collect();
             for type_def in &symbols.types {
                 if let TypeKind::Func { params, results } = &type_def.kind {
                     if *params == func_params && *results == func.results {
@@ -1773,10 +1694,7 @@ fn resolve_call_indirect_type<'a>(
     let mut cursor = node.walk();
     let mut first_index: Option<String> = None;
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         // type_use is authoritative — use it directly
         if kind == "type_use" {
@@ -1819,10 +1737,7 @@ pub fn get_call_indirect_result_types(
     let mut results = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "func_type_results" {
             results.extend(parse_func_type_results(&child, source));
@@ -1840,18 +1755,13 @@ fn resolve_call_indirect_type_implicit(
 ) -> Option<(Vec<ValueType>, Vec<ValueType>)> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "type_use" {
             // Extract index from type_use
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
-                let ik = inner.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = ik.as_str();
+                node_kind!(ik = inner);
                 if ik == "index" || ik == "identifier" {
                     let idx_text = source[inner.byte_range()].trim();
                     if let Ok(idx) = idx_text.parse::<usize>() {
@@ -1869,18 +1779,12 @@ fn resolve_call_indirect_type_implicit(
 fn find_instr_plain_in_expr<'a>(expr: &'a Node) -> Option<Node<'a>> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "expr1" || kind.starts_with("expr1_") {
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let ik = inner.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = inner.kind();
+                node_kind!(ik = inner);
 
                 if ik == "instr_plain" {
                     return Some(inner);
@@ -1934,10 +1838,7 @@ fn find_instr_plain_in_expr(expr: &Node) -> Option<Node> {
 pub fn get_folded_expr_info(expr: &Node, source: &str) -> Option<(String, usize)> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "expr1" {
             return get_expr1_wrapper_info(&child, source);
@@ -1952,10 +1853,7 @@ pub fn get_folded_expr_info(expr: &Node, source: &str) -> Option<(String, usize)
 fn get_expr1_wrapper_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
     let mut cursor = expr1.walk();
     for child in expr1.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind.starts_with("expr1_") {
             return get_expr1_info(&child, source);
@@ -1970,20 +1868,14 @@ fn get_expr1_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
     let explicit_operands = expr1
         .children(&mut expr_cursor)
         .filter(|c| {
-            #[cfg(feature = "native")]
-            let kind = c.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let kind = c.kind();
+            node_kind!(kind = c);
             kind == "expr"
         })
         .count();
 
     let mut cursor = expr1.walk();
     for child in expr1.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "instr_plain" {
             if let Some(name) = get_instruction_name(&child, source) {
@@ -2035,18 +1927,12 @@ fn get_dynamic_operand_count_from_expr(
 ) -> usize {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind.starts_with("expr1_") {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "instr_plain" {
                     return get_dynamic_operand_count(&inner_child, instr_name, symbols, source);
@@ -2064,10 +1950,7 @@ fn find_folded_block_child<'a>(expr: &'a Node, source: &str) -> Option<(Node<'a>
     let _ = source;
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         match kind.as_ref() {
             "expr1_block" => return Some((child, "block")),
@@ -2078,10 +1961,7 @@ fn find_folded_block_child<'a>(expr: &'a Node, source: &str) -> Option<(Node<'a>
                 // Check inside expr1 wrapper
                 let mut inner_cursor = child.walk();
                 for inner in child.children(&mut inner_cursor) {
-                    #[cfg(feature = "native")]
-                    let ik = inner.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ik = inner.kind();
+                    node_kind!(ik = inner);
                     match ik.as_ref() {
                         "expr1_block" => return Some((inner, "block")),
                         "expr1_loop" => return Some((inner, "loop")),
@@ -2192,10 +2072,7 @@ fn process_folded_block_body(
 ) {
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         match kind.as_ref() {
             "instr_list" => {
@@ -2227,10 +2104,7 @@ fn process_folded_block_child(
     symbols: &SymbolTable,
     checker: &mut TypeChecker,
 ) {
-    #[cfg(feature = "native")]
-    let kind = child.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = child.kind();
+    node_kind!(kind = child);
 
     match kind.as_ref() {
         "instr" => {
@@ -2269,10 +2143,7 @@ fn process_folded_if_bodies_from_if_block(
 ) {
     let mut cursor = if_block.walk();
     for child in if_block.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "instr_list" {
             let mut list_cursor = child.walk();
@@ -2294,18 +2165,12 @@ fn process_folded_if_conditions(
     // Find the if_block child of expr1_if
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "if_block" {
             let mut if_cursor = child.walk();
             for if_child in child.children(&mut if_cursor) {
-                #[cfg(feature = "native")]
-                let ik = if_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = if_child.kind();
+                node_kind!(ik = if_child);
 
                 // Process condition expr children on the outer stack
                 if ik == "expr" {
@@ -2327,19 +2192,13 @@ fn process_folded_if_bodies(
     // Find the if_block child of expr1_if
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "if_block" {
             let mut found_then = false;
             let mut if_cursor = child.walk();
             for if_child in child.children(&mut if_cursor) {
-                #[cfg(feature = "native")]
-                let ik = if_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = if_child.kind();
+                node_kind!(ik = if_child);
 
                 if ik == "instr_list" {
                     if !found_then {
@@ -2376,10 +2235,7 @@ fn process_folded_sub_exprs(
     let child_count = expr.child_count();
     for i in 0..child_count {
         if let Some(child) = expr.child(i) {
-            #[cfg(feature = "native")]
-            let kind = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let kind = child.kind();
+            node_kind!(kind = child);
 
             // Navigate to the expr1_* node
             let found = if kind == "expr1" {
@@ -2567,10 +2423,7 @@ fn find_expr1_call_in_expr(expr: &Node) -> Option<Node> {
 pub fn get_expr_result_types(expr: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind.starts_with("expr1_") {
             return get_expr1_result_types(&child, source, symbols);
@@ -2578,10 +2431,7 @@ pub fn get_expr_result_types(expr: &Node, source: &str, symbols: &SymbolTable) -
         if kind == "expr1" {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind.starts_with("expr1_") {
                     return get_expr1_result_types(&inner_child, source, symbols);
@@ -2594,19 +2444,13 @@ pub fn get_expr_result_types(expr: &Node, source: &str, symbols: &SymbolTable) -
 
 /// Get result types for expr1_* nodes
 fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
-    #[cfg(feature = "native")]
-    let kind = expr1.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = expr1.kind();
+    node_kind!(kind = expr1);
 
     match kind.as_ref() {
         "expr1_plain" => {
             let mut cursor = expr1.walk();
             for child in expr1.children(&mut cursor) {
-                #[cfg(feature = "native")]
-                let child_kind = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let child_kind = child.kind();
+                node_kind!(child_kind = child);
 
                 if child_kind == "instr_plain" {
                     if let Some(instr_name) = get_instruction_name(&child, source) {
@@ -2627,10 +2471,7 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
         "expr1_call" => {
             let mut cursor = expr1.walk();
             for child in expr1.children(&mut cursor) {
-                #[cfg(feature = "native")]
-                let child_kind = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let child_kind = child.kind();
+                node_kind!(child_kind = child);
 
                 if child_kind == "call_indirect" || child_kind == "return_call_indirect" {
                     return get_call_indirect_result_types(expr1, symbols, source);
@@ -2655,10 +2496,7 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
 pub fn get_index_from_expr1_call(node: &Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" || kind == "identifier" {
             return Some(source[child.byte_range()].trim().to_string());
@@ -2676,10 +2514,7 @@ fn resolve_block_type_use<'a>(
 ) -> Option<&'a TypeDef> {
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "type_use" {
             return resolve_type_use_node(&child, source, symbols);
@@ -2693,10 +2528,7 @@ fn resolve_block_type_use<'a>(
         {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "type_use" {
                     return resolve_type_use_node(&inner_child, source, symbols);
@@ -2715,10 +2547,7 @@ fn resolve_type_use_node<'a>(
 ) -> Option<&'a TypeDef> {
     let mut cursor = type_use_node.walk();
     for child in type_use_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "index" || kind == "identifier" {
             let index_text = source[child.byte_range()].trim();
@@ -2763,11 +2592,7 @@ fn resolve_type_index_to_func_sig(
         if func.has_type_use {
             continue;
         }
-        let params: Vec<ValueType> = func
-            .parameters
-            .iter()
-            .map(|p| p.param_type.clone())
-            .collect();
+        let params: Vec<ValueType> = func.parameters.iter().map(|p| p.param_type).collect();
         let sig = (params, func.results.clone());
         if !sigs.iter().any(|s| s == &sig) {
             sigs.push(sig);
@@ -2785,10 +2610,7 @@ pub fn get_block_result_types(
     let mut types = Vec::new();
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "func_type_results" {
             types.extend(parse_func_type_results(&child, source));
@@ -2805,10 +2627,7 @@ pub fn get_block_result_types(
         {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "func_type_results" {
                     types.extend(parse_func_type_results(&inner_child, source));
@@ -2838,10 +2657,7 @@ pub fn get_block_param_types(
     let mut has_explicit_params = false;
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "func_type_params_many" {
             has_explicit_params = true;
@@ -2856,10 +2672,7 @@ pub fn get_block_param_types(
         {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "func_type_params_many" {
                     has_explicit_params = true;
@@ -2884,10 +2697,7 @@ pub fn parse_func_type_results(results_node: &Node, source: &str) -> Vec<ValueTy
     let mut types = Vec::new();
     let mut cursor = results_node.walk();
     for child in results_node.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "value_type" || kind == "ref_type" {
             let type_text = &source[child.byte_range()];
@@ -2907,18 +2717,12 @@ pub fn parse_result_types(block_type: &Node, source: &str) -> Vec<ValueType> {
     let mut cursor = block_type.walk();
 
     for child in block_type.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind == "func_type_results" {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "value_type" || inner_kind == "ref_type" {
                     let type_text = &source[inner_child.byte_range()];
@@ -2965,10 +2769,7 @@ fn validate_tail_call_in_folded_expr(
 ) -> Option<Diagnostic> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
-        #[cfg(feature = "native")]
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = child.kind();
+        node_kind!(kind = child);
 
         if kind.starts_with("expr1_") {
             if kind == "expr1_call" {
@@ -2976,10 +2777,7 @@ fn validate_tail_call_in_folded_expr(
             }
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
-                #[cfg(feature = "native")]
-                let inner_kind = inner_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let inner_kind = inner_child.kind();
+                node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "instr_plain" {
                     return validate_tail_call_return_types(
@@ -2994,10 +2792,7 @@ fn validate_tail_call_in_folded_expr(
         if kind == "expr1" {
             let mut mid_cursor = child.walk();
             for mid_child in child.children(&mut mid_cursor) {
-                #[cfg(feature = "native")]
-                let mid_kind = mid_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let mid_kind = mid_child.kind();
+                node_kind!(mid_kind = mid_child);
 
                 if mid_kind == "expr1_call" {
                     return validate_tail_call_return_types(
@@ -3007,10 +2802,7 @@ fn validate_tail_call_in_folded_expr(
                 if mid_kind.starts_with("expr1_") {
                     let mut inner_cursor = mid_child.walk();
                     for inner_child in mid_child.children(&mut inner_cursor) {
-                        #[cfg(feature = "native")]
-                        let inner_kind = inner_child.kind();
-                        #[cfg(all(feature = "wasm", not(feature = "native")))]
-                        let inner_kind = inner_child.kind();
+                        node_kind!(inner_kind = inner_child);
 
                         if inner_kind == "instr_plain" {
                             return validate_tail_call_return_types(

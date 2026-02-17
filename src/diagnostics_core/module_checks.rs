@@ -114,9 +114,7 @@ fn find_module_node(root: &Node) -> Option<Node> {
 fn for_each_module_field(module: &Node, mut f: impl FnMut(&Node)) {
     let mut cursor = module.walk();
     for child in module.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "module_field" {
             // Each module_field wraps one actual field
             let mut fc = child.walk();
@@ -219,9 +217,7 @@ fn check_multiple_starts(module: &Node, source: &str, diagnostics: &mut Vec<Diag
     let _ = source;
     let mut seen_start = false;
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk == "module_field_start" {
             if seen_start {
                 diagnostics.push(Diagnostic::error(
@@ -246,9 +242,7 @@ fn check_start_signature(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_start" {
             return;
         }
@@ -256,9 +250,7 @@ fn check_start_signature(
         // Find the function index referenced by start
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "index" || ck == "identifier" {
                 let text = node_text(&child, source);
                 let func = if text.starts_with('$') {
@@ -270,9 +262,7 @@ fn check_start_signature(
                     let mut ic = child.walk();
                     let mut found = None;
                     for idx_child in child.children(&mut ic) {
-                        let ik = idx_child.kind();
-                        #[cfg(all(feature = "wasm", not(feature = "native")))]
-                        let ik = ik.as_str();
+                        node_kind!(ik = idx_child);
                         if ik == "identifier" {
                             let id_text = node_text(&idx_child, source);
                             found = symbols.get_function_by_name(id_text);
@@ -305,9 +295,7 @@ fn check_duplicate_exports(module: &Node, source: &str, diagnostics: &mut Vec<Di
     let mut seen_exports: HashMap<String, Range> = HashMap::new();
 
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
 
         match fk {
             // Standalone export: (export "name" (func $idx))
@@ -324,9 +312,7 @@ fn check_duplicate_exports(module: &Node, source: &str, diagnostics: &mut Vec<Di
             | "module_field_tag" => {
                 let mut cursor = field.walk();
                 for child in field.children(&mut cursor) {
-                    let ck = child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ck = ck.as_str();
+                    node_kind!(ck = child);
                     if ck == "export" {
                         if let Some(name) = extract_name_child(&child, source) {
                             check_export_name(name, &child, &mut seen_exports, diagnostics);
@@ -346,9 +332,7 @@ fn extract_export_name<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
 fn extract_name_child<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "name" {
             let text = node_text(&child, source);
             // name node wraps a string node; strip outer quotes
@@ -387,9 +371,7 @@ fn check_import_ordering(module: &Node, source: &str, diagnostics: &mut Vec<Diag
     let mut seen_non_import = false;
 
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
 
         match fk {
             "module_field_import" => {
@@ -432,9 +414,7 @@ fn check_import_ordering(module: &Node, source: &str, diagnostics: &mut Vec<Diag
 fn has_inline_import(node: &Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "import" {
             return true;
         }
@@ -442,9 +422,7 @@ fn has_inline_import(node: &Node) -> bool {
         if ck == "memory_fields_type" || ck == "table_fields_type" {
             let mut inner = child.walk();
             for gc in child.children(&mut inner) {
-                let gck = gc.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let gck = gck.as_str();
+                node_kind!(gck = gc);
                 if gck == "import" {
                     return true;
                 }
@@ -467,9 +445,7 @@ fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Ve
     let mut seen_tag: HashMap<String, Range> = HashMap::new();
 
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
 
         match fk {
             "module_field_func" => {
@@ -498,9 +474,7 @@ fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Ve
                     // (rec (type $id? type_field) ...)
                     // But the inner nodes are anonymous sequences, so we look for identifier
                     // children or children that look like type definitions.
-                    let ck = child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ck = ck.as_str();
+                    node_kind!(ck = child);
                     if ck == "module_field_type" {
                         check_identifier_dup(&child, source, &mut seen_type, "type", diagnostics);
                     }
@@ -560,15 +534,11 @@ fn check_import_identifier_dup(
 ) {
     let mut cursor = import_node.walk();
     for child in import_node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "import_desc" {
             let mut dc = child.walk();
             for desc in child.children(&mut dc) {
-                let dk = desc.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let dk = dk.as_str();
+                node_kind!(dk = desc);
                 match dk {
                     "import_desc_func_type" | "import_desc_type_use" => {
                         check_identifier_dup(&desc, source, seen_func, "func", diagnostics);
@@ -592,28 +562,17 @@ fn check_import_identifier_dup(
     }
 }
 
+/// Find identifier child node. Delegates to shared `find_child_by_kind`.
 #[cfg(feature = "native")]
-fn find_identifier_child<'a>(node: &Node<'a>) -> Option<Node<'a>> {
-    let mut cursor = node.walk();
-    #[allow(clippy::manual_find)]
-    for child in node.children(&mut cursor) {
-        if child.kind() == "identifier" {
-            return Some(child);
-        }
-    }
-    None
+#[inline]
+fn find_identifier_child<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
+    crate::utils::find_child_by_kind(node, "identifier")
 }
 
 #[cfg(all(feature = "wasm", not(feature = "native")))]
+#[inline]
 fn find_identifier_child(node: &Node) -> Option<Node> {
-    let mut cursor = node.walk();
-    #[allow(clippy::manual_find)]
-    for child in node.children(&mut cursor) {
-        if child.kind() == "identifier" {
-            return Some(child);
-        }
-    }
-    None
+    crate::utils::find_child_by_kind(node, "identifier")
 }
 
 // ============================================================================
@@ -627,9 +586,7 @@ fn check_inline_type_mismatches(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
 
         if fk != "module_field_func" {
             return;
@@ -643,9 +600,7 @@ fn check_inline_type_mismatches(
 
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             match ck {
                 "type_use" => {
                     #[cfg(feature = "native")]
@@ -706,9 +661,7 @@ fn extract_result_types(node: &Node, source: &str, out: &mut Vec<String>) {
 fn collect_value_types_recursive(node: &Node, source: &str, out: &mut Vec<String>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "value_type" || ck == "ref_type" {
             out.push(node_text(&child, source).to_string());
         } else {
@@ -725,9 +678,7 @@ fn resolve_type_use<'a>(
     // type_use: (type $idx) or (type 0)
     let mut cursor = type_use.walk();
     for child in type_use.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "index" {
             let text = node_text(&child, source);
             // Try as name reference
@@ -741,9 +692,7 @@ fn resolve_type_use<'a>(
             // Index may contain an identifier child
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = ik.as_str();
+                node_kind!(ik = idx_child);
                 if ik == "identifier" {
                     let id_text = node_text(&idx_child, source);
                     return symbols.get_type_by_name(id_text);
@@ -801,9 +750,7 @@ fn check_constant_expressions(
 ) {
     let mut global_index = symbols.num_imported_globals;
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
 
         match fk {
             "module_field_global" => {
@@ -842,9 +789,7 @@ fn check_global_init_expr(
     let mut past_global_type = false;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "global_type" {
             past_global_type = true;
             continue;
@@ -866,9 +811,7 @@ fn check_offset_expr(
     let max_global = symbols.globals.len();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "offset" {
             check_const_instruction_tree(&child, source, symbols, max_global, diagnostics);
         }
@@ -886,15 +829,11 @@ fn check_elem_exprs(
     // elem_expr nodes are inside elem_list, not direct children of module_field_elem
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "elem_list" {
             let mut inner = child.walk();
             for gc in child.children(&mut inner) {
-                let gk = gc.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let gk = gk.as_str();
+                node_kind!(gk = gc);
                 if gk == "elem_expr" {
                     check_const_instruction_tree(&gc, source, symbols, max_global, diagnostics);
                 }
@@ -913,16 +852,12 @@ fn check_table_init_expr(
     let max_global = symbols.num_imported_globals;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         // table_fields_type may contain an expr child
         if ck == "table_fields_type" {
             let mut inner = child.walk();
             for gc in child.children(&mut inner) {
-                let gk = gc.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let gk = gk.as_str();
+                node_kind!(gk = gc);
                 if gk == "expr" {
                     check_const_instruction_tree(&gc, source, symbols, max_global, diagnostics);
                 }
@@ -940,9 +875,7 @@ fn check_const_instruction_tree(
     max_allowed_global: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     match kind {
         "instr_plain" => {
@@ -963,9 +896,7 @@ fn check_const_instruction_tree(
             // Folded expression: first child is instr_plain, check its opcode
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                let ck = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ck = ck.as_str();
+                node_kind!(ck = child);
                 if ck == "instr_plain" {
                     let text = node_text(&child, source);
                     let first_token = text.split_whitespace().next().unwrap_or("");
@@ -1033,9 +964,7 @@ fn check_global_get_in_const(
     // Find the index/identifier child
     let mut cursor = instr_node.walk();
     for child in instr_node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "index" || ck == "identifier" {
             let text = node_text(&child, source);
             let global = if text.starts_with('$') {
@@ -1047,9 +976,7 @@ fn check_global_get_in_const(
                 let mut ic = child.walk();
                 let mut found = None;
                 for idx_child in child.children(&mut ic) {
-                    let ik = idx_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ik = ik.as_str();
+                    node_kind!(ik = idx_child);
                     if ik == "identifier" {
                         found = symbols.get_global_by_name(node_text(&idx_child, source));
                     } else if ik == "nat" {
@@ -1094,9 +1021,7 @@ fn check_data_segment_memory_indices(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_data" {
             return;
         }
@@ -1109,9 +1034,7 @@ fn check_data_segment_memory_indices(
 
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "offset" {
                 has_offset = true;
             }
@@ -1119,9 +1042,7 @@ fn check_data_segment_memory_indices(
                 // (memory $idx) or (memory N)
                 let mut mc = child.walk();
                 for mc_child in child.children(&mut mc) {
-                    let mk = mc_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let mk = mk.as_str();
+                    node_kind!(mk = mc_child);
                     if mk == "index" || mk == "identifier" || mk == "nat" {
                         let text = node_text(&mc_child, source);
                         memory_node_range = Some(node_to_range(&child));
@@ -1164,9 +1085,7 @@ fn check_elem_segment_table_indices(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_elem" {
             return;
         }
@@ -1178,18 +1097,14 @@ fn check_elem_segment_table_indices(
 
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "offset" {
                 has_offset = true;
             }
             if ck == "table_use" {
                 let mut tc = child.walk();
                 for tc_child in child.children(&mut tc) {
-                    let tk = tc_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let tk = tk.as_str();
+                    node_kind!(tk = tc_child);
                     if tk == "index" || tk == "identifier" || tk == "nat" {
                         let text = node_text(&tc_child, source);
                         table_node_range = Some(node_to_range(&child));
@@ -1231,9 +1146,7 @@ fn check_elem_segment_types(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_elem" {
             return;
         }
@@ -1245,9 +1158,7 @@ fn check_elem_segment_types(
 
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
 
             if ck == "offset" {
                 has_offset = true;
@@ -1255,9 +1166,7 @@ fn check_elem_segment_types(
             if ck == "table_use" {
                 let mut tc = child.walk();
                 for tc_child in child.children(&mut tc) {
-                    let tk = tc_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let tk = tk.as_str();
+                    node_kind!(tk = tc_child);
                     if tk == "index" || tk == "identifier" || tk == "nat" {
                         let text = node_text(&tc_child, source);
                         if text.starts_with('$') {
@@ -1274,9 +1183,7 @@ fn check_elem_segment_types(
                 // Extract ref_type from elem_list
                 let mut ec = child.walk();
                 for ec_child in child.children(&mut ec) {
-                    let ek = ec_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ek = ek.as_str();
+                    node_kind!(ek = ec_child);
                     if ek == "ref_type" || ek == "value_type" {
                         let text = node_text(&ec_child, source);
                         elem_type = ValueType::try_parse(text.trim());
@@ -1309,9 +1216,7 @@ fn check_elem_segment_types(
         // Check 2: validate each elem expression item against the declared elem type
         let mut cursor2 = field.walk();
         for child in field.children(&mut cursor2) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
 
             if ck == "elem_list" {
                 check_elem_list_items(&child, &elem_type, source, symbols, diagnostics);
@@ -1349,9 +1254,7 @@ fn check_elem_list_items(
 ) {
     let mut cursor = elem_list.walk();
     for child in elem_list.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
 
         if ck == "elem_expr" {
             check_single_elem_expr(&child, declared_type, source, symbols, diagnostics);
@@ -1373,9 +1276,7 @@ fn check_single_elem_expr(
 
     let mut cursor = elem_expr.walk();
     for child in elem_expr.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
 
         match ck {
             "elem_expr_item" => {
@@ -1433,9 +1334,7 @@ fn check_single_elem_expr(
 /// Infer the type produced by an instruction in an elem context.
 /// Returns None for non-instruction nodes (parens, keywords, etc.)
 fn infer_elem_instr_type(node: &Node, source: &str) -> Option<ValueType> {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     match kind {
         "instr_plain" | "expr1_plain" => {
@@ -1534,9 +1433,7 @@ fn check_ref_func_declarations(
     // Step 1: Collect all functions declared in element segments
     let mut declared_funcs: HashSet<usize> = HashSet::new();
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_elem" {
             return;
         }
@@ -1545,9 +1442,7 @@ fn check_ref_func_declarations(
 
     // Also collect functions referenced in inline elem expressions on tables
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_table" {
             return;
         }
@@ -1557,9 +1452,7 @@ fn check_ref_func_declarations(
     // Also collect functions referenced via ref.func in global/table init expressions
     // Per spec, ref.func in const init contexts counts as a function declaration
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk == "module_field_global" || fk == "module_field_table" {
             collect_ref_func_in_const_expr(field, source, symbols, &mut declared_funcs);
         }
@@ -1567,9 +1460,7 @@ fn check_ref_func_declarations(
 
     // Also collect exported functions — per spec, exported functions are considered "declared"
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         match fk {
             "module_field_export" => {
                 // Standalone export: (export "name" (func $idx))
@@ -1580,9 +1471,7 @@ fn check_ref_func_declarations(
                 let mut cursor = field.walk();
                 let mut has_export = false;
                 for child in field.children(&mut cursor) {
-                    let ck = child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ck = ck.as_str();
+                    node_kind!(ck = child);
                     if ck == "export" {
                         has_export = true;
                         break;
@@ -1592,9 +1481,7 @@ fn check_ref_func_declarations(
                     // Find the function's index from its identifier or position
                     let mut cursor2 = field.walk();
                     for child in field.children(&mut cursor2) {
-                        let ck = child.kind();
-                        #[cfg(all(feature = "wasm", not(feature = "native")))]
-                        let ck = ck.as_str();
+                        node_kind!(ck = child);
                         if ck == "identifier" {
                             let name = node_text(&child, source).trim();
                             if let Some(idx) = resolve_func_index(name, symbols) {
@@ -1630,16 +1517,12 @@ fn find_exported_func_recursive(
     symbols: &SymbolTable,
     declared: &mut HashSet<usize>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
     if kind == "export_desc_func" {
         // (func $idx) — find the index child
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "index" {
                 let idx_text = node_text(&child, source).trim();
                 if let Some(idx) = resolve_func_index(idx_text, symbols) {
@@ -1662,9 +1545,7 @@ fn collect_ref_func_in_const_expr(
     symbols: &SymbolTable,
     declared: &mut HashSet<usize>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     if kind == "instr_plain" {
         let text = node_text(node, source);
@@ -1672,9 +1553,7 @@ fn collect_ref_func_in_const_expr(
             // Find the function reference
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                let ck = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ck = ck.as_str();
+                node_kind!(ck = child);
                 if ck == "index" || ck == "identifier" || ck == "nat" {
                     let ref_text = node_text(&child, source).trim();
                     if let Some(idx) = resolve_func_index(ref_text, symbols) {
@@ -1713,9 +1592,7 @@ fn collect_func_refs_recursive(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
 
         if ck == "identifier" || ck == "index" {
             let text = node_text(&child, source).trim();
@@ -1782,9 +1659,7 @@ fn walk_for_ref_func(
     declared: &HashSet<usize>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     // Check if this is a ref.func instruction
     if kind == "instr_plain" || kind == "op_index" || kind == "op_nullary" {
@@ -1793,17 +1668,13 @@ fn walk_for_ref_func(
             // Find the function reference argument
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                let ck = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ck = ck.as_str();
+                node_kind!(ck = child);
 
                 // Look inside op_ nodes for the index
                 if ck.starts_with("op_") {
                     let mut inner_cursor = child.walk();
                     for inner in child.children(&mut inner_cursor) {
-                        let ik = inner.kind();
-                        #[cfg(all(feature = "wasm", not(feature = "native")))]
-                        let ik = ik.as_str();
+                        node_kind!(ik = inner);
                         if ik == "identifier" || ik == "index" || ik == "nat" {
                             check_ref_func_target(
                                 &inner,
@@ -1866,9 +1737,7 @@ fn check_ref_func_target(
 /// Check that end labels match opening labels on block/loop/if statements.
 pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     if !matches!(kind, "block_block" | "block_loop" | "block_if") {
         return diagnostics;
@@ -1890,9 +1759,7 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
     // First pass: find the opening label
     // Opening label is the first identifier that appears right after the block keyword
     for (i, child) in children.iter().enumerate() {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "identifier" {
             // Make sure this is not after "end" or "else"
             if i > 0 {
@@ -1912,9 +1779,7 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
     let mut after_else = false;
 
     for child in &children {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
 
         // Check for anonymous "end" and "else" tokens
         if child.is_named() {
@@ -2053,9 +1918,7 @@ fn check_type_forward_refs(
 ) {
     let mut type_index = 0usize;
     for_each_module_field(module, |node| {
-        let kind = node.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = kind.as_str();
+        node_kind!(kind = node);
 
         if kind == "module_field_type" {
             check_type_body_for_forward_refs(node, source, symbols, type_index, diagnostics);
@@ -2065,9 +1928,7 @@ fn check_type_forward_refs(
             // (forward references within rec groups are allowed)
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                let ck = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ck = ck.as_str();
+                node_kind!(ck = child);
                 if ck == "module_field_type" {
                     type_index += 1;
                 }
@@ -2084,9 +1945,7 @@ fn check_type_body_for_forward_refs(
     current_type_index: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     // Look for type references in ref_type, _heap_type_or_ref, value_type_ref_type
     if kind == "ref_type" || kind == "_heap_type_or_ref" || kind == "value_type_ref_type" {
@@ -2110,9 +1969,7 @@ fn check_ref_for_forward_type(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
 
         if ck == "identifier" {
             let name = node_text(&child, source);
@@ -2131,9 +1988,7 @@ fn check_ref_for_forward_type(
             // Check for numeric or identifier children
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = ik.as_str();
+                node_kind!(ik = idx_child);
 
                 if ik == "identifier" {
                     let name = node_text(&idx_child, source);
@@ -2173,30 +2028,21 @@ fn check_ref_for_forward_type(
 /// Count unique implicit function types (signatures not matching any explicit type).
 /// Only functions with inline signatures (no type_use) create implicit types.
 fn count_unique_implicit_types(symbols: &SymbolTable) -> usize {
-    // Collect known signatures: (params, results) pairs
-    let mut known_sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
+    // Use HashSet for O(1) dedup instead of O(n) Vec.any()
+    let mut seen = std::collections::HashSet::new();
     for type_def in &symbols.types {
         if let TypeKind::Func { params, results } = &type_def.kind {
-            known_sigs.push((params.clone(), results.clone()));
+            seen.insert((params.clone(), results.clone()));
         }
     }
 
     let mut implicit_count = 0;
     for func in &symbols.functions {
-        // Functions with type_use reference an existing type, not create a new one
         if func.has_type_use {
             continue;
         }
-        let params: Vec<ValueType> = func
-            .parameters
-            .iter()
-            .map(|p| p.param_type.clone())
-            .collect();
-        let already_known = known_sigs
-            .iter()
-            .any(|(kp, kr)| kp == &params && kr == &func.results);
-        if !already_known {
-            known_sigs.push((params, func.results.clone()));
+        let params: Vec<ValueType> = func.parameters.iter().map(|p| p.param_type).collect();
+        if seen.insert((params, func.results.clone())) {
             implicit_count += 1;
         }
     }
@@ -2210,9 +2056,7 @@ fn walk_for_unknown_type_refs(
     max_type_count: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     // Check ref_type nodes for numeric heap type indices
     if kind == "ref_type" || kind == "_heap_type_or_ref" {
@@ -2264,9 +2108,7 @@ fn find_type_index_in_ref(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
 
         // A nat/dec_nat/hex_nat inside a ref type is a numeric type index
         if ck == "nat" || ck == "dec_nat" || ck == "hex_nat" {
@@ -2301,17 +2143,13 @@ fn check_type_use_index(
 ) {
     let mut cursor = type_use_node.walk();
     for child in type_use_node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
 
         if ck == "index" {
             // Check the index node's children for a numeric value
             let mut idx_cursor = child.walk();
             for idx_child in child.children(&mut idx_cursor) {
-                let ick = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ick = ick.as_str();
+                node_kind!(ick = idx_child);
 
                 if ick == "nat" || ick == "dec_nat" || ick == "hex_nat" {
                     let text = node_text(&idx_child, source);
@@ -2475,9 +2313,7 @@ fn infer_const_instr_type(
 fn get_const_instr_type_index(node: &Node, source: &str, symbols: &SymbolTable) -> Option<usize> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "index" || ck == "identifier" {
             let text = node_text(&child, source);
             if text.starts_with('$') {
@@ -2489,9 +2325,7 @@ fn get_const_instr_type_index(node: &Node, source: &str, symbols: &SymbolTable) 
             // Check children
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = ik.as_str();
+                node_kind!(ik = idx_child);
                 if ik == "identifier" {
                     return symbols
                         .get_type_by_name(node_text(&idx_child, source))
@@ -2514,9 +2348,7 @@ fn get_const_instr_type_index(node: &Node, source: &str, symbols: &SymbolTable) 
 fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         // The heap type can appear as various node kinds
         if matches!(
             ck,
@@ -2531,9 +2363,7 @@ fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
         if ck == "index" {
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = ik.as_str();
+                node_kind!(ik = idx_child);
                 if matches!(ik, "identifier" | "nat") {
                     let text = node_text(&idx_child, source).trim().to_string();
                     if !text.is_empty() {
@@ -2555,30 +2385,26 @@ fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
 fn resolve_global_get_type(node: &Node, source: &str, symbols: &SymbolTable) -> Option<ValueType> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "index" || ck == "identifier" {
             let text = node_text(&child, source);
             if text.starts_with('$') {
-                return symbols.get_global_by_name(text).map(|g| g.var_type.clone());
+                return symbols.get_global_by_name(text).map(|g| g.var_type);
             }
             if let Ok(idx) = text.parse::<usize>() {
-                return symbols.get_global_by_index(idx).map(|g| g.var_type.clone());
+                return symbols.get_global_by_index(idx).map(|g| g.var_type);
             }
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = ik.as_str();
+                node_kind!(ik = idx_child);
                 if ik == "identifier" {
                     return symbols
                         .get_global_by_name(node_text(&idx_child, source))
-                        .map(|g| g.var_type.clone());
+                        .map(|g| g.var_type);
                 }
                 if ik == "nat" {
                     if let Ok(idx) = node_text(&idx_child, source).parse::<usize>() {
-                        return symbols.get_global_by_index(idx).map(|g| g.var_type.clone());
+                        return symbols.get_global_by_index(idx).map(|g| g.var_type);
                     }
                 }
             }
@@ -2594,9 +2420,7 @@ fn count_const_instrs_deep(
     source: &str,
     symbols: &SymbolTable,
 ) -> (usize, Option<ValueType>) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     match kind {
         "instr_plain" => {
@@ -2609,9 +2433,7 @@ fn count_const_instrs_deep(
             // Folded expression: the instruction itself produces one value
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                let ck = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ck = ck.as_str();
+                node_kind!(ck = child);
                 if ck == "instr_plain" {
                     let text = node_text(&child, source);
                     let first_token = text.split_whitespace().next().unwrap_or("");
@@ -2647,9 +2469,7 @@ fn check_constant_expression_types(
 ) {
     let mut global_idx = 0usize;
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
 
         match fk {
             "module_field_global" => {
@@ -2683,15 +2503,11 @@ fn check_constant_expression_types(
                 // Count imported globals for forward ref checking
                 let mut cursor = field.walk();
                 for child in field.children(&mut cursor) {
-                    let ck = child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ck = ck.as_str();
+                    node_kind!(ck = child);
                     if ck == "import_desc" {
                         let mut dc = child.walk();
                         for desc in child.children(&mut dc) {
-                            let dk = desc.kind();
-                            #[cfg(all(feature = "wasm", not(feature = "native")))]
-                            let dk = dk.as_str();
+                            node_kind!(dk = desc);
                             if dk == "import_desc_global_type" {
                                 global_idx += 1;
                             }
@@ -2708,9 +2524,7 @@ fn check_constant_expression_types(
 fn extract_global_value_type(node: &Node, source: &str) -> Option<ValueType> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "global_type" {
             // Search for value_type or ref_type inside global_type
             return extract_type_from_global_type(&child, source);
@@ -2723,9 +2537,7 @@ fn extract_global_value_type(node: &Node, source: &str) -> Option<ValueType> {
 fn extract_type_from_global_type(node: &Node, source: &str) -> Option<ValueType> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "global_type_imm"
             || ck == "global_type_mut"
             || ck == "value_type"
@@ -2758,9 +2570,7 @@ fn extract_type_from_global_type(node: &Node, source: &str) -> Option<ValueType>
 fn extract_value_type_recursive(node: &Node, source: &str) -> Option<ValueType> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "value_type" || ck == "ref_type" {
             let text = node_text(&child, source);
             if let Some(vt) = ValueType::try_parse(text.trim()) {
@@ -2832,9 +2642,7 @@ fn check_const_expr_type_for_global(
     let mut last_type: Option<ValueType> = None;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "global_type" {
             past_global_type = true;
             continue;
@@ -2877,9 +2685,7 @@ fn check_data_offset_type(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "offset" {
             let (count, ty) = count_const_instrs_deep(&child, source, symbols);
             // Expected: i32 for memory32, i64 for memory64
@@ -2910,9 +2716,7 @@ fn check_elem_offset_type(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "offset" {
             let (count, ty) = count_const_instrs_deep(&child, source, symbols);
             let expected = ValueType::I32;
@@ -2943,15 +2747,11 @@ fn check_table_init_type(
     // Find the table's ref type and init expression
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "table_fields_type" {
             let mut inner = child.walk();
             for gc in child.children(&mut inner) {
-                let gk = gc.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let gk = gk.as_str();
+                node_kind!(gk = gc);
                 if gk == "expr" {
                     let (count, ty) = count_const_instrs_deep(&gc, source, symbols);
                     // Get expected type from the table's ref_type
@@ -2977,9 +2777,7 @@ fn check_table_init_type(
 fn extract_table_ref_type(node: &Node, source: &str) -> Option<ValueType> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "table_type" {
             return extract_ref_type_from_node(&child, source);
         }
@@ -2995,9 +2793,7 @@ fn extract_table_ref_type(node: &Node, source: &str) -> Option<ValueType> {
 fn extract_ref_type_from_node(node: &Node, source: &str) -> Option<ValueType> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "ref_type" || ck == "value_type" {
             let text = node_text(&child, source);
             if let Some(vt) = ValueType::try_parse(text.trim()) {
@@ -3033,24 +2829,18 @@ fn check_global_forward_refs(
     let mut current_global_idx = 0usize;
 
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
 
         match fk {
             "module_field_import" => {
                 // Count imported globals
                 let mut cursor = field.walk();
                 for child in field.children(&mut cursor) {
-                    let ck = child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ck = ck.as_str();
+                    node_kind!(ck = child);
                     if ck == "import_desc" {
                         let mut dc = child.walk();
                         for desc in child.children(&mut dc) {
-                            let dk = desc.kind();
-                            #[cfg(all(feature = "wasm", not(feature = "native")))]
-                            let dk = dk.as_str();
+                            node_kind!(dk = desc);
                             if dk == "import_desc_global_type" {
                                 current_global_idx += 1;
                             }
@@ -3087,9 +2877,7 @@ fn check_global_get_forward_ref(
     let mut past_global_type = false;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "global_type" {
             past_global_type = true;
             continue;
@@ -3114,9 +2902,7 @@ fn check_global_get_forward_ref_recursive(
     current_idx: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     if kind == "instr_plain" {
         let text = node_text(node, source);
@@ -3141,9 +2927,7 @@ fn check_global_get_forward_ref_recursive(
     if kind == "expr1_plain" {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "instr_plain" {
                 let text = node_text(&child, source);
                 let first_token = text.split_whitespace().next().unwrap_or("");
@@ -3188,9 +2972,7 @@ fn resolve_global_ref_index(
 ) -> Option<usize> {
     let mut cursor = instr_node.walk();
     for child in instr_node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "index" || ck == "identifier" {
             let text = node_text(&child, source);
             if text.starts_with('$') {
@@ -3201,9 +2983,7 @@ fn resolve_global_ref_index(
             }
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = ik.as_str();
+                node_kind!(ik = idx_child);
                 if ik == "identifier" {
                     return symbols
                         .get_global_by_name(node_text(&idx_child, source))
@@ -3240,9 +3020,7 @@ fn walk_for_block_type_use_mismatches(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     if matches!(
         kind,
@@ -3394,9 +3172,7 @@ fn check_block_children_for_type_use(
 /// Also validate table init expression type matches table element type.
 fn check_table_non_nullable_refs(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_table" {
             return;
         }
@@ -3406,9 +3182,7 @@ fn check_table_non_nullable_refs(module: &Node, source: &str, diagnostics: &mut 
 
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "table_fields_type" {
                 let text = node_text(&child, source);
                 // Check if this table has a non-nullable ref type
@@ -3422,9 +3196,7 @@ fn check_table_non_nullable_refs(module: &Node, source: &str, diagnostics: &mut 
                 let mut init_expr = None;
                 let mut inner = child.walk();
                 for gc in child.children(&mut inner) {
-                    let gk = gc.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let gk = gk.as_str();
+                    node_kind!(gk = gc);
                     if gk == "expr" {
                         init_expr = Some(gc);
                         break;
@@ -3511,9 +3283,7 @@ fn check_implicit_memory_refs(
 
     // Walk all function bodies looking for memory instructions
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk == "module_field_func" {
             walk_for_memory_instrs(field, source, diagnostics);
         }
@@ -3521,9 +3291,7 @@ fn check_implicit_memory_refs(
 }
 
 fn walk_for_memory_instrs(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     if kind == "instr_plain" {
         let text = node_text(node, source);
@@ -3557,9 +3325,7 @@ fn check_call_indirect_table_requirements(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk == "module_field_func" {
             walk_for_call_indirect_checks(field, source, symbols, diagnostics);
         }
@@ -3572,9 +3338,7 @@ fn check_call_indirect_table_requirements(
 fn resolve_call_indirect_table_idx(node: &Node, source: &str, symbols: &SymbolTable) -> usize {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "index" || ck == "identifier" {
             let text = source[child.byte_range()].trim();
             // Check if this is a table name
@@ -3631,9 +3395,7 @@ fn walk_for_call_indirect_checks(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = node);
 
     if kind == "instr_plain" {
         let text = node_text(node, source);
@@ -3648,9 +3410,7 @@ fn walk_for_call_indirect_checks(
     if kind == "expr1_plain" {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "instr_plain" {
                 let text = node_text(&child, source);
                 let first_token = text.split_whitespace().next().unwrap_or("");
@@ -3687,9 +3447,7 @@ fn check_inline_elem_func_refs(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_module_field(module, |field| {
-        let fk = field.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let fk = fk.as_str();
+        node_kind!(fk = field);
         if fk != "module_field_table" {
             return;
         }
@@ -3697,9 +3455,7 @@ fn check_inline_elem_func_refs(
         // Look for inline elem segments: table_fields_elem → (elem index*)
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             if ck == "table_fields_elem" {
                 check_inline_table_elem_refs(&child, source, symbols, diagnostics);
             }
@@ -3715,9 +3471,7 @@ fn check_inline_table_elem_refs(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         if ck == "nat" || ck == "index" {
             let text = node_text(&child, source).trim().to_string();
             if let Ok(idx) = text.parse::<usize>() {

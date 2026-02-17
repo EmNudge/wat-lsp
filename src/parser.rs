@@ -110,9 +110,7 @@ fn process_import_field(
     symbol_table: &mut SymbolTable,
     counts: &mut ImportCounts,
 ) {
-    let kind = field_child.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = kind.as_str();
+    node_kind!(kind = field_child);
 
     match kind {
         "module_field_import" => {
@@ -160,9 +158,7 @@ fn process_import_field(
 fn node_has_import_child(node: &Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = kind.as_str();
+        node_kind!(kind = child);
         if kind == "import" {
             return true;
         }
@@ -248,9 +244,7 @@ fn extract_single_import(
             // Look inside import_desc for the specific import type
             let mut desc_cursor = child.walk();
             for desc_child in child.children(&mut desc_cursor) {
-                let kind = desc_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let kind = kind.as_str();
+                node_kind!(kind = desc_child);
                 match kind {
                     "import_desc_func_type" | "import_desc_type_use" => {
                         // Imported function: (func $name? ...)
@@ -609,30 +603,18 @@ fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<
     })
 }
 
-/// Find identifier child node (returns the node itself, not just text)
+/// Find identifier child node (returns the node itself, not just text).
+/// Delegates to shared `find_child_by_kind` in utils.
 #[cfg(feature = "native")]
+#[inline]
 fn find_identifier_node<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
-    let mut cursor = node.walk();
-    #[allow(clippy::manual_find)]
-    for child in node.children(&mut cursor) {
-        if child.kind() == "identifier" {
-            return Some(child);
-        }
-    }
-    None
+    crate::utils::find_child_by_kind(node, "identifier")
 }
 
-/// Find identifier child node (WASM version - no lifetime parameter needed)
 #[cfg(all(feature = "wasm", not(feature = "native")))]
+#[inline]
 fn find_identifier_node(node: &Node) -> Option<Node> {
-    let mut cursor = node.walk();
-    #[allow(clippy::manual_find)]
-    for child in node.children(&mut cursor) {
-        if child.kind() == "identifier" {
-            return Some(child);
-        }
-    }
-    None
+    crate::utils::find_child_by_kind(node, "identifier")
 }
 
 /// Extract function symbols using tree-sitter AST traversal (with offset for imports)
@@ -749,9 +731,7 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
             break;
         }
 
-        let kind = sibling.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = kind.as_str();
+        node_kind!(kind = sibling);
 
         if kind == "comment_line" || kind == "comment_block" {
             let comment_end_line = sibling.range().end_point.row;
@@ -988,10 +968,7 @@ fn resolve_type_use(
         if child.kind() == "type_use" {
             let mut type_cursor = child.walk();
             for type_child in child.children(&mut type_cursor) {
-                #[cfg(feature = "native")]
-                let kind = type_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let kind = type_child.kind();
+                node_kind!(kind = type_child);
 
                 if kind == "index" || kind == "identifier" {
                     let type_ref = source[type_child.byte_range()].trim();
@@ -1010,7 +987,7 @@ fn resolve_type_use(
                                 .enumerate()
                                 .map(|(i, vt)| Parameter {
                                     name: None,
-                                    param_type: vt.clone(),
+                                    param_type: *vt,
                                     index: i,
                                     range: None,
                                 })
@@ -1029,7 +1006,7 @@ fn resolve_type_use(
                                 .enumerate()
                                 .map(|(i, vt)| Parameter {
                                     name: None,
-                                    param_type: vt.clone(),
+                                    param_type: *vt,
                                     index: i,
                                     range: None,
                                 })
@@ -1053,8 +1030,10 @@ fn resolve_implicit_type(
     symbol_table: &SymbolTable,
 ) -> Option<(Vec<ValueType>, Vec<ValueType>)> {
     let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for type_def in &symbol_table.types {
         if let TypeKind::Func { params, results } = &type_def.kind {
+            seen.insert((params.clone(), results.clone()));
             sigs.push((params.clone(), results.clone()));
         }
     }
@@ -1062,13 +1041,9 @@ fn resolve_implicit_type(
         if func.has_type_use {
             continue;
         }
-        let params: Vec<ValueType> = func
-            .parameters
-            .iter()
-            .map(|p| p.param_type.clone())
-            .collect();
+        let params: Vec<ValueType> = func.parameters.iter().map(|p| p.param_type).collect();
         let sig = (params, func.results.clone());
-        if !sigs.iter().any(|s| s == &sig) {
+        if seen.insert(sig.clone()) {
             sigs.push(sig);
         }
     }
@@ -1147,11 +1122,7 @@ fn extract_blocks(func_node: &Node, source: &str) -> Vec<BlockLabel> {
 
 /// Recursively visit nodes to find labeled blocks/loops/ifs
 fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind_str = kind.as_str();
-    #[cfg(feature = "native")]
-    let kind_str = kind;
+    node_kind!(kind_str = node);
 
     // Check both statement form (block_block) and expression form (expr1_block)
     if BLOCK_KINDS_STATEMENT.contains(&kind_str) || BLOCK_KINDS_EXPR.contains(&kind_str) {
@@ -1398,17 +1369,13 @@ fn extract_type_from_single_node(
     let mut parent_ref: Option<String> = None;
     let mut is_final = false;
 
-    let type_kind = type_node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let type_kind = type_kind.as_str();
+    node_kind!(type_kind = type_node);
     match type_kind {
         "sub_type" => {
             // Process sub_type children: (sub final? index? def_type)
             let mut sub_cursor = type_node.walk();
             for sub_child in type_node.children(&mut sub_cursor) {
-                let sub_kind = sub_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let sub_kind = sub_kind.as_str();
+                node_kind!(sub_kind = sub_child);
 
                 match sub_kind {
                     "index" => {
@@ -1483,9 +1450,7 @@ fn extract_type_from_single_node(
             // type_field wraps a def_type: func_type, struct_type, array_type, or sub_type
             let mut cursor = type_node.walk();
             for child in type_node.children(&mut cursor) {
-                let child_kind = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let child_kind = child_kind.as_str();
+                node_kind!(child_kind = child);
                 match child_kind {
                     "func_type" => {
                         let mut parameters = Vec::new();
@@ -1545,9 +1510,7 @@ fn extract_field_types(field_node: &Node, source: &str) -> Vec<(Option<String>, 
 
     let mut cursor = field_node.walk();
     for child in field_node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         match ck {
             "identifier" => {
                 field_name = Some(node_text(&child, source));
@@ -1573,9 +1536,7 @@ fn extract_field_types(field_node: &Node, source: &str) -> Vec<(Option<String>, 
         let mut mutable = false;
         let mut cursor2 = field_node.walk();
         for child in field_node.children(&mut cursor2) {
-            let ck = child.kind();
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let ck = ck.as_str();
+            node_kind!(ck = child);
             match ck {
                 "value_type" => {
                     field_type = extract_value_type(&child, source);
@@ -1626,9 +1587,7 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         if child.kind() == "sub_type" {
             let mut sub_cursor = child.walk();
             for sub_child in child.children(&mut sub_cursor) {
-                let sub_kind = sub_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let sub_kind = sub_kind.as_str();
+                node_kind!(sub_kind = sub_child);
 
                 match sub_kind {
                     "index" => {
@@ -1745,9 +1704,7 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                     // Handle sub_type inside type_field: (sub final? index? def_type)
                     let mut sub_cursor = field_child.walk();
                     for sub_child in field_child.children(&mut sub_cursor) {
-                        let sub_kind = sub_child.kind();
-                        #[cfg(all(feature = "wasm", not(feature = "native")))]
-                        let sub_kind = sub_kind.as_str();
+                        node_kind!(sub_kind = sub_child);
 
                         match sub_kind {
                             "index" => {
@@ -2226,9 +2183,7 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
 
     let mut cursor = value_type_node.walk();
     for child in value_type_node.children(&mut cursor) {
-        let child_kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let child_kind = child_kind.as_str();
+        node_kind!(child_kind = child);
         match child_kind {
             "value_type_num_type" => {
                 let text = node_text(&child, source);
@@ -2242,9 +2197,7 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
 
                 let mut num_cursor = child.walk();
                 for num_child in child.children(&mut num_cursor) {
-                    let num_kind = num_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let num_kind = num_kind.as_str();
+                    node_kind!(num_kind = num_child);
                     match num_kind {
                         "num_type_i32" => return ValueType::I32,
                         "num_type_i64" => return ValueType::I64,
@@ -2286,9 +2239,7 @@ fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
 fn extract_storage_type_with_mut(storage_node: &Node, source: &str) -> (ValueType, bool) {
     let mut cursor = storage_node.walk();
     for child in storage_node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = ck.as_str();
+        node_kind!(ck = child);
         match ck {
             "value_type" => return (extract_value_type(&child, source), false),
             "packed_type" => {
@@ -2304,9 +2255,7 @@ fn extract_storage_type_with_mut(storage_node: &Node, source: &str) -> (ValueTyp
                 // Mutable wrapper — extract inner type
                 let mut inner_cursor = child.walk();
                 for inner_child in child.children(&mut inner_cursor) {
-                    let ik = inner_child.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ik = ik.as_str();
+                    node_kind!(ik = inner_child);
                     match ik {
                         "value_type" => return (extract_value_type(&inner_child, source), true),
                         "packed_type" => {
@@ -2346,9 +2295,7 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
 
     let mut cursor = ref_type_node.walk();
     for child in ref_type_node.children(&mut cursor) {
-        let child_kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let child_kind = child_kind.as_str();
+        node_kind!(child_kind = child);
         match child_kind {
             "ref_type_funcref" => return ValueType::Funcref,
             "ref_type_externref" => return ValueType::Externref,
@@ -2407,9 +2354,7 @@ fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
                 let mut ref_kind = None;
 
                 for c in child.children(&mut concrete_cursor) {
-                    let ck = c.kind();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let ck = ck.as_str();
+                    node_kind!(ck = c);
                     if ck == "index" {
                         let idx_text = node_text(&c, source);
                         if let Ok(idx) = idx_text.parse::<u32>() {
