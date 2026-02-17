@@ -30,6 +30,28 @@ use tree_sitter::Node;
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::Node;
 
+/// Get the ValueType corresponding to an instruction's prefix (i32., i64., f32., f64., v128.).
+fn type_from_prefix(name: &str) -> Option<ValueType> {
+    if name.starts_with("i32.") {
+        Some(ValueType::I32)
+    } else if name.starts_with("i64.") {
+        Some(ValueType::I64)
+    } else if name.starts_with("f32.") {
+        Some(ValueType::F32)
+    } else if name.starts_with("f64.") {
+        Some(ValueType::F64)
+    } else if name.starts_with("v128.") {
+        Some(ValueType::V128)
+    } else {
+        None
+    }
+}
+
+/// Check if an instruction name refers to a SIMD lane operation (contains x2./x4./x8./x16.).
+fn is_simd_instruction(name: &str) -> bool {
+    name.contains("x2.") || name.contains("x4.") || name.contains("x8.") || name.contains("x16.")
+}
+
 /// Track stack state through an instruction list and report underflow/type errors.
 /// If expected_results is None, skip return type validation (e.g., when function uses type reference).
 /// Returns diagnostics as core::types::Diagnostic.
@@ -657,7 +679,7 @@ fn process_instruction(
     // Check global.set targets a mutable global
     if instr_name == "global.set" {
         if let Some(index) = get_index_from_node(node, source) {
-            let is_immutable = if let Some(global) = symbols.get_global_by_name(&index) {
+            let is_immutable = if let Some(global) = symbols.get_global_by_name(index) {
                 !global.is_mutable
             } else if let Ok(idx) = index.parse::<usize>() {
                 symbols
@@ -732,33 +754,9 @@ fn derive_consumed_types_from_name(
     symbols: &SymbolTable,
     source: &str,
 ) -> Option<Vec<ValueType>> {
-    // Helper to get type from instruction prefix
-    let type_from_prefix = |name: &str| -> Option<ValueType> {
-        if name.starts_with("i32.") {
-            return Some(ValueType::I32);
-        }
-        if name.starts_with("i64.") {
-            return Some(ValueType::I64);
-        }
-        if name.starts_with("f32.") {
-            return Some(ValueType::F32);
-        }
-        if name.starts_with("f64.") {
-            return Some(ValueType::F64);
-        }
-        if name.starts_with("v128.") {
-            return Some(ValueType::V128);
-        }
-        None
-    };
-
     // Helper to check if an instruction is a scalar binary op (2 operands of prefix type)
     let is_binary_scalar = |name: &str| -> bool {
-        let is_simd = name.contains("x2.")
-            || name.contains("x4.")
-            || name.contains("x8.")
-            || name.contains("x16.");
-        if is_simd {
+        if is_simd_instruction(name) {
             return false;
         }
         // Arithmetic: add, sub, mul, div, rem, and, or, xor, shl, shr, rot, copysign, min, max
@@ -782,11 +780,7 @@ fn derive_consumed_types_from_name(
 
     // Helper to check if an instruction is a scalar unary op
     let is_unary_scalar = |name: &str| -> bool {
-        let is_simd = name.contains("x2.")
-            || name.contains("x4.")
-            || name.contains("x8.")
-            || name.contains("x16.");
-        if is_simd {
+        if is_simd_instruction(name) {
             return false;
         }
         name.ends_with(".eqz")
@@ -846,7 +840,7 @@ fn derive_consumed_types_from_name(
         // Call — consume parameter types
         "call" | "return_call" => {
             if let Some(func_ref) = get_index_from_node(node, source) {
-                if let Some(func) = symbols.get_function_by_name(&func_ref) {
+                if let Some(func) = symbols.get_function_by_name(func_ref) {
                     return Some(func.parameters.iter().map(|p| p.param_type).collect());
                 } else if let Ok(idx) = func_ref.parse::<usize>() {
                     if let Some(func) = symbols.get_function_by_index(idx) {
@@ -860,13 +854,13 @@ fn derive_consumed_types_from_name(
         // Call_ref — consume param types + typed funcref (ref null $type)
         "call_ref" | "return_call_ref" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
                     if let TypeKind::Func { params, .. } = &type_def.kind {
                         let mut types: Vec<ValueType> = params.clone();
                         types.push(ValueType::RefNull(type_def.index as u32));
                         return Some(types);
                     }
-                } else if let Some(idx) = parse_wat_nat(&type_ref) {
+                } else if let Some(idx) = parse_wat_nat(type_ref) {
                     if let Some(type_def) = symbols.get_type_by_index(idx as usize) {
                         if let TypeKind::Func { params, .. } = &type_def.kind {
                             let mut types: Vec<ValueType> = params.clone();
@@ -1096,7 +1090,7 @@ fn get_branch_depth(node: &Node, source: &str, checker: &mut TypeChecker) -> Opt
     let index = get_index_from_node(node, source)?;
     // Try as numeric index first (supports hex like 0x10000001 and underscore separators)
     if !index.starts_with('$') {
-        if let Some(depth) = parse_wat_nat(&index) {
+        if let Some(depth) = parse_wat_nat(index) {
             let depth = depth as usize;
             if depth < checker.ctrl_depth() {
                 return Some(depth);
@@ -1111,7 +1105,7 @@ fn get_branch_depth(node: &Node, source: &str, checker: &mut TypeChecker) -> Opt
     }
     // Try named label resolution
     if index.starts_with('$') {
-        return checker.resolve_label_depth(&index);
+        return checker.resolve_label_depth(index);
     }
     None
 }
@@ -1209,7 +1203,7 @@ pub fn get_dynamic_operand_count(
     match instr_name {
         "call" | "return_call" => {
             if let Some(func_ref) = get_index_from_node(node, source) {
-                if let Some(func) = symbols.get_function_by_name(&func_ref) {
+                if let Some(func) = symbols.get_function_by_name(func_ref) {
                     return func.parameters.len();
                 } else if let Ok(idx) = func_ref.parse::<usize>() {
                     if let Some(func) = symbols.get_function_by_index(idx) {
@@ -1221,7 +1215,7 @@ pub fn get_dynamic_operand_count(
         }
         "call_ref" | "return_call_ref" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
                     if let TypeKind::Func { params, .. } = &type_def.kind {
                         return params.len() + 1;
                     }
@@ -1237,7 +1231,7 @@ pub fn get_dynamic_operand_count(
         }
         "call_indirect" | "return_call_indirect" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
                     if let TypeKind::Func { params, .. } = &type_def.kind {
                         return params.len() + 1;
                     }
@@ -1253,7 +1247,7 @@ pub fn get_dynamic_operand_count(
         }
         "struct.new" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
                     if let TypeKind::Struct { fields } = &type_def.kind {
                         return fields.len();
                     }
@@ -1269,7 +1263,7 @@ pub fn get_dynamic_operand_count(
         }
         "throw" => {
             if let Some(tag_ref) = get_index_from_node(node, source) {
-                if let Some(tag) = symbols.get_tag_by_name(&tag_ref) {
+                if let Some(tag) = symbols.get_tag_by_name(tag_ref) {
                     return tag.params.len();
                 } else if let Ok(idx) = tag_ref.parse::<usize>() {
                     if let Some(tag) = symbols.get_tag_by_index(idx) {
@@ -1291,13 +1285,13 @@ pub fn get_dynamic_operand_count(
 }
 
 /// Get the index/identifier from an instruction node
-pub fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
+pub fn get_index_from_node<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
 
         if kind == "index" || kind == "identifier" {
-            return Some(source[child.byte_range()].trim().to_string());
+            return Some(source[child.byte_range()].trim());
         }
         if kind == "type_use" {
             let mut inner_cursor = child.walk();
@@ -1305,7 +1299,7 @@ pub fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
                 node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "index" || inner_kind == "identifier" {
-                    return Some(source[inner_child.byte_range()].trim().to_string());
+                    return Some(source[inner_child.byte_range()].trim());
                 }
             }
         }
@@ -1315,7 +1309,7 @@ pub fn get_index_from_node(node: &Node, source: &str) -> Option<String> {
                 node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "index" || inner_kind == "identifier" {
-                    return Some(source[inner_child.byte_range()].trim().to_string());
+                    return Some(source[inner_child.byte_range()].trim());
                 }
             }
         }
@@ -1347,31 +1341,8 @@ pub fn infer_instruction_result_types(
         }
     }
 
-    let type_from_prefix = |name: &str| -> Option<ValueType> {
-        if name.starts_with("i32.") {
-            return Some(ValueType::I32);
-        }
-        if name.starts_with("i64.") {
-            return Some(ValueType::I64);
-        }
-        if name.starts_with("f32.") {
-            return Some(ValueType::F32);
-        }
-        if name.starts_with("f64.") {
-            return Some(ValueType::F64);
-        }
-        if name.starts_with("v128.") {
-            return Some(ValueType::V128);
-        }
-        None
-    };
-
     let is_scalar_comparison = |name: &str| -> bool {
-        let is_simd = name.contains("x2.")
-            || name.contains("x4.")
-            || name.contains("x8.")
-            || name.contains("x16.");
-        if is_simd {
+        if is_simd_instruction(name) {
             return false;
         }
         name.ends_with(".eq")
@@ -1520,12 +1491,12 @@ pub fn get_local_type_from_node(
     let func_line = node.start_position().row as u32;
     let func = symbols.find_function_containing_line(func_line)?;
 
-    let name_to_check = index.strip_prefix('$').unwrap_or(&index);
+    let name_to_check = index.strip_prefix('$').unwrap_or(index);
 
     for param in &func.parameters {
         if let Some(param_name) = &param.name {
             let param_name_stripped = param_name.strip_prefix('$').unwrap_or(param_name);
-            if param_name_stripped == name_to_check || param_name == &index {
+            if param_name_stripped == name_to_check || param_name == index {
                 return Some(param.param_type);
             }
         }
@@ -1534,7 +1505,7 @@ pub fn get_local_type_from_node(
     for local in &func.locals {
         if let Some(local_name) = &local.name {
             let local_name_stripped = local_name.strip_prefix('$').unwrap_or(local_name);
-            if local_name_stripped == name_to_check || local_name == &index {
+            if local_name_stripped == name_to_check || local_name == index {
                 return Some(local.var_type);
             }
         }
@@ -1561,7 +1532,7 @@ pub fn get_global_type_from_node(
 ) -> Option<ValueType> {
     let index = get_index_from_node(node, source)?;
 
-    if let Some(global) = symbols.get_global_by_name(&index) {
+    if let Some(global) = symbols.get_global_by_name(index) {
         return Some(global.var_type);
     }
     if let Ok(idx) = index.parse::<usize>() {
@@ -1576,10 +1547,10 @@ pub fn get_global_type_from_node(
 /// Falls back to table 0 if no explicit index.
 fn resolve_table<'a>(node: &Node, symbols: &'a SymbolTable, source: &str) -> Option<&'a Table> {
     if let Some(index) = get_index_from_node(node, source) {
-        if let Some(table) = symbols.get_table_by_name(&index) {
+        if let Some(table) = symbols.get_table_by_name(index) {
             return Some(table);
         }
-        if let Some(idx) = parse_wat_nat(&index) {
+        if let Some(idx) = parse_wat_nat(index) {
             if let Some(table) = symbols.tables.get(idx as usize) {
                 return Some(table);
             }
@@ -1612,7 +1583,7 @@ fn get_table_index_type(node: &Node, symbols: &SymbolTable, source: &str) -> Val
 fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(func_ref) = get_index_from_node(node, source) {
         // Look up the function to find its type
-        let func = if let Some(f) = symbols.get_function_by_name(&func_ref) {
+        let func = if let Some(f) = symbols.get_function_by_name(func_ref) {
             Some(f)
         } else if let Ok(idx) = func_ref.parse::<usize>() {
             symbols.get_function_by_index(idx)
@@ -1639,7 +1610,7 @@ fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) ->
 /// Get result types for a call instruction
 pub fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(func_ref) = get_index_from_node(node, source) {
-        if let Some(func) = symbols.get_function_by_name(&func_ref) {
+        if let Some(func) = symbols.get_function_by_name(func_ref) {
             return func.results.clone();
         } else if let Ok(idx) = func_ref.parse::<usize>() {
             if let Some(func) = symbols.get_function_by_index(idx) {
@@ -1657,7 +1628,7 @@ pub fn get_call_ref_result_types(
     source: &str,
 ) -> Vec<ValueType> {
     if let Some(type_ref) = get_index_from_node(node, source) {
-        if let Some(type_def) = symbols.get_type_by_name(&type_ref) {
+        if let Some(type_def) = symbols.get_type_by_name(type_ref) {
             if let TypeKind::Func { results, .. } = &type_def.kind {
                 return results.clone();
             }
@@ -2395,7 +2366,7 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
                 }
             }
             if let Some(func_ref) = get_index_from_expr1_call(expr1, source) {
-                if let Some(func) = symbols.get_function_by_name(&func_ref) {
+                if let Some(func) = symbols.get_function_by_name(func_ref) {
                     return func.results.clone();
                 } else if let Ok(idx) = func_ref.parse::<usize>() {
                     if let Some(func) = symbols.get_function_by_index(idx) {
@@ -2410,13 +2381,13 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
 }
 
 /// Get function reference from expr1_call node
-pub fn get_index_from_expr1_call(node: &Node, source: &str) -> Option<String> {
+pub fn get_index_from_expr1_call<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
 
         if kind == "index" || kind == "identifier" {
-            return Some(source[child.byte_range()].trim().to_string());
+            return Some(source[child.byte_range()].trim());
         }
     }
     None

@@ -404,7 +404,7 @@ fn check_import_ordering(module: &Node, source: &str, diagnostics: &mut Vec<Diag
     });
 }
 
-fn has_inline_import(node: &Node) -> bool {
+pub(super) fn has_inline_import(node: &Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
@@ -2170,12 +2170,9 @@ fn check_type_use_index(
 
 /// Parse a nat (natural number) from text, handling hex prefix.
 fn parse_nat(text: &str) -> Result<usize, ()> {
-    let text = text.trim().replace('_', "");
-    if text.starts_with("0x") || text.starts_with("0X") {
-        usize::from_str_radix(&text[2..], 16).map_err(|_| ())
-    } else {
-        text.parse::<usize>().map_err(|_| ())
-    }
+    crate::parser::parse_wat_nat(text)
+        .map(|v| v as usize)
+        .ok_or(())
 }
 
 // ============================================================================

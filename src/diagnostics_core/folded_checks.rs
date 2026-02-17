@@ -32,37 +32,36 @@ pub fn check_folded_operand_count(
     let mut diagnostics = Vec::new();
 
     let mut cursor = node.walk();
-    let children: Vec<_> = node.children(&mut cursor).collect();
 
     // First child should be instr_plain
-    let first_child = match children.first() {
+    let first_child = match node.children(&mut cursor).next() {
         Some(c) if c.kind() == "instr_plain" => c,
         _ => return diagnostics,
     };
 
     // Get the instruction name from instr_plain
     let mut instr_cursor = first_child.walk();
-    let instr_children: Vec<_> = first_child.children(&mut instr_cursor).collect();
-    if instr_children.is_empty() {
-        return diagnostics;
-    }
+    let first_instr_child = match first_child.children(&mut instr_cursor).next() {
+        Some(c) => c,
+        None => return diagnostics,
+    };
 
-    let instr_kind = instr_children[0].kind();
+    let instr_kind = first_instr_child.kind();
     let instr_name = match instr_kind.as_ref() {
         "op_const" => {
-            let mut const_cursor = instr_children[0].walk();
-            let const_children: Vec<_> = instr_children[0].children(&mut const_cursor).collect();
-            if const_children.is_empty() {
-                return diagnostics;
+            let mut const_cursor = first_instr_child.walk();
+            let result = first_instr_child.children(&mut const_cursor).next();
+            match result {
+                Some(c) => source[c.byte_range()].trim().to_string(),
+                None => return diagnostics,
             }
-            source[const_children[0].byte_range()].trim().to_string()
         }
-        _ => source[instr_children[0].byte_range()].trim().to_string(),
+        _ => source[first_instr_child.byte_range()].trim().to_string(),
     };
 
     // Count expr children (these are the operands)
-    let operand_count = children
-        .iter()
+    let operand_count = node
+        .children(&mut cursor)
         .skip(1)
         .filter(|c| c.kind() == "expr")
         .count();
