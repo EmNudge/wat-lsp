@@ -505,7 +505,7 @@ fn check_identifier_dup(
     kind_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Some(id_node) = find_identifier_child(node) {
+    if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
         let name = node_text(&id_node, source);
         if name.starts_with('$') {
             let range = node_to_range(&id_node);
@@ -560,19 +560,6 @@ fn check_import_identifier_dup(
             }
         }
     }
-}
-
-/// Find identifier child node. Delegates to shared `find_child_by_kind`.
-#[cfg(feature = "native")]
-#[inline]
-fn find_identifier_child<'a>(node: &'a Node<'a>) -> Option<Node<'a>> {
-    crate::utils::find_child_by_kind(node, "identifier")
-}
-
-#[cfg(all(feature = "wasm", not(feature = "native")))]
-#[inline]
-fn find_identifier_child(node: &Node) -> Option<Node> {
-    crate::utils::find_child_by_kind(node, "identifier")
 }
 
 // ============================================================================

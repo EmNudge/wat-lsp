@@ -141,36 +141,8 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
             || kind == "instr_call"
             || kind == "expr1_call"
         {
-            let instr_text = &document[current.byte_range()];
-
-            if instr_text.contains("call") {
-                return InstructionContext::Call;
-            } else if instr_text.contains("local.") {
-                return InstructionContext::Local;
-            } else if instr_text.contains("global.") {
-                return InstructionContext::Global;
-            } else if instr_text.starts_with("br") || instr_text.contains(" br") {
-                return InstructionContext::Branch;
-            // Check data/elem segment operations BEFORE general table/memory
-            } else if instr_text.contains("memory.init") || instr_text.contains("data.drop") {
-                return InstructionContext::Data;
-            } else if instr_text.contains("table.init") || instr_text.contains("elem.drop") {
-                return InstructionContext::Elem;
-            } else if instr_text.contains("table.") {
-                return InstructionContext::Table;
-            } else if instr_text.contains("memory.")
-                || instr_text.contains(".load")
-                || instr_text.contains(".store")
-            {
-                return InstructionContext::Memory;
-            } else if instr_text.contains("struct.")
-                || instr_text.contains("array.")
-                || instr_text.contains("ref.cast")
-                || instr_text.contains("ref.test")
-            {
-                return InstructionContext::Type;
-            } else if instr_text.contains("throw") || instr_text.contains("rethrow") {
-                return InstructionContext::Tag;
+            if let Some(ctx) = context_from_instruction_text(&document[current.byte_range()]) {
+                return ctx;
             }
         }
 
@@ -227,44 +199,8 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
 
     // Only check instr_plain nodes for instruction context
     if kind == "instr_plain" || kind == "expr1_plain" {
-        let instr_text = &document[node.byte_range()];
-        // Extract just the first token (instruction name) to avoid matching nested instructions
-        let first_token = instr_text.split_whitespace().next().unwrap_or("");
-
-        // Check data/elem segment operations BEFORE general memory/table
-        if first_token == "memory.init" || first_token == "data.drop" {
-            return InstructionContext::Data;
-        } else if first_token == "table.init" || first_token == "elem.drop" {
-            return InstructionContext::Elem;
-        // Check GC/struct/array instructions first (they take type indices)
-        // Also includes call_ref and return_call_ref which take type indices
-        } else if first_token.starts_with("struct.")
-            || first_token.starts_with("array.")
-            || first_token == "ref.cast"
-            || first_token == "ref.test"
-            || first_token == "call_ref"
-            || first_token == "return_call_ref"
-        {
-            return InstructionContext::Type;
-        } else if first_token == "ref.func" || first_token == "return_call" {
-            return InstructionContext::Call;
-        } else if first_token.starts_with("br") {
-            return InstructionContext::Branch;
-        } else if first_token.starts_with("call") && first_token != "call_indirect" {
-            return InstructionContext::Call;
-        } else if first_token.starts_with("local.") {
-            return InstructionContext::Local;
-        } else if first_token.starts_with("global.") {
-            return InstructionContext::Global;
-        } else if first_token.starts_with("table.") {
-            return InstructionContext::Table;
-        } else if first_token.starts_with("memory.")
-            || first_token.contains(".load")
-            || first_token.contains(".store")
-        {
-            return InstructionContext::Memory;
-        } else if first_token == "throw" || first_token == "rethrow" {
-            return InstructionContext::Tag;
+        if let Some(ctx) = context_from_instruction_text(&document[node.byte_range()]) {
+            return ctx;
         }
     }
 
@@ -285,6 +221,49 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
     }
 
     InstructionContext::General
+}
+
+/// Classify instruction text into an InstructionContext using first-word matching.
+/// Avoids repeated `.contains()` scans over the full text.
+fn context_from_instruction_text(instr_text: &str) -> Option<InstructionContext> {
+    let first_token = instr_text.split_whitespace().next().unwrap_or("");
+
+    // Check data/elem segment operations BEFORE general memory/table
+    if first_token == "memory.init" || first_token == "data.drop" {
+        Some(InstructionContext::Data)
+    } else if first_token == "table.init" || first_token == "elem.drop" {
+        Some(InstructionContext::Elem)
+    // Check GC/struct/array instructions (they take type indices)
+    } else if first_token.starts_with("struct.")
+        || first_token.starts_with("array.")
+        || first_token == "ref.cast"
+        || first_token == "ref.test"
+        || first_token == "call_ref"
+        || first_token == "return_call_ref"
+    {
+        Some(InstructionContext::Type)
+    } else if first_token == "ref.func" || first_token == "return_call" {
+        Some(InstructionContext::Call)
+    } else if first_token.starts_with("br") {
+        Some(InstructionContext::Branch)
+    } else if first_token.starts_with("call") && first_token != "call_indirect" {
+        Some(InstructionContext::Call)
+    } else if first_token.starts_with("local.") {
+        Some(InstructionContext::Local)
+    } else if first_token.starts_with("global.") {
+        Some(InstructionContext::Global)
+    } else if first_token.starts_with("table.") {
+        Some(InstructionContext::Table)
+    } else if first_token.starts_with("memory.")
+        || first_token.contains(".load")
+        || first_token.contains(".store")
+    {
+        Some(InstructionContext::Memory)
+    } else if first_token == "throw" || first_token == "rethrow" {
+        Some(InstructionContext::Tag)
+    } else {
+        None
+    }
 }
 
 /// Determine the context for a node inside a catch_clause.

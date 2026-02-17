@@ -46,15 +46,15 @@ pub fn track_stack_in_instr_list(
     // Get function result types for the control frame
     let func_line = instr_list.start_position().row as u32;
     let result_types = if let Some(func) = symbols.find_function_containing_line(func_line) {
-        expected_results.unwrap_or(&func.results).to_vec()
+        expected_results.unwrap_or(&func.results)
     } else {
-        expected_results.unwrap_or(&[]).to_vec()
+        expected_results.unwrap_or(&[])
     };
 
     // Push function-level control frame
     // Note: function parameters are local variables, NOT on the value stack.
     // The value stack starts empty; start_types is empty for functions.
-    checker.push_ctrl(CtrlOpcode::Function, vec![], result_types.clone());
+    checker.push_ctrl(CtrlOpcode::Function, vec![], result_types.to_vec());
 
     // Process all children
     let mut cursor = instr_list.walk();
@@ -67,7 +67,7 @@ pub fn track_stack_in_instr_list(
             }
             "instr_plain" => {
                 if let Some(instr_name) = get_instruction_name(&child, source) {
-                    process_instruction(&child, &instr_name, &mut checker, symbols, source);
+                    process_instruction(&child, instr_name, &mut checker, symbols, source);
                 }
             }
             "expr" => {
@@ -109,7 +109,7 @@ fn process_instr_node(
         match kind.as_ref() {
             "instr_plain" => {
                 if let Some(instr_name) = get_instruction_name(&child, source) {
-                    process_instruction(&child, &instr_name, checker, symbols, source);
+                    process_instruction(&child, instr_name, checker, symbols, source);
                 }
             }
             "expr" => {
@@ -219,7 +219,7 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
                             if let Some(instr_name) = get_instruction_name(&list_child, source) {
                                 process_instruction(
                                     &list_child,
-                                    &instr_name,
+                                    instr_name,
                                     checker,
                                     symbols,
                                     source,
@@ -272,7 +272,7 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
             }
             "instr_plain" => {
                 if let Some(instr_name) = get_instruction_name(&child, source) {
-                    process_instruction(&child, &instr_name, checker, symbols, source);
+                    process_instruction(&child, instr_name, checker, symbols, source);
                 }
             }
             "expr" => {
@@ -371,8 +371,9 @@ fn is_try_table_node(node: &Node) -> bool {
     false
 }
 
-/// Get the instruction name from an instr_plain node
-pub fn get_instruction_name(instr_node: &Node, source: &str) -> Option<String> {
+/// Get the instruction name from an instr_plain node.
+/// Returns a borrowed slice from `source`, avoiding allocation.
+pub fn get_instruction_name<'a>(instr_node: &Node, source: &'a str) -> Option<&'a str> {
     let mut cursor = instr_node.walk();
     for child in instr_node.children(&mut cursor) {
         node_kind!(kind = child);
@@ -387,22 +388,22 @@ pub fn get_instruction_name(instr_node: &Node, source: &str) -> Option<String> {
 
                     // pat01 contains "i32.const", "i64.const", etc.
                     if inner_kind == "pat01" || inner_kind.contains("const") {
-                        return Some(source[inner_child.byte_range()].trim().to_string());
+                        return Some(source[inner_child.byte_range()].trim());
                     }
                 }
                 // Fallback: extract first token from the whole op_const text
                 let text = &source[child.byte_range()];
-                return text.split_whitespace().next().map(|s| s.to_string());
+                return text.split_whitespace().next();
             }
             // For other op_ nodes (like op_nullary, op_index, op_table_copy),
             // extract just the instruction name (first token)
             let text = &source[child.byte_range()];
-            return text.split_whitespace().next().map(|s| s.to_string());
+            return text.split_whitespace().next();
         }
     }
     // Fallback: get the text of the first token
     let text = &source[instr_node.byte_range()];
-    text.split_whitespace().next().map(|s| s.to_string())
+    text.split_whitespace().next()
 }
 
 /// Process a linear call_indirect/return_call_indirect node (instr_list_call)
@@ -1835,7 +1836,7 @@ fn find_instr_plain_in_expr(expr: &Node) -> Option<Node> {
 
 /// Get instruction info from a folded expression
 /// Returns (instruction_name, explicit_operand_count)
-pub fn get_folded_expr_info(expr: &Node, source: &str) -> Option<(String, usize)> {
+pub fn get_folded_expr_info<'a>(expr: &Node, source: &'a str) -> Option<(&'a str, usize)> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
         node_kind!(kind = child);
@@ -1850,7 +1851,7 @@ pub fn get_folded_expr_info(expr: &Node, source: &str) -> Option<(String, usize)
 }
 
 /// Get instruction info from an expr1 wrapper node
-fn get_expr1_wrapper_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
+fn get_expr1_wrapper_info<'a>(expr1: &Node, source: &'a str) -> Option<(&'a str, usize)> {
     let mut cursor = expr1.walk();
     for child in expr1.children(&mut cursor) {
         node_kind!(kind = child);
@@ -1863,7 +1864,7 @@ fn get_expr1_wrapper_info(expr1: &Node, source: &str) -> Option<(String, usize)>
 }
 
 /// Get instruction info from an expr1_* node
-fn get_expr1_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
+fn get_expr1_info<'a>(expr1: &Node, source: &'a str) -> Option<(&'a str, usize)> {
     let mut expr_cursor = expr1.walk();
     let explicit_operands = expr1
         .children(&mut expr_cursor)
@@ -1883,16 +1884,16 @@ fn get_expr1_info(expr1: &Node, source: &str) -> Option<(String, usize)> {
             }
         }
         if kind == "call_indirect" {
-            return Some(("call_indirect".to_string(), explicit_operands));
+            return Some(("call_indirect", explicit_operands));
         }
         if kind == "return_call_indirect" {
-            return Some(("return_call_indirect".to_string(), explicit_operands));
+            return Some(("return_call_indirect", explicit_operands));
         }
         if kind == "instr_call" {
             let text = &source[child.byte_range()];
             let first_token = text.split_whitespace().next().unwrap_or("");
             if !first_token.is_empty() {
-                return Some((first_token.to_string(), explicit_operands));
+                return Some((first_token, explicit_operands));
             }
         }
     }
@@ -2112,7 +2113,7 @@ fn process_folded_block_child(
         }
         "instr_plain" => {
             if let Some(instr_name) = get_instruction_name(child, source) {
-                process_instruction(child, &instr_name, checker, symbols, source);
+                process_instruction(child, instr_name, checker, symbols, source);
             }
         }
         "expr" => {
@@ -2314,7 +2315,7 @@ fn process_folded_expr(
     // process_instruction handles all cases: branches, terminators, regular instructions.
     if let Some(instr_node) = find_instr_plain_in_expr(expr) {
         if let Some(instr_name) = get_instruction_name(&instr_node, source) {
-            process_instruction(&instr_node, &instr_name, checker, symbols, source);
+            process_instruction(&instr_node, instr_name, checker, symbols, source);
             return;
         }
     }
@@ -2323,24 +2324,17 @@ fn process_folded_expr(
     // The grammar uses string literals for "call_indirect", so there's no named
     // call_indirect child — the expr1_call node itself holds type_use/index.
     if let Some((instr_name, _)) = get_folded_expr_info(expr, source) {
-        if matches!(
-            instr_name.as_str(),
-            "call_indirect" | "return_call_indirect"
-        ) {
+        if matches!(instr_name, "call_indirect" | "return_call_indirect") {
             if let Some(expr1_call_node) = find_expr1_call_in_expr(expr) {
-                let consumed = get_call_indirect_consumed_types(
-                    &expr1_call_node,
-                    &instr_name,
-                    symbols,
-                    source,
-                );
+                let consumed =
+                    get_call_indirect_consumed_types(&expr1_call_node, instr_name, symbols, source);
                 if !consumed.is_empty() {
-                    checker.pop_vals_for_instr(&consumed, expr, &instr_name);
+                    checker.pop_vals_for_instr(&consumed, expr, instr_name);
                 }
 
-                if is_terminating_instruction(&instr_name) {
+                if is_terminating_instruction(instr_name) {
                     if let Some(diag) =
-                        validate_tail_call_in_folded_expr(expr, &instr_name, symbols, source)
+                        validate_tail_call_in_folded_expr(expr, instr_name, symbols, source)
                     {
                         checker.diagnostics.push(diag);
                     }
@@ -2454,12 +2448,7 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
 
                 if child_kind == "instr_plain" {
                     if let Some(instr_name) = get_instruction_name(&child, source) {
-                        return infer_instruction_result_types(
-                            &instr_name,
-                            &child,
-                            symbols,
-                            source,
-                        );
+                        return infer_instruction_result_types(instr_name, &child, symbols, source);
                     }
                 }
             }
