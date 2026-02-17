@@ -186,11 +186,11 @@ pub fn find_undefined_identifiers(
                 if let Some(func) = find_containing_function(symbols, position) {
                     func.parameters
                         .iter()
-                        .any(|p| p.name.as_ref() == Some(&identifier_name.to_string()))
+                        .any(|p| p.name.as_deref() == Some(identifier_name))
                         || func
                             .locals
                             .iter()
-                            .any(|l| l.name.as_ref() == Some(&identifier_name.to_string()))
+                            .any(|l| l.name.as_deref() == Some(identifier_name))
                 } else {
                     false
                 }

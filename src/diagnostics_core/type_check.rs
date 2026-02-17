@@ -422,9 +422,9 @@ impl TypeChecker {
 
     /// Exit a control frame. Validates that end_types match the stack.
     /// Returns the popped frame, or None if ctrl_stack is empty.
-    pub fn pop_ctrl(&mut self, node: &Node) -> Option<CtrlFrame> {
+    pub fn pop_ctrl(&mut self, node: &Node) {
         if self.ctrl_stack.is_empty() {
-            return None;
+            return;
         }
         let frame = self.ctrl_stack.last().unwrap();
         let end_types = frame.end_types.clone();
@@ -454,12 +454,10 @@ impl TypeChecker {
         // Restore val_stack to frame height
         self.val_stack.truncate(height);
 
-        let frame = self.ctrl_stack.pop().unwrap();
+        self.ctrl_stack.pop();
 
-        // Push end_types onto outer stack
-        self.push_vals(&frame.end_types);
-
-        Some(frame)
+        // Push end_types onto outer stack (reuse the already-cloned vec)
+        self.push_vals(&end_types);
     }
 
     /// Handle the else transition in an if block.
