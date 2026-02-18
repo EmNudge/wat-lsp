@@ -9,6 +9,8 @@
 
 use crate::instruction_metadata::is_terminating_instruction;
 
+use super::semantic::get_instruction_name;
+
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
 use tree_sitter::Node;
@@ -48,8 +50,8 @@ pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
         }
 
         "instr_plain" => {
-            if let Some(name) = get_instruction_name_from_node(node, source) {
-                is_terminating_instruction(&name)
+            if let Some(name) = get_instruction_name(node, source) {
+                is_terminating_instruction(name)
             } else {
                 false
             }
@@ -116,39 +118,6 @@ pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
 
         _ => false,
     }
-}
-
-/// Extract the instruction name from a node (handles instr, instr_plain, etc.)
-fn get_instruction_name_from_node(node: &Node, source: &str) -> Option<String> {
-    node_kind!(kind = node);
-
-    if kind == "instr" {
-        // instr wraps other instruction types
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if let Some(name) = get_instruction_name_from_node(&child, source) {
-                return Some(name);
-            }
-        }
-        return None;
-    }
-
-    if kind == "instr_plain" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            node_kind!(child_kind = child);
-
-            if child_kind.starts_with("op_") {
-                let text = &source[child.byte_range()];
-                return text.split_whitespace().next().map(|s| s.to_string());
-            }
-        }
-        // Fallback
-        let text = &source[node.byte_range()];
-        return text.split_whitespace().next().map(|s| s.to_string());
-    }
-
-    None
 }
 
 /// Check if a block/loop body always terminates

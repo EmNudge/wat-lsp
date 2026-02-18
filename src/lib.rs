@@ -58,10 +58,6 @@ pub mod instruction_metadata;
 // Documentation access (instruction docs generated at build time)
 pub mod docs;
 
-// Wast-based parser (native-only: superseded by tree-sitter for WASM builds)
-#[cfg(feature = "native")]
-pub mod wast_parser;
-
 // Tree-sitter facade (unified interface for native and WASM)
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod ts_facade;

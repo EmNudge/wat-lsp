@@ -76,7 +76,7 @@ pub fn check_first_index_reference(
 
 /// Find and validate only the first index identifier in a node
 /// Used for instructions like struct.get where only the first index is a type
-pub fn find_first_index_identifier(
+fn find_first_index_identifier(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
@@ -103,7 +103,7 @@ pub fn find_first_index_identifier(
 }
 
 /// Recursively find identifier nodes and check if they're defined
-pub fn find_undefined_identifiers(
+fn find_undefined_identifiers(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
@@ -359,7 +359,7 @@ fn find_indices_recursive(node: &Node, callback: &mut impl FnMut(&Node)) {
 }
 
 /// Create a diagnostic for an undefined reference
-pub fn create_undefined_reference_diagnostic(
+fn create_undefined_reference_diagnostic(
     node: &Node,
     identifier_name: &str,
     context: &InstructionContext,

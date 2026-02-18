@@ -19,8 +19,7 @@ pub mod tree_walk;
 pub mod type_check;
 
 pub use module_checks::{check_block_label_mismatch, validate_module_structure};
-pub use references::*;
-pub use semantic::*;
+pub use semantic::track_stack_in_instr_list;
 pub use subtype::validate_subtype_hierarchy;
-pub use termination::*;
+pub(crate) use termination::sequence_always_terminates;
 pub use tree_sitter::provide_tree_sitter_diagnostics;
