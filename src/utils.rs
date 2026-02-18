@@ -8,9 +8,6 @@ use tree_sitter::{Node, Tree};
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::{Node, Tree};
 
-#[cfg(feature = "native")]
-use tower_lsp::lsp_types::Range as LspRange;
-
 // ============================================================================
 // Block type constants - centralized to prevent sync issues
 // ============================================================================
@@ -591,24 +588,6 @@ fn calculate_position_after_edit(_text: &str, start: Position, inserted_text: &s
     }
 }
 
-/// Convert a tree-sitter node to an LSP range (native only)
-#[cfg(feature = "native")]
-pub fn node_to_lsp_range(node: &Node) -> LspRange {
-    let start_point = node.start_position();
-    let end_point = node.end_position();
-
-    LspRange {
-        start: tower_lsp::lsp_types::Position {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-        },
-        end: tower_lsp::lsp_types::Position {
-            line: end_point.row as u32,
-            character: end_point.column as u32,
-        },
-    }
-}
-
 /// Convert a tree-sitter node to a core Range (works in both native and WASM)
 pub fn node_to_range(node: &Node) -> crate::core::types::Range {
     let start_point = node.start_position();
@@ -654,24 +633,6 @@ pub fn determine_context_with_fallback(
         get_line_at_position(document, position.line as usize)
             .map(determine_context_from_line)
             .unwrap_or(InstructionContext::General)
-    }
-}
-
-/// Determine instruction context at a specific node with fallback to line-based detection.
-/// Used by references module where we already have the node.
-pub fn determine_context_at_node_with_fallback(
-    node: &Node,
-    document: &str,
-    position: Position,
-) -> InstructionContext {
-    let ast_context = determine_instruction_context_at_node(node, document);
-    if ast_context == InstructionContext::General {
-        // Fallback to line-based detection for incomplete code
-        get_line_at_position(document, position.line as usize)
-            .map(determine_context_from_line)
-            .unwrap_or(InstructionContext::General)
-    } else {
-        ast_context
     }
 }
 

@@ -1194,7 +1194,7 @@ fn get_select_result_type(node: &Node, source: &str) -> Option<ValueType> {
 }
 
 /// Get the operand count for a dynamic instruction
-pub fn get_dynamic_operand_count(
+fn get_dynamic_operand_count(
     node: &Node,
     instr_name: &str,
     symbols: &SymbolTable,
@@ -1285,7 +1285,7 @@ pub fn get_dynamic_operand_count(
 }
 
 /// Get the index/identifier from an instruction node
-pub fn get_index_from_node<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
+fn get_index_from_node<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
@@ -1318,7 +1318,7 @@ pub fn get_index_from_node<'a>(node: &Node, source: &'a str) -> Option<&'a str> 
 }
 
 /// Infer the result type(s) of an instruction from its name and context
-pub fn infer_instruction_result_types(
+fn infer_instruction_result_types(
     instr_name: &str,
     node: &Node,
     symbols: &SymbolTable,
@@ -1482,11 +1482,7 @@ pub fn infer_instruction_result_types(
 }
 
 /// Get the type of a local variable from an instruction node
-pub fn get_local_type_from_node(
-    node: &Node,
-    symbols: &SymbolTable,
-    source: &str,
-) -> Option<ValueType> {
+fn get_local_type_from_node(node: &Node, symbols: &SymbolTable, source: &str) -> Option<ValueType> {
     let index = get_index_from_node(node, source)?;
     let func_line = node.start_position().row as u32;
     let func = symbols.find_function_containing_line(func_line)?;
@@ -1525,7 +1521,7 @@ pub fn get_local_type_from_node(
 }
 
 /// Get the type of a global from an instruction node
-pub fn get_global_type_from_node(
+fn get_global_type_from_node(
     node: &Node,
     symbols: &SymbolTable,
     source: &str,
@@ -1608,7 +1604,7 @@ fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) ->
 }
 
 /// Get result types for a call instruction
-pub fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
+fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(func_ref) = get_index_from_node(node, source) {
         if let Some(func) = symbols.get_function_by_name(func_ref) {
             return func.results.clone();
@@ -1622,11 +1618,7 @@ pub fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -
 }
 
 /// Get result types for a call_ref instruction
-pub fn get_call_ref_result_types(
-    node: &Node,
-    symbols: &SymbolTable,
-    source: &str,
-) -> Vec<ValueType> {
+fn get_call_ref_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(type_ref) = get_index_from_node(node, source) {
         if let Some(type_def) = symbols.get_type_by_name(type_ref) {
             if let TypeKind::Func { results, .. } = &type_def.kind {
@@ -1677,7 +1669,7 @@ fn resolve_call_indirect_type<'a>(
 }
 
 /// Get result types for a call_indirect instruction
-pub fn get_call_indirect_result_types(
+fn get_call_indirect_result_types(
     node: &Node,
     symbols: &SymbolTable,
     source: &str,
@@ -1773,7 +1765,7 @@ fn find_instr_plain_in_expr(expr: &Node) -> Option<Node> {
 
 /// Get instruction info from a folded expression
 /// Returns (instruction_name, explicit_operand_count)
-pub fn get_folded_expr_info<'a>(expr: &Node, source: &'a str) -> Option<(&'a str, usize)> {
+fn get_folded_expr_info<'a>(expr: &Node, source: &'a str) -> Option<(&'a str, usize)> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
         node_kind!(kind = child);
@@ -1838,49 +1830,6 @@ fn get_expr1_info<'a>(expr1: &Node, source: &'a str) -> Option<(&'a str, usize)>
 }
 
 /// Get the expected operand count for an instruction (fixed or dynamic)
-pub fn get_expected_operands_by_name(
-    instr_name: &str,
-    symbols: &SymbolTable,
-    source: &str,
-    expr: &Node,
-) -> usize {
-    if let Some(arity) = lookup_instruction_arity(instr_name) {
-        match arity.operand_mode {
-            OperandMode::Fixed(n) => n,
-            OperandMode::Dynamic => {
-                get_dynamic_operand_count_from_expr(expr, instr_name, symbols, source)
-            }
-        }
-    } else {
-        0
-    }
-}
-
-/// Get dynamic operand count by finding the instr_plain inside an expr
-fn get_dynamic_operand_count_from_expr(
-    expr: &Node,
-    instr_name: &str,
-    symbols: &SymbolTable,
-    source: &str,
-) -> usize {
-    let mut cursor = expr.walk();
-    for child in expr.children(&mut cursor) {
-        node_kind!(kind = child);
-
-        if kind.starts_with("expr1_") {
-            let mut inner_cursor = child.walk();
-            for inner_child in child.children(&mut inner_cursor) {
-                node_kind!(inner_kind = inner_child);
-
-                if inner_kind == "instr_plain" {
-                    return get_dynamic_operand_count(&inner_child, instr_name, symbols, source);
-                }
-            }
-        }
-    }
-    0
-}
-
 /// Check if a folded expression is a block-type (block, loop, if, try_table).
 /// Returns the expr1_* node and its block kind if found.
 macro_rules! find_folded_block_child_body {
@@ -2313,7 +2262,7 @@ fn find_expr1_call_in_expr(expr: &Node) -> Option<Node> {
 }
 
 /// Get result types from a folded expression
-pub fn get_expr_result_types(expr: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
+fn get_expr_result_types(expr: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
     let mut cursor = expr.walk();
     for child in expr.children(&mut cursor) {
         node_kind!(kind = child);
@@ -2381,7 +2330,7 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
 }
 
 /// Get function reference from expr1_call node
-pub fn get_index_from_expr1_call<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
+fn get_index_from_expr1_call<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
@@ -2471,8 +2420,10 @@ fn resolve_type_index_to_func_sig(
 
     // Build implicit type table: explicit type sigs + unique function sigs
     let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for type_def in &symbols.types {
         if let TypeKind::Func { params, results } = &type_def.kind {
+            seen.insert((params.clone(), results.clone()));
             sigs.push((params.clone(), results.clone()));
         }
     }
@@ -2482,7 +2433,7 @@ fn resolve_type_index_to_func_sig(
         }
         let params: Vec<ValueType> = func.parameters.iter().map(|p| p.param_type).collect();
         let sig = (params, func.results.clone());
-        if !sigs.iter().any(|s| s == &sig) {
+        if seen.insert(sig.clone()) {
             sigs.push(sig);
         }
     }
@@ -2490,7 +2441,7 @@ fn resolve_type_index_to_func_sig(
 }
 
 /// Get result types from a block/loop/if node
-pub fn get_block_result_types(
+fn get_block_result_types(
     block_node: &Node,
     source: &str,
     symbols: &SymbolTable,
@@ -2536,11 +2487,7 @@ pub fn get_block_result_types(
 }
 
 /// Get param types from a block/loop/if node
-pub fn get_block_param_types(
-    block_node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-) -> Vec<ValueType> {
+fn get_block_param_types(block_node: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
     let mut types = Vec::new();
     let mut has_explicit_params = false;
     let mut cursor = block_node.walk();
@@ -2581,7 +2528,7 @@ pub fn get_block_param_types(
 }
 
 /// Parse result types from a func_type_results node
-pub fn parse_func_type_results(results_node: &Node, source: &str) -> Vec<ValueType> {
+fn parse_func_type_results(results_node: &Node, source: &str) -> Vec<ValueType> {
     let mut types = Vec::new();
     let mut cursor = results_node.walk();
     for child in results_node.children(&mut cursor) {
@@ -2600,7 +2547,7 @@ pub fn parse_func_type_results(results_node: &Node, source: &str) -> Vec<ValueTy
 }
 
 /// Parse result types from a block_type node
-pub fn parse_result_types(block_type: &Node, source: &str) -> Vec<ValueType> {
+fn parse_result_types(block_type: &Node, source: &str) -> Vec<ValueType> {
     let mut types = Vec::new();
     let mut cursor = block_type.walk();
 
@@ -2768,24 +2715,4 @@ fn validate_tail_call_return_types(
     }
 
     None
-}
-
-/// Create a diagnostic for stack underflow
-pub fn create_stack_underflow_diagnostic(
-    node: &Node,
-    instr_name: &str,
-    needed: usize,
-    available: usize,
-) -> Diagnostic {
-    let range = node_to_range(node);
-    let value_word = if needed == 1 { "value" } else { "values" };
-
-    Diagnostic::error(
-        range,
-        format!(
-            "Stack underflow: '{}' requires {} {} but only {} available on stack",
-            instr_name, needed, value_word, available
-        ),
-    )
-    .with_code("stack-underflow")
 }

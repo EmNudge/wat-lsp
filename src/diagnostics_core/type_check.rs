@@ -267,17 +267,6 @@ impl TypeChecker {
 
     /// Pop a value and check it matches, without emitting diagnostics (caller handles errors).
     /// Returns (actual_type, matched). matched is false if type mismatch.
-    pub fn pop_expect_silent(&mut self, expected: &ValueType) -> (Option<ValueType>, bool) {
-        let actual = self.pop_val();
-        match actual {
-            Some(ref ty) => {
-                let matched = types_compatible(ty, expected);
-                (actual, matched)
-            }
-            None => (None, false),
-        }
-    }
-
     /// Push multiple values onto the stack.
     pub fn push_vals(&mut self, types: &[ValueType]) {
         self.val_stack.extend_from_slice(types);
@@ -370,23 +359,6 @@ impl TypeChecker {
             }
         }
         ok
-    }
-
-    /// Pop multiple values without type checking (just count).
-    /// Returns the number actually popped (may be less than requested on underflow).
-    pub fn pop_n(&mut self, n: usize) -> usize {
-        let height = self.current_frame_height();
-        let available = self.val_stack.len() - height;
-        let to_pop = n.min(available);
-        // If unreachable, we can always pop
-        if self.is_current_unreachable() {
-            let actual_pop = n.min(self.val_stack.len().saturating_sub(height));
-            self.val_stack
-                .truncate(self.val_stack.len().saturating_sub(actual_pop));
-            return n; // pretend we popped all
-        }
-        self.val_stack.truncate(self.val_stack.len() - to_pop);
-        to_pop
     }
 
     /// Enter a new control frame (block, loop, if, function).
@@ -587,27 +559,9 @@ impl TypeChecker {
         }
     }
 
-    /// Get the current stack depth above the current frame height.
-    pub fn stack_depth(&self) -> usize {
-        self.val_stack
-            .len()
-            .saturating_sub(self.current_frame_height())
-    }
-
     /// Get the current control stack depth.
     pub fn ctrl_depth(&self) -> usize {
         self.ctrl_stack.len()
-    }
-
-    /// Peek at a frame at the given depth (0 = current).
-    pub fn get_frame(&self, depth: usize) -> Option<&CtrlFrame> {
-        let idx = self.ctrl_stack.len().checked_sub(1 + depth)?;
-        Some(&self.ctrl_stack[idx])
-    }
-
-    /// Get the function-level frame (bottom of control stack).
-    pub fn function_frame(&self) -> Option<&CtrlFrame> {
-        self.ctrl_stack.first()
     }
 
     /// Pop the function's return types for a `return` instruction.

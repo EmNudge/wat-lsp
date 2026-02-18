@@ -594,11 +594,11 @@ fn check_inline_type_mismatches(
                 }
                 "func_type_params" => {
                     has_inline_sig = true;
-                    extract_param_types(&child, source, &mut inline_params);
+                    collect_value_types_recursive(&child, source, &mut inline_params);
                 }
                 "func_type_results" => {
                     has_inline_sig = true;
-                    extract_result_types(&child, source, &mut inline_results);
+                    collect_value_types_recursive(&child, source, &mut inline_results);
                 }
                 _ => {}
             }
@@ -625,17 +625,6 @@ fn check_inline_type_mismatches(
             }
         }
     });
-}
-
-fn extract_param_types(node: &Node, source: &str, out: &mut Vec<String>) {
-    // func_type_params wraps func_type_params_one or func_type_params_many
-    // which contain value_type children
-    collect_value_types_recursive(node, source, out);
-}
-
-fn extract_result_types(node: &Node, source: &str, out: &mut Vec<String>) {
-    // func_type_results: (result value_type*)
-    collect_value_types_recursive(node, source, out);
 }
 
 fn collect_value_types_recursive(node: &Node, source: &str, out: &mut Vec<String>) {
@@ -3079,11 +3068,11 @@ fn check_block_children_for_type_use<'a>(
             "type_use" => *type_use_node = Some(child),
             "func_type_params" | "func_type_params_many" => {
                 *has_inline_sig = true;
-                extract_param_types(&child, source, inline_params);
+                collect_value_types_recursive(&child, source, inline_params);
             }
             "func_type_results" => {
                 *has_inline_sig = true;
-                extract_result_types(&child, source, inline_results);
+                collect_value_types_recursive(&child, source, inline_results);
             }
             "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
             | "block_try" => {
@@ -3119,11 +3108,11 @@ fn check_block_children_for_type_use(
             "type_use" => *type_use_node = Some(child.clone()),
             "func_type_params" | "func_type_params_many" => {
                 *has_inline_sig = true;
-                extract_param_types(&child, source, inline_params);
+                collect_value_types_recursive(&child, source, inline_params);
             }
             "func_type_results" => {
                 *has_inline_sig = true;
-                extract_result_types(&child, source, inline_results);
+                collect_value_types_recursive(&child, source, inline_results);
             }
             "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
             | "block_try" => {
