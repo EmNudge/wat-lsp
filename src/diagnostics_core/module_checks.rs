@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::types::{Diagnostic, Range};
 use crate::symbols::{SymbolTable, TypeKind, ValueType};
-use crate::utils::node_to_range;
+use crate::utils::{node_text, node_to_range};
 
 #[cfg(feature = "native")]
 use tree_sitter::Node;
@@ -116,11 +116,6 @@ fn for_each_module_field(module: &Node, mut f: impl FnMut(&Node)) {
             }
         }
     }
-}
-
-/// Helper: extract text from a node
-fn node_text<'a>(node: &Node, source: &'a str) -> &'a str {
-    &source[node.byte_range()]
 }
 
 // ============================================================================
