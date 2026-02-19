@@ -71,6 +71,7 @@ fn test_add_table() {
         name: Some("$funcs".to_string()),
         index: 0,
         ref_type: ValueType::Funcref,
+        ref_type_non_nullable: false,
         limits: (10, Some(100)),
         is_table64: false,
         line: 0,

@@ -1117,6 +1117,7 @@ fn check_elem_segment_types(
 
         // Extract declared elem type from elem_list (e.g. funcref, externref)
         let mut elem_type: Option<ValueType> = None;
+        let mut elem_type_nullable = true; // nullable until proven otherwise
         let mut table_idx: Option<usize> = None;
         let mut has_offset = false;
 
@@ -1151,6 +1152,10 @@ fn check_elem_segment_types(
                     if ek == "ref_type" || ek == "value_type" {
                         let text = node_text(&ec_child, source);
                         elem_type = ValueType::try_parse(text.trim());
+                        // Check if the ref_type AST node is non-nullable
+                        if is_non_nullable_ref_type_node(&ec_child, source) {
+                            elem_type_nullable = false;
+                        }
                     }
                 }
             }
@@ -1158,17 +1163,29 @@ fn check_elem_segment_types(
             if ck == "ref_type" && elem_type.is_none() {
                 let text = node_text(&child, source);
                 elem_type = ValueType::try_parse(text.trim());
+                if is_non_nullable_ref_type_node(&child, source) {
+                    elem_type_nullable = false;
+                }
             }
         }
 
-        // Old-style elem segments without explicit type default to funcref
+        // Old-style elem segments without explicit type:
+        // "func" keyword or bare indices = non-nullable func references
         let elem_type = elem_type.unwrap_or(ValueType::Funcref);
+        if elem_type == ValueType::Funcref && !has_explicit_nullable_type(field, source) {
+            elem_type_nullable = false;
+        }
 
         // Check 1: elem type vs target table type (for active segments)
         if has_offset {
             let tbl_idx = table_idx.unwrap_or(0);
             if let Some(table) = symbols.tables.get(tbl_idx) {
-                if !elem_ref_compatible(&elem_type, &table.ref_type) {
+                if !elem_ref_compatible(
+                    &elem_type,
+                    &table.ref_type,
+                    table.ref_type_non_nullable,
+                    elem_type_nullable,
+                ) {
                     diagnostics.push(
                         Diagnostic::error(node_to_range(field), "type mismatch")
                             .with_code("type-mismatch"),
@@ -1189,9 +1206,89 @@ fn check_elem_segment_types(
     });
 }
 
+/// Check if an elem segment has an explicitly nullable type keyword (`funcref` or `externref`).
+/// Returns false for old-style segments (bare indices, `func` keyword), `(ref func)`, etc.
+fn has_explicit_nullable_type(elem_node: &Node, source: &str) -> bool {
+    let mut cursor = elem_node.walk();
+    for child in elem_node.children(&mut cursor) {
+        node_kind!(ck = child);
+        if ck == "elem_list" || ck == "ref_type" || ck == "value_type" {
+            let text = node_text(&child, source).trim().to_string();
+            if text == "funcref" || text == "externref" {
+                return true;
+            }
+            // Check for nested ref_type children
+            let mut ec = child.walk();
+            for gc in child.children(&mut ec) {
+                node_kind!(gk = gc);
+                if gk == "ref_type" || gk == "ref_type_funcref" || gk == "ref_type_externref" {
+                    let gtext = node_text(&gc, source).trim().to_string();
+                    if gtext == "funcref" || gtext == "externref" {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if a ref_type AST node is a non-nullable reference type.
+fn is_non_nullable_ref_type_node(node: &Node, source: &str) -> bool {
+    node_kind!(kind = node);
+    match kind {
+        "ref_type_ref" | "ref_type_concrete" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if &source[child.byte_range()] == "null" {
+                    return false;
+                }
+            }
+            true
+        }
+        "ref_type_funcref" | "ref_type_externref" => false,
+        _ => {
+            let text = source[node.byte_range()].trim();
+            if matches!(
+                text,
+                "funcref"
+                    | "externref"
+                    | "anyref"
+                    | "eqref"
+                    | "i31ref"
+                    | "structref"
+                    | "arrayref"
+                    | "nullref"
+                    | "nullfuncref"
+                    | "nullexternref"
+            ) {
+                return false;
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if is_non_nullable_ref_type_node(&child, source) {
+                    return true;
+                }
+            }
+            false
+        }
+    }
+}
+
 /// Check if elem ref type is compatible with table element type.
-fn elem_ref_compatible(elem_type: &ValueType, table_type: &ValueType) -> bool {
+fn elem_ref_compatible(
+    elem_type: &ValueType,
+    table_type: &ValueType,
+    table_non_nullable: bool,
+    elem_nullable: bool,
+) -> bool {
     use ValueType::*;
+
+    // If the table type is non-nullable, nullable elem types are incompatible
+    if table_non_nullable && elem_nullable {
+        return false;
+    }
+
     if elem_type == table_type {
         return true;
     }

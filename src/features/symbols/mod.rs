@@ -184,6 +184,8 @@ pub struct Table {
     pub name: Option<String>,
     pub index: usize,
     pub ref_type: ValueType,
+    /// Whether the table's element type is non-nullable (e.g. `(ref func)` vs `funcref`).
+    pub ref_type_non_nullable: bool,
     pub limits: (u64, Option<u64>),
     pub is_table64: bool,
     pub line: u32,

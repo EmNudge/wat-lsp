@@ -7,6 +7,7 @@ pub(crate) mod alignment_checks;
 pub(crate) mod arity;
 pub(crate) mod folded_checks;
 pub(crate) mod gc_checks;
+pub(crate) mod local_init;
 pub(crate) mod memory_checks;
 pub(crate) mod module_checks;
 pub(crate) mod references;

@@ -88,6 +88,7 @@ pub fn create_test_symbols() -> SymbolTable {
         name: Some("$funcs".to_string()),
         index: 0,
         ref_type: ValueType::Funcref,
+        ref_type_non_nullable: false,
         limits: (10, None),
         is_table64: false,
         line: 0,
