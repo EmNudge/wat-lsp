@@ -1,6 +1,8 @@
 use crate::core::types::Range;
 use crate::symbols::*;
-use crate::utils::{block_type_from_kind, node_to_range, BLOCK_KINDS_EXPR, BLOCK_KINDS_STATEMENT};
+use crate::utils::{
+    block_type_from_kind, node_text, node_to_range, BLOCK_KINDS_EXPR, BLOCK_KINDS_STATEMENT,
+};
 
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
@@ -2041,11 +2043,6 @@ fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
         line: tag_node.range().start_point.row as u32,
         range: name_range,
     })
-}
-
-/// Helper: Extract text from a node
-fn node_text<'a>(node: &Node, source: &'a str) -> &'a str {
-    &source[node.byte_range()]
 }
 
 /// Parse a WAT natural number, handling hex (0x...) and underscore separators.

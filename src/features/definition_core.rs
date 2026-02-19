@@ -66,7 +66,7 @@ fn provide_definition_at_cursor(
     // Check locals/params/blocks in containing function
     if let Some(func) = find_containing_function(symbols, position) {
         for param in &func.parameters {
-            if param.name.as_ref() == Some(&word.to_string()) {
+            if param.name.as_deref() == Some(word) {
                 if let Some(range) = param.range.as_ref() {
                     if position.line == range.start.line {
                         return Some(*range);
@@ -75,7 +75,7 @@ fn provide_definition_at_cursor(
             }
         }
         for local in &func.locals {
-            if local.name.as_ref() == Some(&word.to_string()) {
+            if local.name.as_deref() == Some(word) {
                 if let Some(range) = local.range.as_ref() {
                     if position.line == range.start.line {
                         return Some(*range);

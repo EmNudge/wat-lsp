@@ -588,6 +588,11 @@ fn calculate_position_after_edit(_text: &str, start: Position, inserted_text: &s
     }
 }
 
+/// Extract text from a node by slicing the source (works in both native and WASM)
+pub(crate) fn node_text<'a>(node: &Node, source: &'a str) -> &'a str {
+    &source[node.byte_range()]
+}
+
 /// Convert a tree-sitter node to a core Range (works in both native and WASM)
 pub fn node_to_range(node: &Node) -> crate::core::types::Range {
     let start_point = node.start_position();

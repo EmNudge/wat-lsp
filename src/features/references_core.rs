@@ -233,7 +233,7 @@ fn identify_named_symbol(
         InstructionContext::Local => {
             if let Some(func) = find_containing_function(symbols, position) {
                 for param in &func.parameters {
-                    if param.name.as_ref() == Some(&word.to_string()) {
+                    if param.name.as_deref() == Some(word) {
                         return Some(ReferenceTarget::Parameter {
                             name: Some(word.to_string()),
                             index: param.index,
@@ -242,7 +242,7 @@ fn identify_named_symbol(
                     }
                 }
                 for local in &func.locals {
-                    if local.name.as_ref() == Some(&word.to_string()) {
+                    if local.name.as_deref() == Some(word) {
                         return Some(ReferenceTarget::Local {
                             name: Some(word.to_string()),
                             index: local.index + func.parameters.len(),
@@ -275,7 +275,7 @@ fn identify_named_symbol(
 
             if let Some(func) = find_containing_function(symbols, position) {
                 for param in &func.parameters {
-                    if param.name.as_ref() == Some(&word.to_string()) {
+                    if param.name.as_deref() == Some(word) {
                         return Some(ReferenceTarget::Parameter {
                             name: Some(word.to_string()),
                             index: param.index,
@@ -284,7 +284,7 @@ fn identify_named_symbol(
                     }
                 }
                 for local in &func.locals {
-                    if local.name.as_ref() == Some(&word.to_string()) {
+                    if local.name.as_deref() == Some(word) {
                         return Some(ReferenceTarget::Local {
                             name: Some(word.to_string()),
                             index: local.index + func.parameters.len(),
@@ -672,13 +672,13 @@ fn matches_target_identifier(
             if *context != InstructionContext::Call {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
         ReferenceTarget::Global { name, .. } => {
             if *context != InstructionContext::Global {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
         ReferenceTarget::Local {
             name,
@@ -688,7 +688,7 @@ fn matches_target_identifier(
             if *context != InstructionContext::Local {
                 return false;
             }
-            if name.as_ref() != Some(&identifier.to_string()) {
+            if name.as_deref() != Some(identifier) {
                 return false;
             }
             is_in_same_function_by_line(line, *function_start_byte, symbols)
@@ -701,7 +701,7 @@ fn matches_target_identifier(
             if *context != InstructionContext::Local {
                 return false;
             }
-            if name.as_ref() != Some(&identifier.to_string()) {
+            if name.as_deref() != Some(identifier) {
                 return false;
             }
             is_in_same_function_by_line(line, *function_start_byte, symbols)
@@ -723,37 +723,37 @@ fn matches_target_identifier(
             if *context != InstructionContext::Table {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
         ReferenceTarget::Memory { name, .. } => {
             if *context != InstructionContext::Memory {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
         ReferenceTarget::Type { name, .. } => {
             if *context != InstructionContext::Type {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
         ReferenceTarget::Tag { name, .. } => {
             if *context != InstructionContext::Tag {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
         ReferenceTarget::Data { name, .. } => {
             if *context != InstructionContext::Data {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
         ReferenceTarget::Elem { name, .. } => {
             if *context != InstructionContext::Elem {
                 return false;
             }
-            name.as_ref() == Some(&identifier.to_string())
+            name.as_deref() == Some(identifier)
         }
     }
 }

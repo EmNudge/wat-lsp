@@ -7,8 +7,6 @@
 //! matching the pattern used by `docs.rs`. Eliminates HashMap
 //! overhead and runtime allocation in WASM builds.
 
-#[cfg(test)]
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -702,7 +700,7 @@ pub fn lookup_instruction_arity(name: &str) -> Option<&'static InstructionArity>
 
 /// Returns a map of instruction names to their expected parameter counts (test-only).
 #[cfg(test)]
-pub fn get_instruction_arity_map() -> HashMap<&'static str, InstructionArity> {
+pub fn get_instruction_arity_map() -> std::collections::HashMap<&'static str, InstructionArity> {
     init_arity_table().into_iter().collect()
 }
 
