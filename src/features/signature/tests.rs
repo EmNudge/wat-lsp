@@ -169,6 +169,7 @@ fn test_format_function_signature_simple() {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
 
     let sig = format_function_signature(&func);
@@ -196,6 +197,7 @@ fn test_format_function_signature_with_params() {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
 
     let sig = format_function_signature(&func);
@@ -220,6 +222,7 @@ fn test_format_function_signature_with_results() {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
 
     let sig = format_function_signature(&func);
@@ -249,6 +252,7 @@ fn test_format_function_signature_unnamed_params() {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
 
     let sig = format_function_signature(&func);

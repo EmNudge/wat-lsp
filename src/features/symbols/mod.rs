@@ -166,6 +166,8 @@ pub struct Function {
     pub doc_comment: Option<String>,
     /// True if this function uses `(type N)` — such functions don't create implicit types
     pub has_type_use: bool,
+    /// The resolved type index for this function (explicit type_use or implicit).
+    pub type_index: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +229,11 @@ pub struct TypeDef {
     pub is_final: bool,
     pub line: u32,
     pub range: Option<Range>,
+    /// Rec group ID — types in the same `(rec ...)` block share an ID.
+    /// Standalone types get their own unique ID.
+    pub rec_group_id: usize,
+    /// Number of types in this rec group (1 for standalone types).
+    pub rec_group_size: usize,
 }
 
 #[derive(Debug, Clone)]

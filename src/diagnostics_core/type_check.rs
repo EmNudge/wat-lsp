@@ -5,7 +5,7 @@
 //! detect both stack underflow AND type mismatches.
 
 use crate::core::types::Diagnostic;
-use crate::symbols::{SymbolTable, TypeKind, ValueType};
+use crate::symbols::{SymbolTable, TypeDef, TypeKind, ValueType};
 use crate::utils::node_to_range;
 
 // Use the appropriate tree-sitter types based on feature
@@ -79,18 +79,21 @@ fn is_ref_subtype(sub: &ValueType, sup: &ValueType) -> bool {
         // i31ref, structref, arrayref <: eqref <: anyref
         (I31ref | Structref | Arrayref | Eqref, Anyref) => true,
         (I31ref | Structref | Arrayref, Eqref) => true,
-        // Ref(n) / RefNull(n) — without symbol table, assume func hierarchy only
-        (Ref(_), Funcref) => true,
-        (RefNull(_), Funcref) => true,
-        // NullFuncref is bottom of func hierarchy — subtype of all func refs
-        (NullFuncref, RefNull(_) | Ref(_) | Structref) => true,
-        // Non-null <: nullable for same index
-        (Ref(a), RefNull(b)) if a == b => true,
-        // Structref is used as placeholder for unresolved named ref types (e.g., (ref $mytype))
-        // in the parser (extract_ref_type can't resolve named indices without SymbolTable).
-        // Treat as compatible with concrete indexed refs to avoid false positives.
+        // Concrete Ref(n)/RefNull(n) are subtypes of all abstract ref supertypes.
+        // Without symbol table we can't distinguish struct/array/func kinds, so we
+        // accept all abstract supertypes (precise checking done by types_compatible_with_symbols).
+        (Ref(_) | RefNull(_), Funcref | Anyref | Eqref | Arrayref | Structref) => true,
+        // NullFuncref is bottom of func hierarchy — subtype of all nullable func refs
+        (NullFuncref, RefNull(_) | Structref) => true,
+        // Nullref is bottom of internal ref hierarchy — subtype of all nullable internal refs
+        (Nullref, RefNull(_)) => true,
+        // Concrete ref cross-compatibility: without symbols we can't verify type
+        // equivalence (e.g., iso-recursive rec group identity), so be permissive.
+        // Precise checking done by types_compatible_with_symbols.
+        (Ref(_), Ref(_) | RefNull(_)) => true,
+        (RefNull(_), RefNull(_)) => true,
+        // Structref compat with concrete refs (Structref was used as unresolved-ref placeholder)
         (Structref, Ref(_) | RefNull(_)) => true,
-        (Ref(_) | RefNull(_), Structref) => true,
         _ => false,
     }
 }
@@ -105,11 +108,26 @@ pub fn types_compatible_with_symbols(
     expected: &ValueType,
     symbols: &SymbolTable,
 ) -> bool {
-    // Fast path: check without symbols first
-    if types_compatible(actual, expected) {
+    use ValueType::*;
+    if *actual == Unknown || *expected == Unknown {
         return true;
     }
-    // Concrete ref subtyping requires symbols
+    if actual == expected {
+        return true;
+    }
+    // For concrete ref types, use precise symbol-based checking instead of
+    // the permissive is_ref_subtype (which treats Ref(a) ~= Ref(b) without symbols).
+    let is_concrete = matches!(
+        (actual, expected),
+        (Ref(_) | RefNull(_), Ref(_) | RefNull(_))
+    );
+    if is_concrete {
+        return is_concrete_ref_subtype(actual, expected, symbols);
+    }
+    // For non-concrete ref types, use basic subtyping
+    if is_ref_subtype(actual, expected) {
+        return true;
+    }
     is_concrete_ref_subtype(actual, expected, symbols)
 }
 
@@ -172,6 +190,13 @@ fn is_type_subtype(child_idx: usize, parent_idx: usize, symbols: &SymbolTable) -
         return true;
     }
 
+    // Check iso-recursive type equivalence (types in different rec groups
+    // can be equivalent if the rec groups have the same shape)
+    if are_types_equivalent(child_idx, parent_idx, symbols) {
+        return true;
+    }
+
+    // Walk the declared parent chain
     let mut current_idx = child_idx;
     for _ in 0..64 {
         let type_def = match symbols.get_type_by_index(current_idx) {
@@ -200,10 +225,253 @@ fn is_type_subtype(child_idx: usize, parent_idx: usize, symbols: &SymbolTable) -
         if resolved_idx == parent_idx {
             return true;
         }
+        // Also check equivalence with the target
+        if are_types_equivalent(resolved_idx, parent_idx, symbols) {
+            return true;
+        }
         current_idx = resolved_idx;
     }
 
     false
+}
+
+/// Check iso-recursive type equivalence between two type indices.
+/// Two types are equivalent if they are in rec groups with the same shape
+/// (same size, same relative position, and structurally identical type definitions
+/// with internal references mapped by relative position).
+fn are_types_equivalent(idx_a: usize, idx_b: usize, symbols: &SymbolTable) -> bool {
+    if idx_a == idx_b {
+        return true;
+    }
+    let td_a = match symbols.get_type_by_index(idx_a) {
+        Some(td) => td,
+        None => return false,
+    };
+    let td_b = match symbols.get_type_by_index(idx_b) {
+        Some(td) => td,
+        None => return false,
+    };
+
+    // Must be in rec groups of the same size
+    if td_a.rec_group_size != td_b.rec_group_size {
+        return false;
+    }
+
+    // Compute offsets within rec groups
+    let group_a_start = idx_a - (idx_a - find_rec_group_start(idx_a, symbols));
+    let group_b_start = idx_b - (idx_b - find_rec_group_start(idx_b, symbols));
+    let offset_a = idx_a - group_a_start;
+    let offset_b = idx_b - group_b_start;
+
+    // Must be at the same position within their rec groups
+    if offset_a != offset_b {
+        return false;
+    }
+
+    // Compare all types in both rec groups pairwise
+    let size = td_a.rec_group_size;
+    for i in 0..size {
+        let ta = match symbols.get_type_by_index(group_a_start + i) {
+            Some(t) => t,
+            None => return false,
+        };
+        let tb = match symbols.get_type_by_index(group_b_start + i) {
+            Some(t) => t,
+            None => return false,
+        };
+        if !types_structurally_equal(ta, tb, group_a_start, group_b_start, size, symbols) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Find the start index of the rec group containing the given type index.
+fn find_rec_group_start(idx: usize, symbols: &SymbolTable) -> usize {
+    let td = match symbols.get_type_by_index(idx) {
+        Some(t) => t,
+        None => return idx,
+    };
+    let rec_id = td.rec_group_id;
+    // Scan backward to find the first type with the same rec_group_id
+    let mut start = idx;
+    while start > 0 {
+        if let Some(prev) = symbols.get_type_by_index(start - 1) {
+            if prev.rec_group_id == rec_id {
+                start -= 1;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    start
+}
+
+/// Check if two type definitions are structurally equal, mapping internal references.
+fn types_structurally_equal(
+    a: &TypeDef,
+    b: &TypeDef,
+    group_a_start: usize,
+    group_b_start: usize,
+    group_size: usize,
+    symbols: &SymbolTable,
+) -> bool {
+    // Finality must match
+    if a.is_final != b.is_final {
+        return false;
+    }
+    // Parent declarations must match (mapped)
+    match (&a.parent, &b.parent) {
+        (None, None) => {}
+        (Some(pa), Some(pb)) => {
+            let ra = resolve_type_ref(pa, symbols);
+            let rb = resolve_type_ref(pb, symbols);
+            if !refs_equivalent(ra, rb, group_a_start, group_b_start, group_size, symbols) {
+                return false;
+            }
+        }
+        _ => return false,
+    }
+    // Kind must match
+    match (&a.kind, &b.kind) {
+        (
+            TypeKind::Func {
+                params: pa,
+                results: ra,
+            },
+            TypeKind::Func {
+                params: pb,
+                results: rb,
+            },
+        ) => {
+            if pa.len() != pb.len() || ra.len() != rb.len() {
+                return false;
+            }
+            for (va, vb) in pa.iter().zip(pb.iter()) {
+                if !value_types_equivalent(
+                    va,
+                    vb,
+                    group_a_start,
+                    group_b_start,
+                    group_size,
+                    symbols,
+                ) {
+                    return false;
+                }
+            }
+            for (va, vb) in ra.iter().zip(rb.iter()) {
+                if !value_types_equivalent(
+                    va,
+                    vb,
+                    group_a_start,
+                    group_b_start,
+                    group_size,
+                    symbols,
+                ) {
+                    return false;
+                }
+            }
+            true
+        }
+        (TypeKind::Struct { fields: fa }, TypeKind::Struct { fields: fb }) => {
+            if fa.len() != fb.len() {
+                return false;
+            }
+            for ((_, ta, ma), (_, tb, mb)) in fa.iter().zip(fb.iter()) {
+                if ma != mb {
+                    return false;
+                }
+                if !value_types_equivalent(
+                    ta,
+                    tb,
+                    group_a_start,
+                    group_b_start,
+                    group_size,
+                    symbols,
+                ) {
+                    return false;
+                }
+            }
+            true
+        }
+        (
+            TypeKind::Array {
+                element_type: ea,
+                mutable: ma,
+            },
+            TypeKind::Array {
+                element_type: eb,
+                mutable: mb,
+            },
+        ) => {
+            ma == mb
+                && value_types_equivalent(ea, eb, group_a_start, group_b_start, group_size, symbols)
+        }
+        _ => false,
+    }
+}
+
+/// Check if two value types are equivalent with rec group reference mapping.
+fn value_types_equivalent(
+    a: &ValueType,
+    b: &ValueType,
+    group_a_start: usize,
+    group_b_start: usize,
+    group_size: usize,
+    symbols: &SymbolTable,
+) -> bool {
+    use ValueType::*;
+    match (a, b) {
+        (Ref(na), Ref(nb)) | (RefNull(na), RefNull(nb)) => refs_equivalent(
+            Some(*na as usize),
+            Some(*nb as usize),
+            group_a_start,
+            group_b_start,
+            group_size,
+            symbols,
+        ),
+        _ => a == b,
+    }
+}
+
+/// Check if two type references are equivalent under rec group mapping.
+fn refs_equivalent(
+    a: Option<usize>,
+    b: Option<usize>,
+    group_a_start: usize,
+    group_b_start: usize,
+    group_size: usize,
+    symbols: &SymbolTable,
+) -> bool {
+    match (a, b) {
+        (Some(ra), Some(rb)) => {
+            let in_group_a = ra >= group_a_start && ra < group_a_start + group_size;
+            let in_group_b = rb >= group_b_start && rb < group_b_start + group_size;
+            if in_group_a && in_group_b {
+                // Both internal — compare relative positions
+                (ra - group_a_start) == (rb - group_b_start)
+            } else if !in_group_a && !in_group_b {
+                // Both external — check type equivalence recursively
+                are_types_equivalent(ra, rb, symbols)
+            } else {
+                // One internal, one external — not equivalent
+                false
+            }
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// Resolve a type reference string to a type index.
+fn resolve_type_ref(ref_str: &str, symbols: &SymbolTable) -> Option<usize> {
+    if ref_str.starts_with('$') {
+        symbols.get_type_by_name(ref_str).map(|t| t.index)
+    } else {
+        ref_str.parse::<usize>().ok()
+    }
 }
 
 impl TypeChecker {
@@ -602,6 +870,8 @@ mod tests {
             is_final: false,
             line: 0,
             range: None,
+            rec_group_id: 0,
+            rec_group_size: 1,
         }
     }
 
@@ -617,6 +887,8 @@ mod tests {
             is_final: false,
             line: 0,
             range: None,
+            rec_group_id: 0,
+            rec_group_size: 1,
         }
     }
 
@@ -632,6 +904,8 @@ mod tests {
             is_final: false,
             line: 0,
             range: None,
+            rec_group_id: 0,
+            rec_group_size: 1,
         }
     }
 

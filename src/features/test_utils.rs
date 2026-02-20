@@ -68,6 +68,7 @@ pub fn create_test_symbols() -> SymbolTable {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
     table.add_function(func);
 
@@ -108,6 +109,8 @@ pub fn create_test_symbols() -> SymbolTable {
         is_final: false,
         line: 0,
         range: None,
+        rec_group_id: 0,
+        rec_group_size: 1,
     };
     table.add_type(type_def);
 
@@ -153,6 +156,7 @@ pub fn create_signature_test_symbols() -> SymbolTable {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
     table.add_function(multi_param_func);
 
@@ -168,6 +172,8 @@ pub fn create_signature_test_symbols() -> SymbolTable {
         is_final: false,
         line: 0,
         range: None,
+        rec_group_id: 0,
+        rec_group_size: 1,
     };
     table.add_type(complex_type);
 

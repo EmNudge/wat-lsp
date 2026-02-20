@@ -60,6 +60,9 @@ fn extract_symbols(tree: &Tree, source: &str) -> Result<SymbolTable, String> {
     extract_data_segments(&root, source, &mut symbol_table);
     extract_elem_segments(&root, source, &mut symbol_table);
 
+    // Post-parse: resolve type_index for functions without explicit type_use
+    resolve_implicit_function_types(&mut symbol_table);
+
     Ok(symbol_table)
 }
 
@@ -127,13 +130,14 @@ fn process_import_field(
             }
         }
         "module_field_global" if node_has_import_child(field_child) => {
-            if let Some(global) = extract_global(field_child, source, counts.globals) {
+            if let Some(global) = extract_global(field_child, source, counts.globals, symbol_table)
+            {
                 symbol_table.add_global(global);
                 counts.globals += 1;
             }
         }
         "module_field_table" if node_has_import_child(field_child) => {
-            if let Some(table) = extract_table(field_child, source, counts.tables) {
+            if let Some(table) = extract_table(field_child, source, counts.tables, symbol_table) {
                 symbol_table.add_table(table);
                 counts.tables += 1;
             }
@@ -175,17 +179,25 @@ fn extract_inline_import_func(
 ) -> Option<Function> {
     let (name, name_range) = extract_identifier_info(func_node, source);
 
-    let mut parameters = extract_parameters(func_node, source);
-    let mut results = extract_results(func_node, source);
+    let mut parameters = extract_parameters(func_node, source, Some(symbol_table));
+    let mut results = extract_results(func_node, source, Some(symbol_table));
 
     // Resolve type_use if no explicit params/results
+    let mut type_index_resolved = None;
     if results.is_empty() {
-        if let Some((type_params, type_results)) = resolve_type_use(func_node, source, symbol_table)
+        if let Some((type_params, type_results, tidx)) =
+            resolve_type_use(func_node, source, symbol_table)
         {
             results = type_results;
+            type_index_resolved = Some(tidx);
             if parameters.is_empty() {
                 parameters = type_params;
             }
+        }
+    } else if has_type_use_child(func_node) {
+        // Has explicit params/results AND type_use — still capture the type index
+        if let Some((_, _, tidx)) = resolve_type_use(func_node, source, symbol_table) {
+            type_index_resolved = Some(tidx);
         }
     }
 
@@ -203,6 +215,7 @@ fn extract_inline_import_func(
         range: name_range,
         doc_comment: None,
         has_type_use: has_type_use_child(func_node),
+        type_index: type_index_resolved,
     })
 }
 
@@ -237,9 +250,12 @@ fn extract_single_import(
                     }
                     "import_desc_global_type" => {
                         // Imported global: (global $name? global_type)
-                        if let Some(global) =
-                            extract_imported_global(&desc_child, source, counts.globals)
-                        {
+                        if let Some(global) = extract_imported_global(
+                            &desc_child,
+                            source,
+                            counts.globals,
+                            symbol_table,
+                        ) {
                             symbol_table.add_global(global);
                             counts.globals += 1;
                         }
@@ -247,7 +263,7 @@ fn extract_single_import(
                     "import_desc_table_type" => {
                         // Imported table: (table $name? table_type)
                         if let Some(table) =
-                            extract_imported_table(&desc_child, source, counts.tables)
+                            extract_imported_table(&desc_child, source, counts.tables, symbol_table)
                         {
                             symbol_table.add_table(table);
                             counts.tables += 1;
@@ -295,8 +311,8 @@ fn extract_imported_function(
     for child in desc_node.children(&mut cursor) {
         if child.kind() == "func_type" {
             // Extract from the func_type node and accumulate
-            let new_params = extract_parameters(&child, source);
-            let new_results = extract_results(&child, source);
+            let new_params = extract_parameters(&child, source, Some(symbol_table));
+            let new_results = extract_results(&child, source, Some(symbol_table));
             if !new_params.is_empty() {
                 // Re-index parameters to continue the sequence
                 let base_idx = parameters.len();
@@ -310,7 +326,7 @@ fn extract_imported_function(
             }
         } else if child.kind() == "func_type_params" {
             // Direct params
-            let new_params = extract_parameters(desc_node, source);
+            let new_params = extract_parameters(desc_node, source, Some(symbol_table));
             if !new_params.is_empty() {
                 let base_idx = parameters.len();
                 for mut p in new_params {
@@ -319,27 +335,34 @@ fn extract_imported_function(
                 }
             }
         } else if child.kind() == "func_type_results" {
-            let new_results = extract_results(desc_node, source);
+            let new_results = extract_results(desc_node, source, Some(symbol_table));
             results.extend(new_results);
         }
     }
 
     // Also check for params directly under desc_node (fallback)
     if parameters.is_empty() {
-        parameters = extract_parameters(desc_node, source);
+        parameters = extract_parameters(desc_node, source, Some(symbol_table));
     }
     if results.is_empty() {
-        results = extract_results(desc_node, source);
+        results = extract_results(desc_node, source, Some(symbol_table));
     }
 
     // Resolve type_use if no explicit params/results
+    let mut type_index_resolved = None;
     if results.is_empty() {
-        if let Some((type_params, type_results)) = resolve_type_use(desc_node, source, symbol_table)
+        if let Some((type_params, type_results, tidx)) =
+            resolve_type_use(desc_node, source, symbol_table)
         {
             results = type_results;
+            type_index_resolved = Some(tidx);
             if parameters.is_empty() {
                 parameters = type_params;
             }
+        }
+    } else if has_type_use_child(desc_node) {
+        if let Some((_, _, tidx)) = resolve_type_use(desc_node, source, symbol_table) {
+            type_index_resolved = Some(tidx);
         }
     }
 
@@ -357,11 +380,17 @@ fn extract_imported_function(
         range: name_range,
         doc_comment: None, // Imported functions don't have doc comments
         has_type_use: has_type_use_child(desc_node),
+        type_index: type_index_resolved,
     })
 }
 
 /// Extract an imported global
-fn extract_imported_global(desc_node: &Node, source: &str, index: usize) -> Option<Global> {
+fn extract_imported_global(
+    desc_node: &Node,
+    source: &str,
+    index: usize,
+    symbols: &SymbolTable,
+) -> Option<Global> {
     let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut is_mutable = false;
@@ -370,24 +399,7 @@ fn extract_imported_global(desc_node: &Node, source: &str, index: usize) -> Opti
     let mut cursor = desc_node.walk();
     for child in desc_node.children(&mut cursor) {
         if child.kind() == "global_type" {
-            let mut type_cursor = child.walk();
-            for type_child in child.children(&mut type_cursor) {
-                if type_child.kind() == "global_type_mut" {
-                    is_mutable = true;
-                    let mut mut_cursor = type_child.walk();
-                    for mut_child in type_child.children(&mut mut_cursor) {
-                        if mut_child.kind() == "value_type" {
-                            var_type = extract_value_type(&mut_child, source);
-                        }
-                    }
-                } else if type_child.kind() == "global_type_imm" {
-                    // Immutable globals: global_type_imm contains the type directly
-                    var_type = extract_value_type(&type_child, source);
-                } else if type_child.kind() == "value_type" {
-                    // Fallback for other grammar structures
-                    var_type = extract_value_type(&type_child, source);
-                }
-            }
+            (var_type, is_mutable) = extract_global_type_info(&child, source, symbols);
         }
     }
 
@@ -403,7 +415,12 @@ fn extract_imported_global(desc_node: &Node, source: &str, index: usize) -> Opti
 }
 
 /// Extract an imported table
-fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Option<Table> {
+fn extract_imported_table(
+    desc_node: &Node,
+    source: &str,
+    index: usize,
+    symbols: &SymbolTable,
+) -> Option<Table> {
     let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut ref_type = ValueType::Funcref;
@@ -434,7 +451,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
                         }
                     }
                 } else if type_child.kind() == "ref_type" {
-                    ref_type = extract_ref_type(&type_child, source);
+                    ref_type = extract_ref_type_resolved(&type_child, source, symbols);
                     ref_type_non_nullable = is_ref_type_non_nullable(&type_child, source);
                 } else if type_child.kind() == "table64_type" {
                     is_table64 = true;
@@ -753,20 +770,28 @@ fn extract_function(
     let (name, name_range) = extract_identifier_info(func_node, source);
 
     // Extract parameters, results, locals, and blocks
-    let mut parameters = extract_parameters(func_node, source);
-    let mut results = extract_results(func_node, source);
-    let locals = extract_locals(func_node, source);
+    // Pass symbol_table for named ref resolution (e.g. `(ref $vec)` → `Ref(idx)`)
+    let mut parameters = extract_parameters(func_node, source, Some(symbol_table));
+    let mut results = extract_results(func_node, source, Some(symbol_table));
+    let locals = extract_locals(func_node, source, Some(symbol_table));
     let blocks = extract_blocks(func_node, source);
     let has_type_use = has_type_use_child(func_node);
 
     // If results (and/or params) are empty but there's a (type $t) reference, resolve from the type
+    let mut type_index_resolved = None;
     if results.is_empty() {
-        if let Some((type_params, type_results)) = resolve_type_use(func_node, source, symbol_table)
+        if let Some((type_params, type_results, tidx)) =
+            resolve_type_use(func_node, source, symbol_table)
         {
             results = type_results;
+            type_index_resolved = Some(tidx);
             if parameters.is_empty() {
                 parameters = type_params;
             }
+        }
+    } else if has_type_use {
+        if let Some((_, _, tidx)) = resolve_type_use(func_node, source, symbol_table) {
+            type_index_resolved = Some(tidx);
         }
     }
 
@@ -787,14 +812,28 @@ fn extract_function(
         range: name_range,
         doc_comment,
         has_type_use,
+        type_index: type_index_resolved,
     })
 }
 
-/// Extract parameters from a function node
-fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
+/// Extract parameters from a function node.
+/// When `symbols` is provided, named refs like `(ref $vec)` are resolved to `Ref(idx)`.
+fn extract_parameters(
+    func_node: &Node,
+    source: &str,
+    symbols: Option<&SymbolTable>,
+) -> Vec<Parameter> {
     let mut parameters = Vec::new();
     let mut cursor = func_node.walk();
     let mut param_index = 0;
+
+    let resolve = |node: &Node| -> ValueType {
+        if let Some(s) = symbols {
+            extract_value_type_resolved(node, source, s)
+        } else {
+            extract_value_type(node, source)
+        }
+    };
 
     // Traverse child nodes looking for func_type_params
     for child in func_node.children(&mut cursor) {
@@ -814,7 +853,7 @@ fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
                             name_opt = Some(node_text(&one_child, source).to_string());
                             range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
-                            type_opt = Some(extract_value_type(&one_child, source));
+                            type_opt = Some(resolve(&one_child));
                         }
                     }
 
@@ -834,7 +873,7 @@ fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
                         if many_child.kind() == "value_type" {
                             parameters.push(Parameter {
                                 name: None,
-                                param_type: extract_value_type(&many_child, source),
+                                param_type: resolve(&many_child),
                                 index: param_index,
                                 range: None,
                             });
@@ -849,8 +888,13 @@ fn extract_parameters(func_node: &Node, source: &str) -> Vec<Parameter> {
     parameters
 }
 
-/// Extract result types from a function node
-fn extract_results(func_node: &Node, source: &str) -> Vec<ValueType> {
+/// Extract result types from a function node.
+/// When `symbols` is provided, named refs are resolved.
+fn extract_results(
+    func_node: &Node,
+    source: &str,
+    symbols: Option<&SymbolTable>,
+) -> Vec<ValueType> {
     let mut results = Vec::new();
     let mut cursor = func_node.walk();
 
@@ -860,7 +904,12 @@ fn extract_results(func_node: &Node, source: &str) -> Vec<ValueType> {
             let mut results_cursor = child.walk();
             for result_child in child.children(&mut results_cursor) {
                 if result_child.kind() == "value_type" {
-                    results.push(extract_value_type(&result_child, source));
+                    let vt = if let Some(s) = symbols {
+                        extract_value_type_resolved(&result_child, source, s)
+                    } else {
+                        extract_value_type(&result_child, source)
+                    };
+                    results.push(vt);
                 }
             }
         }
@@ -881,12 +930,12 @@ fn has_type_use_child(node: &Node) -> bool {
 }
 
 /// Resolve params and results from a `(type $t)` reference on a function node.
-/// Returns `Some((params, results))` if a type_use was found and resolved.
+/// Returns `Some((params, results, type_index))` if a type_use was found and resolved.
 fn resolve_type_use(
     func_node: &Node,
     source: &str,
     symbol_table: &SymbolTable,
-) -> Option<(Vec<Parameter>, Vec<ValueType>)> {
+) -> Option<(Vec<Parameter>, Vec<ValueType>, usize)> {
     let mut cursor = func_node.walk();
     for child in func_node.children(&mut cursor) {
         if child.kind() == "type_use" {
@@ -905,6 +954,7 @@ fn resolve_type_use(
                     };
 
                     if let Some(td) = type_def {
+                        let type_idx = td.index;
                         if let TypeKind::Func { params, results } = &td.kind {
                             let parameters = params
                                 .iter()
@@ -916,7 +966,7 @@ fn resolve_type_use(
                                     range: None,
                                 })
                                 .collect();
-                            return Some((parameters, results.clone()));
+                            return Some((parameters, results.clone(), type_idx));
                         }
                     }
 
@@ -935,7 +985,7 @@ fn resolve_type_use(
                                     range: None,
                                 })
                                 .collect();
-                            return Some((parameters, results));
+                            return Some((parameters, results, idx));
                         }
                     }
                 }
@@ -943,6 +993,39 @@ fn resolve_type_use(
         }
     }
     None
+}
+
+/// Resolve type_index for functions without explicit type_use.
+/// In the WebAssembly spec, implicit function types match a standalone type
+/// (rec_group_size == 1) with the same signature. If no such type exists,
+/// the function's type index is beyond the explicit types.
+fn resolve_implicit_function_types(symbol_table: &mut SymbolTable) {
+    for i in 0..symbol_table.functions.len() {
+        if symbol_table.functions[i].type_index.is_some() {
+            continue; // Already resolved via type_use
+        }
+        let func_params: Vec<ValueType> = symbol_table.functions[i]
+            .parameters
+            .iter()
+            .map(|p| p.param_type)
+            .collect();
+        let func_results = symbol_table.functions[i].results.clone();
+
+        // Find a matching standalone func type (rec_group_size == 1)
+        let mut matched = None;
+        for td in &symbol_table.types {
+            if td.rec_group_size != 1 {
+                continue; // Skip types in multi-type rec groups
+            }
+            if let TypeKind::Func { params, results } = &td.kind {
+                if *params == func_params && *results == func_results {
+                    matched = Some(td.index);
+                    break;
+                }
+            }
+        }
+        symbol_table.functions[i].type_index = matched;
+    }
 }
 
 /// Resolve a type index that may refer to an implicit type created by
@@ -975,11 +1058,20 @@ fn resolve_implicit_type(
     sigs.get(idx).cloned()
 }
 
-/// Extract local variables from a function node
-fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
+/// Extract local variables from a function node.
+/// When `symbols` is provided, named refs are resolved.
+fn extract_locals(func_node: &Node, source: &str, symbols: Option<&SymbolTable>) -> Vec<Variable> {
     let mut locals = Vec::new();
     let mut cursor = func_node.walk();
     let mut local_index = 0;
+
+    let resolve = |node: &Node| -> ValueType {
+        if let Some(s) = symbols {
+            extract_value_type_resolved(node, source, s)
+        } else {
+            extract_value_type(node, source)
+        }
+    };
 
     for child in func_node.children(&mut cursor) {
         if child.kind() == "func_locals" {
@@ -998,7 +1090,7 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                             name_opt = Some(node_text(&one_child, source).to_string());
                             range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
-                            type_opt = Some(extract_value_type(&one_child, source));
+                            type_opt = Some(resolve(&one_child));
                         }
                     }
 
@@ -1019,7 +1111,7 @@ fn extract_locals(func_node: &Node, source: &str) -> Vec<Variable> {
                         if many_child.kind() == "value_type" {
                             locals.push(Variable {
                                 name: None,
-                                var_type: extract_value_type(&many_child, source),
+                                var_type: resolve(&many_child),
                                 is_mutable: true,
                                 index: local_index,
                                 range: None,
@@ -1092,7 +1184,8 @@ fn extract_globals_with_offset(
                         if field_child.kind() == "module_field_global"
                             && !node_has_import_child(&field_child)
                         {
-                            if let Some(global) = extract_global(&field_child, source, global_index)
+                            if let Some(global) =
+                                extract_global(&field_child, source, global_index, symbol_table)
                             {
                                 symbol_table.add_global(global);
                                 global_index += 1;
@@ -1107,7 +1200,9 @@ fn extract_globals_with_offset(
                 if field_child.kind() == "module_field_global"
                     && !node_has_import_child(&field_child)
                 {
-                    if let Some(global) = extract_global(&field_child, source, global_index) {
+                    if let Some(global) =
+                        extract_global(&field_child, source, global_index, symbol_table)
+                    {
                         symbol_table.add_global(global);
                         global_index += 1;
                     }
@@ -1117,8 +1212,51 @@ fn extract_globals_with_offset(
     }
 }
 
+/// Extract type info from a global_type node, handling nested value_type.
+fn extract_global_type_info(
+    global_type_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> (ValueType, bool) {
+    let mut var_type = ValueType::Unknown;
+    let mut is_mutable = false;
+    let mut cursor = global_type_node.walk();
+    for type_child in global_type_node.children(&mut cursor) {
+        if type_child.kind() == "global_type_mut" {
+            is_mutable = true;
+            let mut mut_cursor = type_child.walk();
+            for mut_child in type_child.children(&mut mut_cursor) {
+                if mut_child.kind() == "value_type" {
+                    var_type = extract_value_type_resolved(&mut_child, source, symbols);
+                }
+            }
+        } else if type_child.kind() == "global_type_imm" {
+            // Find value_type inside global_type_imm to properly resolve ref types
+            let mut imm_cursor = type_child.walk();
+            for imm_child in type_child.children(&mut imm_cursor) {
+                if imm_child.kind() == "value_type" {
+                    var_type = extract_value_type_resolved(&imm_child, source, symbols);
+                    break;
+                }
+            }
+            // Fallback to trying the imm node directly
+            if var_type == ValueType::Unknown {
+                var_type = extract_value_type_resolved(&type_child, source, symbols);
+            }
+        } else if type_child.kind() == "value_type" {
+            var_type = extract_value_type_resolved(&type_child, source, symbols);
+        }
+    }
+    (var_type, is_mutable)
+}
+
 /// Extract a single global from a global node
-fn extract_global(global_node: &Node, source: &str, index: usize) -> Option<Global> {
+fn extract_global(
+    global_node: &Node,
+    source: &str,
+    index: usize,
+    symbols: &SymbolTable,
+) -> Option<Global> {
     let (name, name_range) = extract_identifier_info(global_node, source);
 
     let mut is_mutable = false;
@@ -1127,25 +1265,7 @@ fn extract_global(global_node: &Node, source: &str, index: usize) -> Option<Glob
     let mut cursor = global_node.walk();
     for child in global_node.children(&mut cursor) {
         if child.kind() == "global_type" {
-            let mut type_cursor = child.walk();
-            for type_child in child.children(&mut type_cursor) {
-                if type_child.kind() == "global_type_mut" {
-                    is_mutable = true;
-                    // value_type is nested inside global_type_mut
-                    let mut mut_cursor = type_child.walk();
-                    for mut_child in type_child.children(&mut mut_cursor) {
-                        if mut_child.kind() == "value_type" {
-                            var_type = extract_value_type(&mut_child, source);
-                        }
-                    }
-                } else if type_child.kind() == "global_type_imm" {
-                    // Immutable globals: global_type_imm contains the type directly
-                    var_type = extract_value_type(&type_child, source);
-                } else if type_child.kind() == "value_type" {
-                    // Fallback: Non-mutable globals might have value_type directly under global_type
-                    var_type = extract_value_type(&type_child, source);
-                }
-            }
+            (var_type, is_mutable) = extract_global_type_info(&child, source, symbols);
         }
     }
 
@@ -1164,6 +1284,7 @@ fn extract_global(global_node: &Node, source: &str, index: usize) -> Option<Glob
 fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
     let mut cursor = root.walk();
     let mut type_index = 0;
+    let mut rec_group_id = 0;
 
     for child in root.children(&mut cursor) {
         if child.kind() == "module" {
@@ -1182,13 +1303,24 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
                                     symbol_table,
                                     &mut type_def.kind,
                                 );
+                                // Standalone type: its own 1-element rec group
+                                type_def.rec_group_id = rec_group_id;
+                                type_def.rec_group_size = 1;
+                                rec_group_id += 1;
                                 symbol_table.add_type(type_def);
                                 type_index += 1;
                             }
                         } else if field_child.kind() == "module_field_rec" {
                             // Extract types from rec group
-                            type_index =
-                                extract_rec_types(&field_child, source, symbol_table, type_index);
+                            let (new_type_index, new_rec_group_id) = extract_rec_types(
+                                &field_child,
+                                source,
+                                symbol_table,
+                                type_index,
+                                rec_group_id,
+                            );
+                            type_index = new_type_index;
+                            rec_group_id = new_rec_group_id;
                         }
                     }
                 }
@@ -1204,12 +1336,23 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
                             symbol_table,
                             &mut type_def.kind,
                         );
+                        type_def.rec_group_id = rec_group_id;
+                        type_def.rec_group_size = 1;
+                        rec_group_id += 1;
                         symbol_table.add_type(type_def);
                         type_index += 1;
                     }
                 } else if field_child.kind() == "module_field_rec" {
                     // Extract types from rec group
-                    type_index = extract_rec_types(&field_child, source, symbol_table, type_index);
+                    let (new_type_index, new_rec_group_id) = extract_rec_types(
+                        &field_child,
+                        source,
+                        symbol_table,
+                        type_index,
+                        rec_group_id,
+                    );
+                    type_index = new_type_index;
+                    rec_group_id = new_rec_group_id;
                 }
             }
         }
@@ -1226,7 +1369,8 @@ fn extract_rec_types(
     source: &str,
     symbol_table: &mut SymbolTable,
     mut type_index: usize,
-) -> usize {
+    rec_group_id: usize,
+) -> (usize, usize) {
     let start_type_index = type_index;
 
     let mut cursor = rec_node.walk();
@@ -1287,6 +1431,14 @@ fn extract_rec_types(
         }
     }
 
+    let rec_group_size = type_index - start_type_index;
+
+    // Set rec group info on all types in this group
+    for idx in start_type_index..type_index {
+        symbol_table.types[idx].rec_group_id = rec_group_id;
+        symbol_table.types[idx].rec_group_size = rec_group_size;
+    }
+
     // Pass 2: resolve named refs now that all rec group types are in the symbol table
     for (offset, &node_pos) in type_node_positions.iter().enumerate() {
         let sym_idx = start_type_index + offset;
@@ -1302,7 +1454,7 @@ fn extract_rec_types(
         symbol_table.types[sym_idx].kind = kind;
     }
 
-    type_index
+    (type_index, rec_group_id + 1)
 }
 
 /// Resolve named type references in a TypeKind that were left as Structref placeholders.
@@ -1455,7 +1607,7 @@ fn try_resolve_at(
 
 /// Recursively search a subtree for a `ref_type_concrete` or `ref_type_ref` with a named
 /// index, and resolve it via the symbol table.
-fn try_resolve_named_ref_in_subtree(
+pub(crate) fn try_resolve_named_ref_in_subtree(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
@@ -1549,11 +1701,11 @@ fn extract_type_from_single_node(
                             } else if def_child.kind() == "func_type" {
                                 let mut parameters = Vec::new();
                                 let mut results = Vec::new();
-                                let params = extract_parameters(&def_child, source);
+                                let params = extract_parameters(&def_child, source, None);
                                 for param in params {
                                     parameters.push(param.param_type);
                                 }
-                                results.extend(extract_results(&def_child, source));
+                                results.extend(extract_results(&def_child, source, None));
                                 kind = TypeKind::Func {
                                     params: parameters,
                                     results,
@@ -1597,11 +1749,11 @@ fn extract_type_from_single_node(
                     "func_type" => {
                         let mut parameters = Vec::new();
                         let mut results = Vec::new();
-                        let params = extract_parameters(&child, source);
+                        let params = extract_parameters(&child, source, None);
                         for param in params {
                             parameters.push(param.param_type);
                         }
-                        results.extend(extract_results(&child, source));
+                        results.extend(extract_results(&child, source, None));
                         if !parameters.is_empty() || !results.is_empty() {
                             kind = TypeKind::Func {
                                 params: parameters,
@@ -1639,6 +1791,8 @@ fn extract_type_from_single_node(
         is_final,
         line: type_node.range().start_point.row as u32,
         range: name_range,
+        rec_group_id: 0,
+        rec_group_size: 1,
     })
 }
 
@@ -1739,11 +1893,11 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                             } else if def_child.kind() == "array_type" {
                                 kind = extract_array_kind(&def_child, source);
                             } else if def_child.kind() == "func_type" {
-                                let params = extract_parameters(&def_child, source);
+                                let params = extract_parameters(&def_child, source, None);
                                 for param in params {
                                     parameters.push(param.param_type);
                                 }
-                                results.extend(extract_results(&def_child, source));
+                                results.extend(extract_results(&def_child, source, None));
                             }
                         }
                     }
@@ -1784,11 +1938,11 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                 if field_child.kind() == "func_type" {
                     // Extract parameters and results from func_type
                     // Accumulate across all func_type children
-                    let params = extract_parameters(&field_child, source);
+                    let params = extract_parameters(&field_child, source, None);
                     for param in params {
                         parameters.push(param.param_type);
                     }
-                    results.extend(extract_results(&field_child, source));
+                    results.extend(extract_results(&field_child, source, None));
                 } else if field_child.kind() == "struct_type" {
                     // Extract struct fields (handles abbreviated multi-field syntax)
                     let mut fields = Vec::new();
@@ -1822,11 +1976,11 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                                     } else if def_child.kind() == "array_type" {
                                         kind = extract_array_kind(&def_child, source);
                                     } else if def_child.kind() == "func_type" {
-                                        let params = extract_parameters(&def_child, source);
+                                        let params = extract_parameters(&def_child, source, None);
                                         for param in params {
                                             parameters.push(param.param_type);
                                         }
-                                        results.extend(extract_results(&def_child, source));
+                                        results.extend(extract_results(&def_child, source, None));
                                     }
                                 }
                             }
@@ -1863,6 +2017,8 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         is_final,
         line: type_node.range().start_point.row as u32,
         range: name_range,
+        rec_group_id: 0,
+        rec_group_size: 1,
     })
 }
 
@@ -1919,7 +2075,9 @@ fn extract_tables_with_offset(
                         if field_child.kind() == "module_field_table"
                             && !node_has_import_child(&field_child)
                         {
-                            if let Some(table) = extract_table(&field_child, source, table_index) {
+                            if let Some(table) =
+                                extract_table(&field_child, source, table_index, symbol_table)
+                            {
                                 symbol_table.add_table(table);
                                 table_index += 1;
                             }
@@ -1933,7 +2091,9 @@ fn extract_tables_with_offset(
                 if field_child.kind() == "module_field_table"
                     && !node_has_import_child(&field_child)
                 {
-                    if let Some(table) = extract_table(&field_child, source, table_index) {
+                    if let Some(table) =
+                        extract_table(&field_child, source, table_index, symbol_table)
+                    {
                         symbol_table.add_table(table);
                         table_index += 1;
                     }
@@ -1944,7 +2104,12 @@ fn extract_tables_with_offset(
 }
 
 /// Extract a single table from a table node
-fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table> {
+fn extract_table(
+    table_node: &Node,
+    source: &str,
+    index: usize,
+    symbols: &SymbolTable,
+) -> Option<Table> {
     let (name, name_range) = extract_identifier_info(table_node, source);
 
     let mut ref_type = ValueType::Funcref;
@@ -1979,7 +2144,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                                 }
                             }
                         } else if type_child.kind() == "ref_type" {
-                            ref_type = extract_ref_type(&type_child, source);
+                            ref_type = extract_ref_type_resolved(&type_child, source, symbols);
                             ref_type_non_nullable = is_ref_type_non_nullable(&type_child, source);
                         } else if type_child.kind() == "table64_type" {
                             is_table64 = true;
@@ -2008,7 +2173,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                         }
                     }
                 } else if type_child.kind() == "ref_type" {
-                    ref_type = extract_ref_type(&type_child, source);
+                    ref_type = extract_ref_type_resolved(&type_child, source, symbols);
                     ref_type_non_nullable = is_ref_type_non_nullable(&type_child, source);
                 } else if type_child.kind() == "table64_type" {
                     is_table64 = true;
@@ -2261,6 +2426,24 @@ pub(crate) fn parse_wat_nat(text: &str) -> Option<u64> {
     }
 }
 
+/// Extract value type with symbol table resolution for named refs.
+/// When the basic extraction falls back to Structref for named refs like `(ref $vec)`,
+/// this tries to resolve the name to a concrete Ref(index) using the symbol table.
+fn extract_value_type_resolved(
+    value_type_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> ValueType {
+    let vt = extract_value_type(value_type_node, source);
+    if vt == ValueType::Structref {
+        // Structref may be a fallback for an unresolved named ref — try to resolve
+        if let Some(resolved) = try_resolve_named_ref_in_subtree(value_type_node, source, symbols) {
+            return resolved;
+        }
+    }
+    vt
+}
+
 /// Extract value type from a value_type node (handles nested structure)
 fn extract_value_type(value_type_node: &Node, source: &str) -> ValueType {
     // Check strict match first (for direct children like "i32" in some contexts)
@@ -2417,8 +2600,23 @@ fn is_ref_type_non_nullable(node: &Node, source: &str) -> bool {
     }
 }
 
+/// Extract reference type from a ref_type node, with symbol table for named ref resolution.
+fn extract_ref_type_resolved(
+    ref_type_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> ValueType {
+    let vt = extract_ref_type(ref_type_node, source);
+    if vt == ValueType::Structref {
+        if let Some(resolved) = try_resolve_named_ref_in_subtree(ref_type_node, source, symbols) {
+            return resolved;
+        }
+    }
+    vt
+}
+
 /// Extract reference type from a ref_type node (handles nested structure)
-fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
+pub(crate) fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType {
     // Check strict match first
     let text = node_text(ref_type_node, source);
     if let Some(vt) = simple_type_from_str(text) {
