@@ -38,8 +38,8 @@
     "instructions": {
       "patterns": [
         {
-          "comment": "Numeric type instructions (i32.add, f64.mul, etc.)",
-          "match": "\\b(i32|i64|f32|f64)(\\.[a-z_][a-z0-9_]*)\\b",
+          "comment": "Numeric type instructions (i32.add, f64.mul, i32.atomic.rmw8.add_u, etc.)",
+          "match": "\\b(i32|i64|f32|f64)((?:\\.[a-z_][a-z0-9_]*)+)\\b",
           "captures": {
             "1": { "name": "support.class.type.wat" },
             "2": { "name": "keyword.operator.wat" }
@@ -71,7 +71,7 @@
         },
         {
           "comment": "Memory instructions",
-          "match": "\\b(memory)(\\.(size|grow|copy|fill|init))\\b",
+          "match": "\\b(memory)(\\.(size|grow|copy|fill|init|atomic\\.(notify|wait32|wait64|fence)))\\b",
           "captures": {
             "1": { "name": "support.class.wat" },
             "2": { "name": "keyword.operator.wat" }
@@ -118,8 +118,8 @@
           }
         },
         {
-          "comment": "Extern instructions (GC)",
-          "match": "\\b(extern)(\\.(internalize|externalize))\\b",
+          "comment": "Extern/any conversion instructions (GC)",
+          "match": "\\b(extern|any)(\\.(convert_extern|convert_any|internalize|externalize))\\b",
           "captures": {
             "1": { "name": "support.class.wat" },
             "2": { "name": "keyword.operator.wat" }
