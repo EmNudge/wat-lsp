@@ -8929,3 +8929,452 @@ Example:
 ```
 
 ---
+
+## i8x16.mul
+
+Lane-wise multiplication of two i8x16 vectors.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i8x16.mul (local.get $a) (local.get $b))
+```
+
+---
+
+## i8x16.shl
+
+Shift each lane in an i8x16 vector left by a scalar amount. The shift count is taken modulo 8.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i8x16.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+```
+
+---
+
+## i8x16.shr_s
+
+Shift each lane in an i8x16 vector right by a scalar amount (signed/arithmetic). The shift count is taken modulo 8. Sign bit is preserved.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i8x16.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
+```
+
+---
+
+## i8x16.shr_u
+
+Shift each lane in an i8x16 vector right by a scalar amount (unsigned/logical). The shift count is taken modulo 8.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i8x16.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+```
+
+---
+
+## i8x16.splat
+
+Create an i8x16 vector with all 16 lanes set to the same i32 value (truncated to i8).
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i8x16.splat (i32.const 42))
+```
+
+---
+
+## i8x16.swizzle
+
+Rearrange lanes of an i8x16 vector using indices from a second vector. If an index is out of range (>= 16), the lane is set to 0.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+;; Rearrange lanes of first vector using indices from second vector
+(i8x16.swizzle (local.get $vec) (local.get $indices))
+```
+
+---
+
+## i16x8.load8x8_s
+
+Load 8 signed 8-bit integers from memory and sign-extend each to 16-bit, producing an i16x8 vector.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i16x8.load8x8_s (i32.const 0))
+```
+
+---
+
+## i16x8.load8x8_u
+
+Load 8 unsigned 8-bit integers from memory and zero-extend each to 16-bit, producing an i16x8 vector.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i16x8.load8x8_u (i32.const 0))
+```
+
+---
+
+## i16x8.shl
+
+Shift each lane in an i16x8 vector left by a scalar amount. The shift count is taken modulo 16.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i16x8.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+```
+
+---
+
+## i16x8.shr_s
+
+Shift each lane in an i16x8 vector right by a scalar amount (signed/arithmetic). The shift count is taken modulo 16. Sign bit is preserved.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i16x8.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
+```
+
+---
+
+## i16x8.shr_u
+
+Shift each lane in an i16x8 vector right by a scalar amount (unsigned/logical). The shift count is taken modulo 16.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i16x8.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+```
+
+---
+
+## i16x8.splat
+
+Create an i16x8 vector with all 8 lanes set to the same i32 value (truncated to i16).
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i16x8.splat (i32.const 42))
+```
+
+---
+
+## i32x4.ge_s
+
+Signed greater-than-or-equal comparison for i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.ge_s (local.get $a) (local.get $b))
+```
+
+---
+
+## i32x4.ge_u
+
+Unsigned greater-than-or-equal comparison for i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.ge_u (local.get $a) (local.get $b))
+```
+
+---
+
+## i32x4.le_u
+
+Unsigned less-than-or-equal comparison for i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.le_u (local.get $a) (local.get $b))
+```
+
+---
+
+## i32x4.lt_u
+
+Unsigned less-than comparison for i32x4 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.lt_u (local.get $a) (local.get $b))
+```
+
+---
+
+## i32x4.ne
+
+Lane-wise inequality comparison of two i32x4 vectors.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.ne (local.get $a) (local.get $b))
+```
+
+---
+
+## i32x4.shr_u
+
+Shift each lane in an i32x4 vector right by a scalar amount (unsigned/logical). The shift count is taken modulo 32.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+```
+
+---
+
+## i32x4.load16x4_s
+
+Load 4 signed 16-bit integers from memory and sign-extend each to 32-bit, producing an i32x4 vector.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.load16x4_s (i32.const 0))
+```
+
+---
+
+## i32x4.load16x4_u
+
+Load 4 unsigned 16-bit integers from memory and zero-extend each to 32-bit, producing an i32x4 vector.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i32x4.load16x4_u (i32.const 0))
+```
+
+---
+
+## i64x2.eq
+
+Lane-wise equality comparison of two i64x2 vectors.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.eq (local.get $a) (local.get $b))
+```
+
+---
+
+## i64x2.ne
+
+Lane-wise inequality comparison of two i64x2 vectors.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.ne (local.get $a) (local.get $b))
+```
+
+---
+
+## i64x2.lt_s
+
+Signed less-than comparison for i64x2 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.lt_s (local.get $a) (local.get $b))
+```
+
+---
+
+## i64x2.gt_s
+
+Signed greater-than comparison for i64x2 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.gt_s (local.get $a) (local.get $b))
+```
+
+---
+
+## i64x2.le_s
+
+Signed less-than-or-equal comparison for i64x2 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.le_s (local.get $a) (local.get $b))
+```
+
+---
+
+## i64x2.ge_s
+
+Signed greater-than-or-equal comparison for i64x2 vectors lane-wise.
+
+Signature: `(param v128 v128) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.ge_s (local.get $a) (local.get $b))
+```
+
+---
+
+## i64x2.shl
+
+Shift each lane in an i64x2 vector left by a scalar amount. The shift count is taken modulo 64.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+```
+
+---
+
+## i64x2.shr_s
+
+Shift each lane in an i64x2 vector right by a scalar amount (signed/arithmetic). The shift count is taken modulo 64. Sign bit is preserved.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
+```
+
+---
+
+## i64x2.shr_u
+
+Shift each lane in an i64x2 vector right by a scalar amount (unsigned/logical). The shift count is taken modulo 64.
+
+Signature: `(param v128 i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+```
+
+---
+
+## i64x2.splat
+
+Create an i64x2 vector with both lanes set to the same i64 value.
+
+Signature: `(param i64) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.splat (i64.const 42))
+```
+
+---
+
+## i64x2.load32x2_s
+
+Load 2 signed 32-bit integers from memory and sign-extend each to 64-bit, producing an i64x2 vector.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.load32x2_s (i32.const 0))
+```
+
+---
+
+## i64x2.load32x2_u
+
+Load 2 unsigned 32-bit integers from memory and zero-extend each to 64-bit, producing an i64x2 vector.
+
+Signature: `(param i32) (result v128)`
+
+Example:
+
+```wat-snippet
+(i64x2.load32x2_u (i32.const 0))
+```
+
+---
