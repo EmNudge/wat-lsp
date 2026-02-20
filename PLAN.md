@@ -2,19 +2,20 @@
 
 **Generated**: 2026-02-20
 **Baseline**: commit 488fa6b4
-**Updated**: 2026-02-20 (Phase 1 complete)
+**Updated**: 2026-02-20 (Phase 1 complete, re-analyzed at commit 18da9a8c)
 
-## Current Results (after Phase 1)
+## Current Results
 
-| Category | Pass | Total | Rate | Delta |
+| Category | Pass | Total | Rate | Delta from baseline |
 |---|---|---|---|---|
 | Modules (valid) | 2092 | 2128 | 98.3% | +0 |
 | assert_invalid | 2667 | 2689 | 99.2% | **+17** |
 | assert_malformed | 1229 | 1229 | 100.0% | **+1** |
 | **TOTAL (non-skip)** | **5988** | **6046** | **99.0%** | **+18** |
-| Skipped (runtime) | 58577 | — | — | — |
+| Skipped (runtime) | 57766 | — | — | — |
+| Skipped (binary/linking) | 810 | — | — | — |
 
-**58 total failures** across 21 files (was 76 across 25).
+**58 total failures** across 21 files (down from 76 across 25 at baseline).
 
 ### Phase 1 Changes (completed)
 - **array.copy/fill/init_data/init_elem**: Element type validation (+7 assert_invalid)
@@ -23,7 +24,7 @@
 - **throw_ref**: Stack operand validation (+2 assert_invalid)
 - **struct duplicate fields**: Duplicate field name detection (+1 assert_malformed)
 
-## Previous Baseline
+## Baseline (pre-Phase 1)
 
 | Category | Pass | Total | Rate |
 |---|---|---|---|
@@ -32,140 +33,146 @@
 | assert_malformed | 1228 | 1229 | 99.9% |
 | **TOTAL (non-skip)** | **5970** | **6046** | **98.7%** |
 
-**76 total failures** across 25 files.
+## Per-File Failures (58 remaining)
 
-## Per-File Failures
-
-| File | Mod | Inv | Mal | Total |
+| File | Mod | Inv | Total | Root Cause |
 |---|---|---|---|---|
-| type-subtyping.wast | 11 | 7 | 0 | 18 |
-| type-rec.wast | 0 | 9 | 0 | 9 |
-| try_table.wast | 1 | 5 | 0 | 6 |
-| br_on_cast_fail.wast | 3 | 2 | 0 | 5 |
-| br_on_cast.wast | 3 | 2 | 0 | 5 |
-| array.wast | 4 | 0 | 0 | 4 |
-| return_call_ref.wast | 1 | 2 | 0 | 3 |
-| array_copy.wast | 0 | 3 | 0 | 3 |
-| instance.wast | 2 | 0 | 0 | 2 |
-| table.wast | 2 | 0 | 0 | 2 |
-| array_fill.wast | 0 | 2 | 0 | 2 |
-| array_init_elem.wast | 0 | 2 | 0 | 2 |
-| struct.wast | 0 | 1 | 1 | 2 |
-| throw_ref.wast | 0 | 2 | 0 | 2 |
-| annotations.wast | 1 | 0 | 0 | 1 |
-| call_indirect64.wast | 1 | 0 | 0 | 1 |
-| i31.wast | 1 | 0 | 0 | 1 |
-| id.wast | 1 | 0 | 0 | 1 |
-| memory.wast | 1 | 0 | 0 | 1 |
-| memory64.wast | 1 | 0 | 0 | 1 |
-| ref_as_non_null.wast | 0 | 1 | 0 | 1 |
-| stack.wast | 1 | 0 | 0 | 1 |
-| table-sub.wast | 1 | 0 | 0 | 1 |
-| table64.wast | 1 | 0 | 0 | 1 |
-| array_init_data.wast | 0 | 1 | 0 | 1 |
+| type-subtyping.wast | 11 | 7 | **18** | Subtype variance |
+| type-rec.wast | 0 | 9 | **9** | Rec type groups |
+| array.wast | 4 | 0 | **4** | Structref placeholder |
+| br_on_cast_fail.wast | 3 | 0 | **3** | Cast stack effects |
+| br_on_cast.wast | 3 | 0 | **3** | Cast stack effects |
+| return_call_ref.wast | 1 | 2 | **3** | Ref type resolution |
+| instance.wast | 2 | 0 | **2** | Definition syntax |
+| table.wast | 1 | 1 | **2** | Definition + structref |
+| try_table.wast | 1 | 1 | **2** | Import aliasing + type |
+| annotations.wast | 1 | 0 | **1** | Grammar |
+| array_copy.wast | 0 | 1 | **1** | Array type matching |
+| call_indirect64.wast | 1 | 0 | **1** | Table64 index type |
+| i31.wast | 1 | 0 | **1** | i31ref type |
+| id.wast | 1 | 0 | **1** | Quoted identifiers |
+| memory.wast | 1 | 0 | **1** | Definition syntax |
+| memory64.wast | 1 | 0 | **1** | Definition syntax |
+| ref_as_non_null.wast | 0 | 1 | **1** | Ref type narrowing |
+| stack.wast | 1 | 0 | **1** | Flat call_indirect |
+| struct.wast | 0 | 1 | **1** | GC field type |
+| table-sub.wast | 1 | 0 | **1** | Ref subtyping |
+| table64.wast | 1 | 0 | **1** | Definition syntax |
 
-## Failure Root Causes
+## Failure Root Causes (58 total)
 
-| Root Cause | Mod | Inv | Mal | Total | Description |
-|---|---|---|---|---|---|
-| GC rec types & subtyping | 11 | 16 | 0 | **27** | Recursive type groups, type equivalence across rec boundaries, variance violations |
-| GC instruction validation | 6 | 10 | 0 | **16** | br_on_cast/fail nullability, array ops mutability/types, try_table catch types |
-| Module definition syntax | 5 | 0 | 0 | **5** | `(module definition ...)` wast syntax (instance.wast, memory.wast, table.wast) |
-| Memory64/Table64 edge cases | 3 | 0 | 0 | **3** | 64-bit index types in memory.size, table ops, call_indirect64 |
-| Misc single-file issues | 11 | 13 | 1 | **25** | Quoted IDs, annotations, multi-value stack, throw_ref, struct field dup, ref_as_non_null |
+| Root Cause | Mod | Inv | Total | Description |
+|---|---|---|---|---|
+| Function subtype variance | 11 | 7 | **18** | `module_checks.rs` requires exact match; spec allows covariant returns + contravariant params |
+| Rec type groups | 0 | 9 | **9** | No rec group modeling; can't validate type equivalence or forward refs within rec |
+| GC concrete ref resolution | 8 | 0 | **8** | All concrete GC types map to Structref placeholder — loses arrayref/funcref/i31ref distinction |
+| br_on_cast/fail stack | 6 | 0 | **6** | Type checker doesn't model type narrowing after cast; false stack underflow |
+| Module definition syntax | 6 | 0 | **6** | `(module definition ...)` wast syntax not supported by grammar |
+| GC type checking gaps | 0 | 6 | **6** | Missing: array type match, ref narrowing, return_call_ref return types, struct fields |
+| Miscellaneous | 5 | 0 | **5** | Annotations grammar, call_indirect64, quoted IDs, flat call_indirect, imported tag aliasing |
 
 ## Prioritized Phases
 
-### Phase 1: GC Instruction Validation (~16 fixes)
-**Feasibility**: Medium | **Impact**: High
+### Phase 2: Function Subtype Variance (~18 fixes)
+**Feasibility**: Medium | **Impact**: Highest | **Files**: `module_checks.rs`
 
-Root cause: The type checker doesn't understand GC-specific instructions well enough.
+Root cause: The subtype check in `module_checks.rs` emits "Function subtype signature must match parent exactly" — it requires identical signatures. The spec allows:
+- **Covariant** return types (subtype may return a subtype of parent's return)
+- **Contravariant** param types (subtype may accept a supertype of parent's param)
 
-**Subphase 1a: Array operation type validation (+8)**
-- `array_copy.wast`: 3 invalid — need to check array element type compatibility and mutability for `array.copy`
-- `array_fill.wast`: 2 invalid — need to check `array.fill` element type (packed i8/i16 → i32 widening)
-- `array_init_data.wast`: 1 invalid — need to verify array type is numeric/vector for `array.init_data`
-- `array_init_elem.wast`: 2 invalid — need element type matching for `array.init_elem`
-- **Files**: `semantic.rs`, `type_check.rs`
+**Module fixes (11)**: type-subtyping.wast lines 177, 188, 229, 422, 438, 486, 497, 652, 659, 668, 677
+- All fail with "Function subtype signature must match parent exactly"
+- Fix: Replace exact-match with `is_subtype(sub_return, parent_return)` and `is_subtype(parent_param, sub_param)`
 
-**Subphase 1b: br_on_cast / br_on_cast_fail validation (+4)**
-- 2 invalid each for br_on_cast and br_on_cast_fail — nullability constraint on cast types
-- **Files**: `semantic.rs`, `type_check.rs`
+**Invalid fixes (7)**: type-subtyping.wast lines 139, 205, 215, 726, 734, 851, 883
+- "no errors (expected type mismatch/sub type)" — need to validate variance violations
+- Fix: Detect when subtype attempts *invalid* variance (contravariant returns, covariant params, `sub final` violations)
 
-**Subphase 1c: try_table catch type validation (+5)**
-- try_table.wast: 5 invalid — catch/catch_ref handler type mismatches
-- **Files**: `semantic.rs`, `type_check.rs`
+**Prerequisite**: Need `is_subtype(a, b)` for ValueType/ref types. Partial support exists (type_check.rs has `is_subtype_of` for stack checking); needs extension to handle concrete type indices.
 
-**Subphase 1d: Miscellaneous GC type checking (+4)**
-- return_call_ref.wast: 2 invalid — return type subtyping
-- throw_ref.wast: 2 invalid — exnref type on stack
-- ref_as_non_null.wast: 1 invalid — nullable→non-nullable cast type narrowing
-- struct.wast: 1 invalid — struct field type mismatch
-- **Files**: `semantic.rs`, `type_check.rs`
+### Phase 3: GC Concrete Type Resolution (~14 fixes)
+**Feasibility**: Hard | **Impact**: High | **Files**: `parser.rs`, `semantic.rs`, `type_check.rs`
 
-### Phase 2: GC Rec Types & Subtyping (~27 fixes)
-**Feasibility**: Hard | **Impact**: Highest
+Root cause: The parser maps all concrete GC types (`ref $my_array`, `ref $my_struct`, etc.) to `ValueType::Structref` as a placeholder. This means the type checker can't distinguish arrayref from structref from funcref at concrete type boundaries.
 
-Root cause: The parser/type system doesn't model recursive type groups (`rec`), so type equivalence across rec boundaries and subtype variance cannot be validated.
+**Module fixes (8)**:
+- array.wast: 4 — "expected arrayref, found structref" (concrete array type → should be arrayref)
+- table.wast:93 — "expected funcref, found structref" (concrete func type used as funcref)
+- table-sub.wast:1 — type mismatch on ref subtype table copy
+- return_call_ref.wast:213 — "expected (ref null 2), found (ref 1)" (concrete type refs)
+- i31.wast:128 — i31ref table init expression
 
-- type-subtyping.wast: 18 failures — need proper rec type group handling, covariant/contravariant field checking
-- type-rec.wast: 9 failures — need `rec` group type equivalence, forward references within rec groups
-- **Files**: `parser.rs` (type representation), `module_checks.rs` (subtype validation), `type_check.rs` (type matching)
-- **Prerequisite**: Need a proper GC type representation in the symbol table that tracks:
-  - Rec group membership and boundaries
-  - Structural type definitions (struct fields, array element, func params/results)
-  - Subtype declarations (`sub` / `sub final`)
-  - Type equivalence rules for iso-recursive types
+**Invalid fixes (6)**:
+- array_copy.wast:41 — "array types do not match" (needs concrete type tracking)
+- ref_as_non_null.wast:31, struct.wast:58, try_table.wast:470, return_call_ref.wast:231,286 — various type mismatches requiring concrete GC type knowledge
 
-### Phase 3: Module False Positives (~14 module fixes)
-**Feasibility**: Medium | **Impact**: Medium
+**Approach**: Add `ValueType::Ref(TypeIndex)` variant or enhance the symbol table to track concrete type kinds (struct/array/func) so subtype checks can query the structural type.
 
-**Subphase 3a: GC module validity (+10)**
-- br_on_cast.wast: 3 module — false positive errors on valid br_on_cast usage
-- br_on_cast_fail.wast: 3 module — same for br_on_cast_fail
-- array.wast: 4 module — false positive errors on valid array operations (rec types, GC refs)
-- **Root cause**: Lack of rec type awareness causes spurious "unknown type" or "type mismatch" errors
-- **Files**: `references.rs`, `module_checks.rs`, `semantic.rs`
+### Phase 4: Rec Type Groups (~9 fixes)
+**Feasibility**: Hard | **Impact**: Medium | **Files**: `parser.rs`, `module_checks.rs`
 
-**Subphase 3b: Memory/Table/Instance module syntax (+5)**
-- instance.wast: 2 — `(module definition ...)` wast syntax
-- memory.wast: 1 — same
-- table.wast: 2 — same
-- memory64.wast: 1 — 64-bit index type for memory.size
-- table64.wast: 1 — 64-bit index type for table operations
-- call_indirect64.wast: 1 — 64-bit call_indirect
-- **Files**: `wast-runner` (module definition parsing), `semantic.rs` (64-bit index types)
+Root cause: No modeling of `(rec ...)` type groups. The spec requires:
+- Types within the same rec group can forward-reference each other
+- Type equivalence is defined per rec group (iso-recursive)
+- Rec group boundaries affect type identity
 
-**Subphase 3c: Misc module fixes (+5)**
-- annotations.wast: 1 — quoted annotation names `(@"name")`
-- id.wast: 1 — quoted identifier normalization `$"fh"` ≡ `$fh`
-- i31.wast: 1 — i31ref table init expression
-- stack.wast: 1 — multi-value block stack validation
-- table-sub.wast: 1 — table copy with subtype refs
-- **Files**: `grammar.js`, `parser.rs`, `semantic.rs`
+**Fixes (9 invalid)**: type-rec.wast lines 28, 51, 59, 93, 103, 114, 124, 204, 216
+- Line 28: "expected unknown type" — rec group forward ref should be invalid when referencing beyond group
+- Lines 51+: "expected type mismatch" — rec type equivalence violations
 
-### Phase 4: Structural Validation (+2)
-**Feasibility**: Easy | **Impact**: Low
+**Approach**: Track rec group membership in symbol table; add rec group boundary checks to type validation.
 
-- struct.wast: 1 malformed — duplicate field detection in struct types
-- return_call_ref.wast: 1 module — return type subtyping validation
-- **Files**: `module_checks.rs`, `semantic.rs`
+### Phase 5: br_on_cast/fail Stack Modeling (~6 fixes)
+**Feasibility**: Medium | **Impact**: Medium | **Files**: `semantic.rs`, `type_check.rs`
+
+Root cause: `br_on_cast` and `br_on_cast_fail` have complex stack effects — they narrow the type on the stack based on the cast result. The current type checker doesn't model this, causing false "Stack underflow" and "type mismatch" errors.
+
+**Fixes (6 modules)**:
+- br_on_cast.wast: 3 (lines 3, 104, 211)
+- br_on_cast_fail.wast: 3 (lines 3, 104, 226)
+
+**Approach**: When processing `br_on_cast`, push the *difference type* (non-cast result) back onto the stack after the branch. Similarly for `br_on_cast_fail` (push the cast result type). Requires understanding the input type and cast target type.
+
+### Phase 6: Module Definition Syntax (~6 fixes)
+**Feasibility**: Easy | **Impact**: Low | **Files**: `wast-runner` or `grammar.js`
+
+Root cause: `(module definition ...)` is a WAST-only syntax for defining module instances. Not valid WAT — only appears in test harness contexts.
+
+**Fixes (6 modules)**:
+- instance.wast: 2 (lines 3, 109)
+- memory.wast:8, memory64.wast:8, table.wast:9, table64.wast:9
+
+**Approach**: Have wast-runner skip or handle `(module definition ...)` directives gracefully.
+
+### Phase 7: Miscellaneous (~5 fixes)
+**Feasibility**: Easy-Medium | **Impact**: Low
+
+| Fix | File | Issue |
+|---|---|---|
+| annotations.wast:1 | `grammar.js` | Annotation with special chars causes parse error at line 15 |
+| call_indirect64.wast:3 | `semantic.rs` | `table i64 funcref` — call_indirect with i64 table index |
+| id.wast:1 | `parser.rs` | `$"fh"` quoted identifier should normalize to `$fh` |
+| stack.wast:156 | `semantic.rs` | Flat (non-folded) call_indirect inside block — stack tracking |
+| try_table.wast:10 | `parser.rs` | Imported tag/func aliases not resolved across registered modules |
 
 ## Projected Pass Rates
 
-| Phase | Pass | Total | Rate | Delta |
-|---|---|---|---|---|
-| Baseline | 5970 | 6046 | 98.7% | — |
-| After Phase 1 | ~5986 | 6046 | ~99.0% | +16 |
-| After Phase 2 | ~6013 | 6046 | ~99.5% | +27 |
-| After Phase 3 | ~6027 | 6046 | ~99.7% | +14 |
-| After Phase 4 | ~6029 | 6046 | ~99.7% | +2 |
-
-**Remaining ~17 failures** after all phases would be primarily `(module definition)` wast syntax (not WAT) and edge cases requiring full iso-recursive type system.
+| Phase | Pass | Total | Rate | Delta | Cumulative |
+|---|---|---|---|---|---|
+| Current (Phase 1 done) | 5988 | 6046 | 99.04% | — | — |
+| After Phase 2 | ~6006 | 6046 | ~99.3% | +18 | +18 |
+| After Phase 3 | ~6020 | 6046 | ~99.6% | +14 | +32 |
+| After Phase 4 | ~6029 | 6046 | ~99.7% | +9 | +41 |
+| After Phase 5 | ~6035 | 6046 | ~99.8% | +6 | +47 |
+| After Phase 6 | ~6041 | 6046 | ~99.9% | +6 | +53 |
+| After Phase 7 | ~6046 | 6046 | ~100% | +5 | +58 |
 
 ## Recommended Next Step
 
-**Start with Phase 1a** (array operation type validation). It has the best effort-to-fix ratio:
-- 8 assert_invalid fixes from adding type checks for 4 array instructions
-- Self-contained changes in `semantic.rs` / `type_check.rs`
-- No prerequisite infrastructure changes needed
+**Start with Phase 2** (function subtype variance). It has the best effort-to-fix ratio:
+- 18 fixes (11 modules + 7 invalid) from a single file (`module_checks.rs`)
+- The existing "Function subtype signature must match parent exactly" check just needs covariant/contravariant awareness
+- No new data structures needed — just enhance the comparison logic
+- `is_subtype_of` already partially exists in `type_check.rs` — extend for ref types
+
+**Alternative quick wins**: Phase 6 (module definition syntax, 6 easy fixes) and Phase 7 (miscellaneous, 5 varied fixes) are simpler but lower impact.

@@ -1173,7 +1173,15 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
                     let mut field_cursor = module_child.walk();
                     for field_child in module_child.children(&mut field_cursor) {
                         if field_child.kind() == "module_field_type" {
-                            if let Some(type_def) = extract_type(&field_child, source, type_index) {
+                            if let Some(mut type_def) =
+                                extract_type(&field_child, source, type_index)
+                            {
+                                resolve_type_kind_refs(
+                                    &field_child,
+                                    source,
+                                    symbol_table,
+                                    &mut type_def.kind,
+                                );
                                 symbol_table.add_type(type_def);
                                 type_index += 1;
                             }
@@ -1189,7 +1197,13 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
                 if field_child.kind() == "module_field_type" {
-                    if let Some(type_def) = extract_type(&field_child, source, type_index) {
+                    if let Some(mut type_def) = extract_type(&field_child, source, type_index) {
+                        resolve_type_kind_refs(
+                            &field_child,
+                            source,
+                            symbol_table,
+                            &mut type_def.kind,
+                        );
                         symbol_table.add_type(type_def);
                         type_index += 1;
                     }
@@ -1202,19 +1216,26 @@ fn extract_types(root: &Node, source: &str, symbol_table: &mut SymbolTable) {
     }
 }
 
-/// Extract types from a rec group
+/// Extract types from a rec group.
+///
+/// Uses a two-pass approach: first adds all types to the symbol table (without resolving
+/// named refs), then resolves refs in a second pass. This handles self-referential and
+/// mutually-recursive types within rec groups.
 fn extract_rec_types(
     rec_node: &Node,
     source: &str,
     symbol_table: &mut SymbolTable,
     mut type_index: usize,
 ) -> usize {
-    // The rec node's children are flattened: "(", "rec", "(", "type", id?, type_field, ")", "(", "type", ..., ")", ")"
-    // We need to parse this as a sequence, looking for patterns: "(" "type" [id] type_field ")"
+    let start_type_index = type_index;
 
     let mut cursor = rec_node.walk();
     let children_vec: Vec<_> = rec_node.children(&mut cursor).collect();
 
+    // Track which children_vec positions hold type definition nodes (for pass 2)
+    let mut type_node_positions: Vec<usize> = Vec::new();
+
+    // Pass 1: extract types and add to symbol table (without resolving named refs)
     let mut i = 0;
     while i < children_vec.len() {
         let child = &children_vec[i];
@@ -1222,10 +1243,8 @@ fn extract_rec_types(
         // Look for pattern: "(" followed by "type"
         if child.kind() == "(" && i + 1 < children_vec.len() && children_vec[i + 1].kind() == "type"
         {
-            // Found start of a type definition
             i += 2; // Skip "(" and "type"
 
-            // Check for optional identifier
             let (name, name_range) =
                 if i < children_vec.len() && children_vec[i].kind() == "identifier" {
                     let id_node = &children_vec[i];
@@ -1238,7 +1257,6 @@ fn extract_rec_types(
                     (None, None)
                 };
 
-            // Next should be the type_field or direct struct_type/array_type
             if i < children_vec.len() {
                 let type_node = &children_vec[i];
                 if type_node.kind() == "struct_type"
@@ -1246,10 +1264,10 @@ fn extract_rec_types(
                     || type_node.kind() == "type_field"
                     || type_node.kind() == "sub_type"
                 {
-                    // Extract the type
                     if let Some(type_def) = extract_type_from_single_node(
                         type_node, source, type_index, name, name_range,
                     ) {
+                        type_node_positions.push(i);
                         symbol_table.add_type(type_def);
                         type_index += 1;
                     }
@@ -1257,19 +1275,239 @@ fn extract_rec_types(
                 }
             }
 
-            // Skip until we find the closing ")"
+            // Skip until closing ")"
             while i < children_vec.len() && children_vec[i].kind() != ")" {
                 i += 1;
             }
             if i < children_vec.len() && children_vec[i].kind() == ")" {
-                i += 1; // Skip the ")"
+                i += 1;
             }
         } else {
             i += 1;
         }
     }
 
+    // Pass 2: resolve named refs now that all rec group types are in the symbol table
+    for (offset, &node_pos) in type_node_positions.iter().enumerate() {
+        let sym_idx = start_type_index + offset;
+        let type_node = &children_vec[node_pos];
+        // Temporarily take the kind out to avoid borrow conflict
+        // (resolve_type_kind_refs needs &SymbolTable + &mut TypeKind)
+        let placeholder = TypeKind::Func {
+            params: Vec::new(),
+            results: Vec::new(),
+        };
+        let mut kind = std::mem::replace(&mut symbol_table.types[sym_idx].kind, placeholder);
+        resolve_type_kind_refs(type_node, source, symbol_table, &mut kind);
+        symbol_table.types[sym_idx].kind = kind;
+    }
+
     type_index
+}
+
+/// Resolve named type references in a TypeKind that were left as Structref placeholders.
+///
+/// During initial extraction, `extract_ref_type` can't resolve named indices like `$t1`
+/// because it doesn't have symbol table access. These fall back to `ValueType::Structref`.
+/// This function walks the AST structurally — matching func_type params/results,
+/// struct fields, and array elements — to resolve only the specific Structref values
+/// that came from named references.
+fn resolve_type_kind_refs(
+    type_ast: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    kind: &mut TypeKind,
+) {
+    resolve_refs_in_subtree(type_ast, source, symbols, kind);
+}
+
+/// Recursively search for the func_type/struct_type/array_type node and resolve refs.
+fn resolve_refs_in_subtree(node: &Node, source: &str, symbols: &SymbolTable, kind: &mut TypeKind) {
+    node_kind!(k = node);
+    match k {
+        "func_type" => {
+            if let TypeKind::Func { params, results } = kind {
+                resolve_func_type_refs(node, source, symbols, params, results);
+            }
+            return;
+        }
+        "struct_type" => {
+            if let TypeKind::Struct { fields } = kind {
+                resolve_struct_type_refs(node, source, symbols, fields);
+            }
+            return;
+        }
+        "array_type" => {
+            if let TypeKind::Array { element_type, .. } = kind {
+                resolve_array_type_refs(node, source, symbols, element_type);
+            }
+            return;
+        }
+        _ => {}
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        resolve_refs_in_subtree(&child, source, symbols, kind);
+    }
+}
+
+/// Resolve named refs in a func_type node, walking params then results positionally.
+fn resolve_func_type_refs(
+    func_type_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    params: &mut [ValueType],
+    results: &mut [ValueType],
+) {
+    let mut param_idx = 0;
+    let mut result_idx = 0;
+    let mut cursor = func_type_node.walk();
+    for child in func_type_node.children(&mut cursor) {
+        node_kind!(ck = child);
+        if ck == "func_type_params" {
+            let mut params_cursor = child.walk();
+            for param_child in child.children(&mut params_cursor) {
+                node_kind!(pk = param_child);
+                if pk == "func_type_params_one" || pk == "func_type_params_many" {
+                    let mut inner_cursor = param_child.walk();
+                    for inner_child in param_child.children(&mut inner_cursor) {
+                        if inner_child.kind() == "value_type" {
+                            try_resolve_at(&inner_child, source, symbols, params, &mut param_idx);
+                        }
+                    }
+                }
+            }
+        } else if ck == "func_type_results" {
+            let mut results_cursor = child.walk();
+            for result_child in child.children(&mut results_cursor) {
+                if result_child.kind() == "value_type" {
+                    try_resolve_at(&result_child, source, symbols, results, &mut result_idx);
+                }
+            }
+        }
+    }
+}
+
+/// Resolve named refs in a struct_type node, walking field_type children positionally.
+fn resolve_struct_type_refs(
+    struct_type_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    fields: &mut [(Option<String>, ValueType, bool)],
+) {
+    let mut field_idx = 0;
+    let mut cursor = struct_type_node.walk();
+    for child in struct_type_node.children(&mut cursor) {
+        if child.kind() == "field_type" {
+            let mut fc = child.walk();
+            for fc_child in child.children(&mut fc) {
+                if fc_child.kind() == "storage_type" {
+                    if field_idx < fields.len() && fields[field_idx].1 == ValueType::Structref {
+                        if let Some(resolved) =
+                            try_resolve_named_ref_in_subtree(&fc_child, source, symbols)
+                        {
+                            fields[field_idx].1 = resolved;
+                        }
+                    }
+                    field_idx += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Resolve a named ref in an array_type node's storage_type child.
+fn resolve_array_type_refs(
+    array_type_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    element_type: &mut ValueType,
+) {
+    if *element_type != ValueType::Structref {
+        return;
+    }
+    let mut cursor = array_type_node.walk();
+    for child in array_type_node.children(&mut cursor) {
+        if child.kind() == "storage_type" {
+            if let Some(resolved) = try_resolve_named_ref_in_subtree(&child, source, symbols) {
+                *element_type = resolved;
+            }
+            return;
+        }
+    }
+}
+
+/// Try to resolve a Structref at `types[*idx]`, then increment `*idx`.
+fn try_resolve_at(
+    value_type_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    types: &mut [ValueType],
+    idx: &mut usize,
+) {
+    if *idx < types.len() && types[*idx] == ValueType::Structref {
+        if let Some(resolved) = try_resolve_named_ref_in_subtree(value_type_node, source, symbols) {
+            types[*idx] = resolved;
+        }
+    }
+    *idx += 1;
+}
+
+/// Recursively search a subtree for a `ref_type_concrete` or `ref_type_ref` with a named
+/// index, and resolve it via the symbol table.
+fn try_resolve_named_ref_in_subtree(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Option<ValueType> {
+    node_kind!(k = node);
+    if k == "ref_type_concrete" || k == "ref_type_ref" {
+        let mut cursor = node.walk();
+        let mut named_index = None;
+        let mut nullable = false;
+        let mut has_ref_kind = false;
+
+        for child in node.children(&mut cursor) {
+            node_kind!(ck = child);
+            match ck {
+                "index" => {
+                    let text = node_text(&child, source);
+                    if text.starts_with('$') {
+                        named_index = Some(text);
+                    }
+                }
+                "null" => nullable = true,
+                "ref_kind" => has_ref_kind = true,
+                _ => {
+                    if node_text(&child, source) == "null" {
+                        nullable = true;
+                    }
+                }
+            }
+        }
+
+        if !has_ref_kind {
+            if let Some(name) = named_index {
+                if let Some(type_def) = symbols.get_type_by_name(name) {
+                    let idx = type_def.index as u32;
+                    return Some(if nullable {
+                        ValueType::RefNull(idx)
+                    } else {
+                        ValueType::Ref(idx)
+                    });
+                }
+            }
+        }
+        return None;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if let Some(resolved) = try_resolve_named_ref_in_subtree(&child, source, symbols) {
+            return Some(resolved);
+        }
+    }
+    None
 }
 
 /// Extract a type from a single node (struct_type, array_type, or type_field)
@@ -1285,11 +1523,13 @@ fn extract_type_from_single_node(
         results: Vec::new(),
     };
     let mut parent_ref: Option<String> = None;
-    let mut is_final = false;
+    let mut is_final = true;
 
     node_kind!(type_kind = type_node);
     match type_kind {
         "sub_type" => {
+            // sub without explicit "final" keyword defaults to non-final
+            is_final = false;
             // Process sub_type children: (sub final? index? def_type)
             let mut sub_cursor = type_node.walk();
             for sub_child in type_node.children(&mut sub_cursor) {
@@ -1475,11 +1715,13 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
         results: Vec::new(),
     };
     let mut parent_ref: Option<String> = None;
-    let mut is_final = false;
+    let mut is_final = true;
     let mut cursor = type_node.walk();
     for child in type_node.children(&mut cursor) {
         // Handle sub_type: (sub final? supertype_index? def_type)
         if child.kind() == "sub_type" {
+            // sub without explicit "final" keyword defaults to non-final
+            is_final = false;
             let mut sub_cursor = child.walk();
             for sub_child in child.children(&mut sub_cursor) {
                 node_kind!(sub_kind = sub_child);
@@ -1562,6 +1804,8 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                     kind = extract_array_kind(&field_child, source);
                 } else if field_child.kind() == "sub_type" {
                     // Handle sub_type inside type_field: (sub final? index? def_type)
+                    // sub without explicit "final" keyword defaults to non-final
+                    is_final = false;
                     let mut sub_cursor = field_child.walk();
                     for sub_child in field_child.children(&mut sub_cursor) {
                         node_kind!(sub_kind = sub_child);

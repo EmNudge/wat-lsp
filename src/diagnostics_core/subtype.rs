@@ -123,6 +123,12 @@ fn check_structural_compatibility(
                     }
                 } else {
                     // Immutable fields: covariant (child must be subtype of parent)
+                    if *child_mut {
+                        diagnostics.push(Diagnostic::error(
+                            range,
+                            format!("Struct field {} mutability mismatch", i),
+                        ));
+                    }
                     if !types_compatible_with_symbols(child_type, parent_type, symbols) {
                         diagnostics.push(Diagnostic::error(
                             range,
@@ -164,6 +170,12 @@ fn check_structural_compatibility(
                 }
             } else {
                 // Immutable array: covariant
+                if *child_mut {
+                    diagnostics.push(Diagnostic::error(
+                        range,
+                        "Array mutability mismatch".to_string(),
+                    ));
+                }
                 if !types_compatible_with_symbols(child_elem, parent_elem, symbols) {
                     diagnostics.push(Diagnostic::error(
                         range,
