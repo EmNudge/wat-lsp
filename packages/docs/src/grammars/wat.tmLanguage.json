@@ -1,85 +1,245 @@
 {
-  "name": "WebAssembly Text (WAT)",
+  "name": "WebAssembly Text Format",
   "scopeName": "source.wat",
-  "fileTypes": ["wat", "wast"],
   "patterns": [
-    { "include": "#block-comment" },
-    { "include": "#line-comment" },
+    { "include": "#comments" },
     { "include": "#strings" },
-    { "include": "#numbers-hex" },
-    { "include": "#numbers-float" },
-    { "include": "#numbers-int" },
-    { "include": "#control-keywords" },
-    { "include": "#instructions-numeric" },
-    { "include": "#instructions-variable" },
-    { "include": "#instructions-memory" },
+    { "include": "#instructions" },
+    { "include": "#keywords" },
+    { "include": "#types" },
     { "include": "#identifiers" },
-    { "include": "#parens" }
+    { "include": "#numbers" }
   ],
   "repository": {
-    "block-comment": {
-      "name": "comment.block.wat",
-      "begin": "\\(;",
-      "end": ";\\)",
-      "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.wat" } },
-      "endCaptures": { "0": { "name": "punctuation.definition.comment.end.wat" } }
-    },
-    "line-comment": {
-      "name": "comment.line.double-semicolon.wat",
-      "match": ";;.*$"
-    },
-    "strings": {
-      "name": "string.quoted.double.wat",
-      "match": "\"(?:[^\"\\\\]|\\\\.)*\""
-    },
-    "numbers-hex": {
-      "name": "constant.numeric.hex.wat",
-      "match": "[-+]?0x[0-9A-Fa-f]+"
-    },
-    "numbers-float": {
-      "name": "constant.numeric.float.wat",
-      "match": "[-+]?(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][+-]?\\d+)?"
-    },
-    "numbers-int": {
-      "name": "constant.numeric.integer.wat",
-      "match": "[-+]?\\d+"
-    },
-    "control-keywords": {
+    "comments": {
       "patterns": [
         {
-          "name": "keyword.control.wat",
-          "match": "\\b(block|loop|if|else|end|br|br_if|br_table|call|call_indirect|return|unreachable|nop|select)\\b"
+          "name": "comment.line.wat",
+          "match": ";;.*$"
         },
         {
-          "name": "keyword.declaration.wat",
-          "match": "\\b(module|func|param|result|local|type|table|memory|global|elem|data|start|export|import|offset|mut)\\b"
+          "name": "comment.block.wat",
+          "begin": "\\(;",
+          "end": ";\\)"
         }
       ]
     },
-    "instructions-numeric": {
-      "name": "keyword.operator.numeric.wat",
-      "match": "\\b(?:(?:i32|i64|f32|f64)\\.(?:add|sub|mul|div(?:_s|_u)?|rem(?:_s|_u)?|and|or|xor|shl|shr(?:_s|_u)?|rotl|rotr|eq|ne|lt(?:_s|_u)?|le(?:_s|_u)?|gt(?:_s|_u)?|ge(?:_s|_u)?|const|abs|neg|sqrt|ceil|floor|trunc|nearest|min|max|copysign|convert_i32_s|convert_i32_u|convert_i64_s|convert_i64_u|promote_f32|demote_f64|extend_i32_s|extend_i32_u|extend_i64_s|extend_i64_u|wrap_i64))\\b"
+    "strings": {
+      "name": "string.quoted.double.wat",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.wat",
+          "match": "\\\\(?:n|t|r|\\\\|\"|'|[0-9a-fA-F]{2}|u\\{[0-9a-fA-F]+\\})"
+        }
+      ]
     },
-    "instructions-variable": {
-      "name": "support.function.variable.wat",
-      "match": "\\b(?:(?:local|global)\\.(?:get|set|tee))\\b"
+    "instructions": {
+      "patterns": [
+        {
+          "comment": "Numeric type instructions (i32.add, f64.mul, i32.atomic.rmw8.add_u, etc.)",
+          "match": "\\b(i32|i64|f32|f64)((?:\\.[a-z_][a-z0-9_]*)+)\\b",
+          "captures": {
+            "1": { "name": "support.class.type.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "SIMD v128 instructions",
+          "match": "\\b(v128)(\\.[a-z_][a-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "support.class.type.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "SIMD lane type instructions (i8x16.add, f32x4.mul, etc.)",
+          "match": "\\b(i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)(\\.[a-z_][a-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "support.class.type.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Local/global variable instructions",
+          "match": "\\b(local|global)(\\.(get|set|tee))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Memory instructions",
+          "match": "\\b(memory)(\\.(size|grow|copy|fill|init|atomic\\.(notify|wait32|wait64|fence)))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Table instructions",
+          "match": "\\b(table)(\\.(get|set|size|grow|fill|copy|init))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Reference instructions",
+          "match": "\\b(ref)(\\.(null|is_null|as_non_null|func|extern|eq|test|cast|cast_null|i31))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "i31 instructions",
+          "match": "\\b(i31)(\\.(new|get_s|get_u))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Struct instructions",
+          "match": "\\b(struct)(\\.(new|new_default|get|get_s|get_u|set))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Array instructions",
+          "match": "\\b(array)(\\.(new|new_default|new_fixed|new_data|new_elem|get|get_s|get_u|set|len|fill|copy|init_data|init_elem))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Extern/any conversion instructions (GC)",
+          "match": "\\b(extern|any)(\\.(convert_extern|convert_any|internalize|externalize))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Atomic instructions",
+          "match": "\\b(atomic)(\\.(notify|fence))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Data/elem drop",
+          "match": "\\b(data|elem)(\\.(drop))\\b",
+          "captures": {
+            "1": { "name": "support.class.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        },
+        {
+          "comment": "Memory attributes",
+          "match": "\\b(offset|align)(=)",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.wat" },
+            "2": { "name": "keyword.operator.wat" }
+          }
+        }
+      ]
     },
-    "instructions-memory": {
-      "name": "support.function.memory.wat",
-      "match": "\\b(?:memory\\.(?:size|grow)|i(?:32|64)\\.(?:load(?:8_s|8_u|16_s|16_u|32_s|32_u)?|store(?:8|16|32)?))\\b"
+    "keywords": {
+      "patterns": [
+        {
+          "comment": "Module structure keywords",
+          "name": "storage.type.wat",
+          "match": "(?<=\\()(?:module|import|export|memory|data|table|elem|start|func|type|param|result|global|local|mut|tag|struct|field|array|rec|sub)\\b"
+        },
+        {
+          "comment": "Control flow",
+          "name": "keyword.control.wat",
+          "match": "\\b(?:block|loop|if|then|else|end|br|br_if|br_table|br_on_null|br_on_non_null|br_on_cast|br_on_cast_fail|return|call|call_indirect|call_ref|return_call|return_call_indirect|return_call_ref|unreachable|nop|drop|select|try|try_table|catch|catch_all|throw|throw_ref|rethrow|delegate)\\b"
+        },
+        {
+          "comment": "Modifiers (shared, final)",
+          "name": "storage.modifier.wat",
+          "match": "\\b(?:shared|final)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "comment": "Numeric value types (standalone, not followed by dot)",
+          "name": "entity.name.type.wat",
+          "match": "\\b(?:i32|i64|f32|f64|v128)\\b(?!\\.)"
+        },
+        {
+          "comment": "Small integer types (GC)",
+          "name": "entity.name.type.wat",
+          "match": "\\b(?:i8|i16)\\b"
+        },
+        {
+          "comment": "Reference types",
+          "name": "entity.name.type.wat",
+          "match": "\\b(?:funcref|externref|anyref|eqref|i31ref|structref|arrayref|nullref|nullfuncref|nullexternref|exnref)\\b"
+        },
+        {
+          "comment": "ref and null keywords in type contexts",
+          "name": "entity.name.type.wat",
+          "match": "\\b(?:ref|null)\\b(?!\\.)"
+        },
+        {
+          "comment": "SIMD lane types (standalone)",
+          "name": "entity.name.type.wat",
+          "match": "\\b(?:i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\\b(?!\\.)"
+        }
+      ]
     },
     "identifiers": {
       "patterns": [
         {
-          "name": "entity.name.label.wat",
-          "match": "\\$[A-Za-z0-9_\\.\\-]+"
+          "comment": "Named identifiers",
+          "name": "variable.other.wat",
+          "match": "\\$[0-9A-Za-z!#$%&'*+\\-./:<=>?@\\\\^_`|~]+"
         }
       ]
     },
-    "parens": {
+    "numbers": {
       "patterns": [
-        { "name": "punctuation.section.parens.begin.wat", "match": "\\(" },
-        { "name": "punctuation.section.parens.end.wat", "match": "\\)" }
+        {
+          "comment": "Hexadecimal float",
+          "name": "constant.numeric.float.wat",
+          "match": "[+-]?0x[0-9a-fA-F][0-9a-fA-F_]*(?:\\.[0-9a-fA-F_]*)?[pP][+-]?[0-9]+"
+        },
+        {
+          "comment": "Hexadecimal integer",
+          "name": "constant.numeric.hex.wat",
+          "match": "[+-]?0x[0-9a-fA-F][0-9a-fA-F_]*\\b"
+        },
+        {
+          "comment": "Floating point with exponent",
+          "name": "constant.numeric.float.wat",
+          "match": "[+-]?[0-9][0-9_]*(?:\\.[0-9_]*)?[eE][+-]?[0-9_]+\\b"
+        },
+        {
+          "comment": "Floating point",
+          "name": "constant.numeric.float.wat",
+          "match": "[+-]?[0-9][0-9_]*\\.[0-9_]*\\b"
+        },
+        {
+          "comment": "Decimal integer",
+          "name": "constant.numeric.integer.wat",
+          "match": "[+-]?[0-9][0-9_]*\\b"
+        },
+        {
+          "comment": "Special float values",
+          "name": "constant.numeric.float.wat",
+          "match": "[+-]?(?:inf|nan(?::0x[0-9a-fA-F]+)?)\\b"
+        }
       ]
     }
   }
