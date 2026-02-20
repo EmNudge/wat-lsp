@@ -450,6 +450,7 @@ fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Ve
             }
             "module_field_type" => {
                 check_identifier_dup(field, source, &mut seen_type, "type", diagnostics);
+                check_duplicate_struct_fields(field, source, diagnostics);
             }
             "module_field_tag" => {
                 check_identifier_dup(field, source, &mut seen_tag, "tag", diagnostics);
@@ -466,6 +467,7 @@ fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Ve
                     node_kind!(ck = child);
                     if ck == "module_field_type" {
                         check_identifier_dup(&child, source, &mut seen_type, "type", diagnostics);
+                        check_duplicate_struct_fields(&child, source, diagnostics);
                     }
                 }
             }
@@ -573,6 +575,68 @@ fn check_tag_no_results(node: &Node, _source: &str, diagnostics: &mut Vec<Diagno
         false
     }
     has_results(node, diagnostics);
+}
+
+/// Check for duplicate named fields within a struct type definition.
+fn check_duplicate_struct_fields(
+    type_node: &Node,
+    source: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut seen_fields: HashMap<String, Range> = HashMap::new();
+    find_struct_and_check_fields(type_node, source, &mut seen_fields, diagnostics);
+}
+
+/// Recursively find struct_type nodes and check their fields for duplicates.
+fn find_struct_and_check_fields(
+    node: &Node,
+    source: &str,
+    seen: &mut HashMap<String, Range>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind == "struct_type" {
+            collect_struct_field_names(&child, source, seen, diagnostics);
+        } else {
+            find_struct_and_check_fields(&child, source, seen, diagnostics);
+        }
+    }
+}
+
+/// Collect and check named fields in a struct for duplicates.
+fn collect_struct_field_names(
+    node: &Node,
+    source: &str,
+    seen: &mut HashMap<String, Range>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind == "field_type" {
+            // Check for identifier children (named fields)
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "identifier" {
+                    let name = node_text(&inner_child, source).to_string();
+                    let range = node_to_range(&inner_child);
+                    if let std::collections::hash_map::Entry::Vacant(e) = seen.entry(name.clone()) {
+                        e.insert(range);
+                    } else {
+                        diagnostics.push(Diagnostic::error(
+                            range,
+                            format!("duplicate field {}", name),
+                        ));
+                    }
+                }
+            }
+        } else if kind != "(" && kind != ")" && kind != "struct" {
+            // Recurse into other structural nodes
+            collect_struct_field_names(&child, source, seen, diagnostics);
+        }
+    }
 }
 
 // ============================================================================
