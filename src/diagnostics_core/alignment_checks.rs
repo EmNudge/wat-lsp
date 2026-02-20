@@ -4,6 +4,7 @@
 //! and that alignment values are powers of 2.
 
 use crate::core::types::Diagnostic;
+use crate::symbols::SymbolTable;
 use crate::utils::node_to_range;
 
 #[cfg(feature = "native")]
@@ -17,7 +18,8 @@ use crate::ts_facade::Node;
 /// Returns diagnostics if:
 /// - `align=N` where N is not a power of 2
 /// - `align=N` where N exceeds the instruction's natural alignment
-pub fn check_alignment(node: &Node, source: &str) -> Vec<Diagnostic> {
+/// - `offset=N` where N exceeds u32::MAX for memory32 targets
+pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut instr_name = None;
     let mut align_node = None;
@@ -47,14 +49,17 @@ pub fn check_alignment(node: &Node, source: &str) -> Vec<Diagnostic> {
         }
     }
 
-    // Check offset range (must fit in u32 for memory32)
-    if let Some(ref offset_nd) = offset_node {
-        if let Some(offset) = parse_offset_value(offset_nd, source) {
-            if offset > u32::MAX as u64 {
-                diagnostics.push(Diagnostic::error(
-                    node_to_range(offset_nd),
-                    "offset out of range".to_string(),
-                ));
+    // Check offset range (must fit in u32 for memory32, u64 for memory64)
+    let is_memory64 = symbols.memories.first().is_some_and(|m| m.is_memory64);
+    if !is_memory64 {
+        if let Some(ref offset_nd) = offset_node {
+            if let Some(offset) = parse_offset_value(offset_nd, source) {
+                if offset > u32::MAX as u64 {
+                    diagnostics.push(Diagnostic::error(
+                        node_to_range(offset_nd),
+                        "offset out of range".to_string(),
+                    ));
+                }
             }
         }
     }

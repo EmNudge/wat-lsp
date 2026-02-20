@@ -296,16 +296,17 @@ pub fn check_references(
         return find_first_index_identifier(node, source, symbols, context);
     }
 
-    // Multi-index instructions: table.init takes (elem_idx, table_idx),
-    // memory.init takes (data_idx, memory_idx). The context from
-    // determine_instruction_context_at_node applies only to the first index.
+    // Multi-index instructions: table.init / memory.init
+    // WAT text format: (table.init $table $elem) or (table.init $elem) — abbreviated
+    // With 1 index: it's elem/data (table/memory defaults to 0)
+    // With 2 indices: first is table/memory, second is elem/data
     if first_token == "table.init" || first_token == "memory.init" {
-        let second_context = if first_token == "table.init" {
+        let secondary = if first_token == "table.init" {
             InstructionContext::Table
         } else {
             InstructionContext::Memory
         };
-        return check_multi_index_instruction(node, source, symbols, context, &second_context);
+        return check_init_instruction(node, source, symbols, context, &secondary);
     }
 
     // memory.copy and table.copy take two indices of the same context (dest, src)
@@ -313,11 +314,73 @@ pub fn check_references(
         return check_multi_index_instruction(node, source, symbols, context, context);
     }
 
+    // array.new_data / array.init_data: first index is Type, second is Data
+    if first_token == "array.new_data" || first_token == "array.init_data" {
+        return check_multi_index_instruction(
+            node,
+            source,
+            symbols,
+            &InstructionContext::Type,
+            &InstructionContext::Data,
+        );
+    }
+
+    // array.new_elem / array.init_elem: first index is Type, second is Elem
+    if first_token == "array.new_elem" || first_token == "array.init_elem" {
+        return check_multi_index_instruction(
+            node,
+            source,
+            symbols,
+            &InstructionContext::Type,
+            &InstructionContext::Elem,
+        );
+    }
+
+    // br_on_cast / br_on_cast_fail: first index is Branch, rest are heap types (not validated)
+    if first_token == "br_on_cast" || first_token == "br_on_cast_fail" {
+        return check_first_index_reference(node, source, symbols, &InstructionContext::Branch);
+    }
+
     find_undefined_identifiers(node, source, symbols, context)
 }
 
+/// Check table.init / memory.init where the index order depends on count:
+/// - 1 index: elem/data (table/memory defaults to 0)
+/// - 2 indices: first is table/memory, second is elem/data
+fn check_init_instruction(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    primary_context: &InstructionContext,   // Elem or Data
+    secondary_context: &InstructionContext, // Table or Memory
+) -> Vec<Diagnostic> {
+    // Count indices first
+    let mut total_indices = 0usize;
+    find_indices_recursive(node, &mut |_| {
+        total_indices += 1;
+    });
+
+    let mut diagnostics = Vec::new();
+    let mut index_count = 0usize;
+    find_indices_recursive(node, &mut |index_node| {
+        let ctx = if total_indices == 1 {
+            // Abbreviated: single index is primary (elem/data)
+            primary_context
+        } else if index_count == 0 {
+            // Full form: first is secondary (table/memory)
+            secondary_context
+        } else {
+            // Full form: second is primary (elem/data)
+            primary_context
+        };
+        diagnostics.extend(find_undefined_identifiers(index_node, source, symbols, ctx));
+        index_count += 1;
+    });
+
+    diagnostics
+}
+
 /// Check a multi-index instruction where the first and second index have different contexts.
-/// E.g. `table.init $elem $table` or `memory.init $data $memory`.
 fn check_multi_index_instruction(
     node: &Node,
     source: &str,

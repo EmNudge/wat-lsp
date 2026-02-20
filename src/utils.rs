@@ -199,6 +199,8 @@ fn context_from_instruction_text(instr_text: &str) -> Option<InstructionContext>
     } else if first_token == "table.init" || first_token == "elem.drop" {
         Some(InstructionContext::Elem)
     // Check GC/struct/array instructions (they take type indices)
+    // Note: array.new_data/elem/init_data/init_elem also return Type here;
+    // their multi-index handling is done in references.rs
     } else if first_token.starts_with("struct.")
         || first_token.starts_with("array.")
         || first_token == "ref.cast"
@@ -209,6 +211,9 @@ fn context_from_instruction_text(instr_text: &str) -> Option<InstructionContext>
         Some(InstructionContext::Type)
     } else if first_token == "ref.func" || first_token == "return_call" {
         Some(InstructionContext::Call)
+    // br_on_cast/br_on_cast_fail: first index is branch label, rest are types (handled in references.rs)
+    } else if first_token == "br_on_cast" || first_token == "br_on_cast_fail" {
+        Some(InstructionContext::Type)
     } else if first_token.starts_with("br") {
         Some(InstructionContext::Branch)
     } else if first_token.starts_with("call") && first_token != "call_indirect" {

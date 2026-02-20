@@ -252,6 +252,7 @@ pub struct DataSegment {
 pub struct ElemSegment {
     pub name: Option<String>,
     pub index: usize,
+    pub ref_type: ValueType,
     pub func_names: Vec<String>,
     pub line: u32,
     pub range: Option<Range>,
