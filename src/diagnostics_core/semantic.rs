@@ -16,7 +16,7 @@ use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
     infer_simd_instruction_arity, is_terminating_instruction, lookup_instruction_arity, OperandMode,
 };
-use crate::symbols::{SymbolTable, Table, TypeDef, TypeKind, ValueType};
+use crate::symbols::{Memory, SymbolTable, Table, TypeDef, TypeKind, ValueType};
 use crate::utils::node_to_range;
 
 use super::sequence_always_terminates;
@@ -50,6 +50,112 @@ fn type_from_prefix(name: &str) -> Option<ValueType> {
 /// Check if an instruction name refers to a SIMD lane operation (contains x2./x4./x8./x16.).
 fn is_simd_instruction(name: &str) -> bool {
     name.contains("x2.") || name.contains("x4.") || name.contains("x8.") || name.contains("x16.")
+}
+
+/// Derive the splat input type from an instruction prefix (e.g. "i8x16" -> I32, "f32x4" -> F32).
+fn simd_splat_input_type(name: &str) -> ValueType {
+    if name.starts_with("i8x16.") || name.starts_with("i16x8.") || name.starts_with("i32x4.") {
+        ValueType::I32
+    } else if name.starts_with("i64x2.") {
+        ValueType::I64
+    } else if name.starts_with("f32x4.") {
+        ValueType::F32
+    } else if name.starts_with("f64x2.") {
+        ValueType::F64
+    } else {
+        ValueType::I32
+    }
+}
+
+/// Derive consumed types for SIMD lane instructions (i8x16.*, i16x8.*, i32x4.*, i64x2.*, f32x4.*, f64x2.*).
+fn derive_simd_consumed_types(name: &str) -> Option<Vec<ValueType>> {
+    // Splat: scalar -> v128
+    if name.ends_with(".splat") {
+        return Some(vec![simd_splat_input_type(name)]);
+    }
+
+    // Extract lane: v128 -> scalar (lane index is immediate, not stack operand)
+    if name.contains(".extract_lane") {
+        return Some(vec![ValueType::V128]);
+    }
+
+    // Replace lane: v128 + scalar -> v128
+    if name.contains(".replace_lane") {
+        return Some(vec![ValueType::V128, simd_splat_input_type(name)]);
+    }
+
+    // Reductions: v128 -> i32
+    if name.ends_with(".all_true") || name.ends_with(".bitmask") {
+        return Some(vec![ValueType::V128]);
+    }
+
+    // Shift operations: v128 + i32 -> v128
+    if name.ends_with(".shl") || name.ends_with(".shr_s") || name.ends_with(".shr_u") {
+        return Some(vec![ValueType::V128, ValueType::I32]);
+    }
+
+    // Unary ops: v128 -> v128
+    if name.ends_with(".neg")
+        || name.ends_with(".abs")
+        || name.ends_with(".not")
+        || name.ends_with(".popcnt")
+        || name.ends_with(".ceil")
+        || name.ends_with(".floor")
+        || name.ends_with(".trunc")
+        || name.ends_with(".nearest")
+        || name.ends_with(".sqrt")
+        || name.contains(".trunc_sat_")
+        || name.contains(".extend_low_")
+        || name.contains(".extend_high_")
+        || name.contains(".convert_")
+        || name.contains(".promote_low_")
+        || name.contains(".demote_")
+        || name.contains(".extadd_pairwise_")
+    {
+        return Some(vec![ValueType::V128]);
+    }
+
+    // Ternary relaxed SIMD ops: (v128, v128, v128) -> v128
+    if name.contains(".relaxed_madd")
+        || name.contains(".relaxed_nmadd")
+        || name.contains(".relaxed_laneselect")
+        || name.contains(".relaxed_dot_i8x16_i7x16_add")
+    {
+        return Some(vec![ValueType::V128, ValueType::V128, ValueType::V128]);
+    }
+
+    // Unary relaxed SIMD ops
+    if name.contains(".relaxed_trunc") {
+        return Some(vec![ValueType::V128]);
+    }
+
+    // i8x16.shuffle: (v128, v128) -> v128 (lane indices are immediates)
+    if name == "i8x16.shuffle" {
+        return Some(vec![ValueType::V128, ValueType::V128]);
+    }
+
+    // Narrow operations: (v128, v128) -> v128
+    if name.contains(".narrow_") {
+        return Some(vec![ValueType::V128, ValueType::V128]);
+    }
+
+    // Swizzle: (v128, v128) -> v128
+    if name.ends_with(".swizzle") || name.contains(".relaxed_swizzle") {
+        return Some(vec![ValueType::V128, ValueType::V128]);
+    }
+
+    // Dot product: (v128, v128) -> v128
+    if name.contains(".dot_") {
+        return Some(vec![ValueType::V128, ValueType::V128]);
+    }
+
+    // Extmul: (v128, v128) -> v128
+    if name.contains(".extmul_") {
+        return Some(vec![ValueType::V128, ValueType::V128]);
+    }
+
+    // Default: binary ops (v128, v128) -> v128 (add, sub, mul, min, max, eq, ne, lt, gt, le, ge, etc.)
+    Some(vec![ValueType::V128, ValueType::V128])
 }
 
 /// Track stack state through an instruction list and report underflow/type errors.
@@ -697,6 +803,16 @@ fn process_instruction(
         }
     }
 
+    // Check table.init/table.copy type compatibility
+    if instr_name == "table.init" {
+        check_table_init_types(node, symbols, source, checker);
+    } else if instr_name == "table.copy" {
+        check_table_copy_types(node, symbols, source, checker);
+    }
+
+    // Check immutable array for array mutation instructions
+    check_immutable_array(instr_name, node, symbols, source, checker);
+
     let produced = infer_instruction_result_types(instr_name, node, symbols, source);
     // If we know the instruction produces N values but couldn't infer types, pad with Unknown
     let produces_count = get_instruction_produces_count(instr_name);
@@ -899,27 +1015,51 @@ fn derive_consumed_types_from_name(
         "f32.reinterpret_i32" => Some(vec![ValueType::I32]),
         "f64.reinterpret_i64" => Some(vec![ValueType::I64]),
 
-        // SIMD lane load/store — consume address (i32) + v128 vector
+        // ---- SIMD instruction type signatures ----
+        // v128 bitwise: (v128, v128) -> v128
+        "v128.and" | "v128.or" | "v128.xor" | "v128.andnot" => {
+            Some(vec![ValueType::V128, ValueType::V128])
+        }
+        // v128 bitselect: (v128, v128, v128) -> v128
+        "v128.bitselect" => Some(vec![ValueType::V128, ValueType::V128, ValueType::V128]),
+        // v128 not: (v128) -> v128
+        "v128.not" => Some(vec![ValueType::V128]),
+        // v128.any_true: (v128) -> i32
+        "v128.any_true" => Some(vec![ValueType::V128]),
+
+        // SIMD lane instructions
+        name if is_simd_instruction(name) => derive_simd_consumed_types(name),
+
+        // SIMD lane load/store — consume address + v128 vector
         name if name.contains("_lane") && name.starts_with("v128.load") => {
-            Some(vec![ValueType::I32, ValueType::V128])
+            let addr_type = get_memory_address_type(node, symbols, source);
+            Some(vec![addr_type, ValueType::V128])
         }
         name if name.contains("_lane") && name.starts_with("v128.store") => {
-            Some(vec![ValueType::I32, ValueType::V128])
+            let addr_type = get_memory_address_type(node, symbols, source);
+            Some(vec![addr_type, ValueType::V128])
         }
 
-        // Memory load — consume address (i32 for memory32)
-        name if name.contains(".load") => Some(vec![ValueType::I32]),
+        // Memory load — consume address (i32 for memory32, i64 for memory64)
+        name if name.contains(".load") => {
+            let addr_type = get_memory_address_type(node, symbols, source);
+            Some(vec![addr_type])
+        }
 
         // Memory store — consume address + value
         name if name.contains(".store") => {
+            let addr_type = get_memory_address_type(node, symbols, source);
             let value_type = type_from_prefix(name).unwrap_or(ValueType::Unknown);
-            Some(vec![ValueType::I32, value_type])
+            Some(vec![addr_type, value_type])
         }
 
         // Memory size — no operands
         "memory.size" => Some(vec![]),
-        // Memory grow — consume delta (i32)
-        "memory.grow" => Some(vec![ValueType::I32]),
+        // Memory grow — consume delta (i32 for memory32, i64 for memory64)
+        "memory.grow" => {
+            let addr_type = get_memory_address_type(node, symbols, source);
+            Some(vec![addr_type])
+        }
 
         // Reference instructions
         "ref.null" => Some(vec![]),
@@ -973,12 +1113,33 @@ fn derive_consumed_types_from_name(
         "br_on_cast" | "br_on_cast_fail" => Some(vec![ValueType::Unknown]),
 
         // Exceptions
+        "throw" => {
+            // throw $tag: consumes tag's param types
+            if let Some(tag_ref) = get_index_from_node(node, source) {
+                let tag = symbols
+                    .get_tag_by_name(tag_ref)
+                    .or_else(|| parse_wat_nat(tag_ref).and_then(|i| symbols.tags.get(i as usize)));
+                if let Some(tag) = tag {
+                    return Some(tag.params.clone());
+                }
+            }
+            Some(vec![])
+        }
         "throw_ref" => Some(vec![ValueType::Unknown]), // exnref
 
-        // Bulk memory
-        "memory.copy" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I32]),
-        "memory.fill" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I32]),
-        "memory.init" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I32]),
+        // Bulk memory — addresses are i32/i64 depending on memory type
+        "memory.copy" => {
+            let addr_type = get_memory_address_type(node, symbols, source);
+            Some(vec![addr_type, addr_type, addr_type])
+        }
+        "memory.fill" => {
+            let addr_type = get_memory_address_type(node, symbols, source);
+            Some(vec![addr_type, ValueType::I32, addr_type])
+        }
+        "memory.init" => {
+            let addr_type = get_memory_address_type(node, symbols, source);
+            Some(vec![addr_type, ValueType::I32, ValueType::I32])
+        }
         "data.drop" | "elem.drop" => Some(vec![]),
 
         // Table operations — resolve element type and index type from symbol table
@@ -1002,16 +1163,31 @@ fn derive_consumed_types_from_name(
             let elem_type = get_table_elem_type(node, symbols, source);
             Some(vec![idx_type, elem_type, idx_type])
         }
-        "table.copy" => Some(vec![
-            ValueType::Unknown,
-            ValueType::Unknown,
-            ValueType::Unknown,
-        ]),
-        "table.init" => Some(vec![
-            ValueType::Unknown,
-            ValueType::Unknown,
-            ValueType::Unknown,
-        ]),
+        "table.copy" => {
+            // table.copy $dst $src: (d:dst_addr, s:src_addr, n:min(dst_addr, src_addr))
+            let (dst_type, src_type) = resolve_table_copy_addr_types(node, symbols, source);
+            // n uses i32 unless both tables are i64
+            let n_type = if dst_type == ValueType::I64 && src_type == ValueType::I64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            };
+            Some(vec![dst_type, src_type, n_type])
+        }
+        "table.init" => {
+            // table.init $table $elem: (d:table_addr, s:i32, n:i32)
+            let table = resolve_table_for_table_init(node, symbols, source);
+            let addr_type = table
+                .map(|t| {
+                    if t.is_table64 {
+                        ValueType::I64
+                    } else {
+                        ValueType::I32
+                    }
+                })
+                .unwrap_or(ValueType::I32);
+            Some(vec![addr_type, ValueType::I32, ValueType::I32])
+        }
 
         // Atomic fence — no operands
         "atomic.fence" => Some(vec![]),
@@ -1422,7 +1598,9 @@ fn infer_instruction_result_types(
         }
         name if name.contains(".store") => vec![],
 
-        "memory.size" | "memory.grow" => vec![ValueType::I32],
+        "memory.size" | "memory.grow" => {
+            vec![get_memory_address_type(node, symbols, source)]
+        }
 
         "local.get" | "local.tee" => get_local_type_from_node(node, symbols, source)
             .map(|t| vec![t])
@@ -1566,6 +1744,35 @@ fn get_table_index_type(node: &Node, symbols: &SymbolTable, source: &str) -> Val
     resolve_table(node, symbols, source)
         .map(|t| {
             if t.is_table64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            }
+        })
+        .unwrap_or(ValueType::I32)
+}
+
+/// Resolve the memory referenced by a memory instruction node.
+/// Checks for a memory index/identifier in the instruction, falls back to memory 0.
+fn resolve_memory<'a>(node: &Node, symbols: &'a SymbolTable, source: &str) -> Option<&'a Memory> {
+    if let Some(index) = get_index_from_node(node, source) {
+        if let Some(mem) = symbols.get_memory_by_name(index) {
+            return Some(mem);
+        }
+        if let Some(idx) = parse_wat_nat(index) {
+            if let Some(mem) = symbols.memories.get(idx as usize) {
+                return Some(mem);
+            }
+        }
+    }
+    symbols.memories.first()
+}
+
+/// Get the address type for memory operations (i32 for memory32, i64 for memory64)
+fn get_memory_address_type(node: &Node, symbols: &SymbolTable, source: &str) -> ValueType {
+    resolve_memory(node, symbols, source)
+        .map(|m| {
+            if m.is_memory64 {
                 ValueType::I64
             } else {
                 ValueType::I32
@@ -2715,4 +2922,204 @@ fn validate_tail_call_return_types(
     }
 
     None
+}
+
+/// Resolve elem segment from an instruction's indices.
+/// For table.init with 1 index: it's the elem idx. With 2 indices: second is elem idx.
+fn resolve_elem_for_table_init<'a>(
+    node: &Node,
+    symbols: &'a SymbolTable,
+    source: &str,
+) -> Option<&'a crate::symbols::ElemSegment> {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+
+    let elem_ref = if indices.len() == 1 {
+        indices[0]
+    } else if indices.len() >= 2 {
+        indices[1]
+    } else {
+        return symbols.elem_segments.first();
+    };
+
+    if let Some(elem) = symbols.get_elem_by_name(elem_ref) {
+        return Some(elem);
+    }
+    if let Some(idx) = parse_wat_nat(elem_ref) {
+        return symbols.elem_segments.get(idx as usize);
+    }
+    None
+}
+
+/// Resolve table from table.init's indices.
+/// With 1 index: table defaults to 0. With 2 indices: first is table idx.
+fn resolve_table_for_table_init<'a>(
+    node: &Node,
+    symbols: &'a SymbolTable,
+    source: &str,
+) -> Option<&'a Table> {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+
+    if indices.len() >= 2 {
+        let table_ref = indices[0];
+        if let Some(table) = symbols.get_table_by_name(table_ref) {
+            return Some(table);
+        }
+        if let Some(idx) = parse_wat_nat(table_ref) {
+            return symbols.tables.get(idx as usize);
+        }
+    }
+    symbols.tables.first()
+}
+
+/// Collect index/identifier text values from instruction node children.
+fn collect_instruction_indices<'a>(node: &Node, source: &'a str, out: &mut Vec<&'a str>) {
+    let mut c = node.walk();
+    for child in node.children(&mut c) {
+        let kind = child.kind();
+        if kind == "index" || kind == "identifier" {
+            out.push(source[child.byte_range()].trim());
+        } else if kind.starts_with("op_") {
+            collect_instruction_indices(&child, source, out);
+        }
+    }
+}
+
+/// Check table.init type compatibility between table and elem segment ref types.
+fn check_table_init_types(
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+    checker: &mut TypeChecker,
+) {
+    let table = resolve_table_for_table_init(node, symbols, source);
+    let elem = resolve_elem_for_table_init(node, symbols, source);
+    if let (Some(table), Some(elem)) = (table, elem) {
+        if !ref_types_compatible(elem.ref_type, table.ref_type) {
+            checker.diagnostics.push(
+                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                    .with_code("type-mismatch"),
+            );
+        }
+    }
+}
+
+/// Check table.copy type compatibility between destination and source tables.
+fn check_table_copy_types(
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+    checker: &mut TypeChecker,
+) {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+
+    let (dst, src) = if indices.len() >= 2 {
+        let dst = symbols
+            .get_table_by_name(indices[0])
+            .or_else(|| parse_wat_nat(indices[0]).and_then(|i| symbols.tables.get(i as usize)));
+        let src = symbols
+            .get_table_by_name(indices[1])
+            .or_else(|| parse_wat_nat(indices[1]).and_then(|i| symbols.tables.get(i as usize)));
+        (dst, src)
+    } else {
+        (symbols.tables.first(), symbols.tables.first())
+    };
+
+    if let (Some(dst), Some(src)) = (dst, src) {
+        if !ref_types_compatible(src.ref_type, dst.ref_type) {
+            checker.diagnostics.push(
+                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                    .with_code("type-mismatch"),
+            );
+        }
+    }
+}
+
+/// Resolve address types for table.copy $dst $src.
+fn resolve_table_copy_addr_types(
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+) -> (ValueType, ValueType) {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+
+    let addr = |t: Option<&Table>| -> ValueType {
+        t.map(|t| {
+            if t.is_table64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            }
+        })
+        .unwrap_or(ValueType::I32)
+    };
+
+    if indices.len() >= 2 {
+        let dst = symbols
+            .get_table_by_name(indices[0])
+            .or_else(|| parse_wat_nat(indices[0]).and_then(|i| symbols.tables.get(i as usize)));
+        let src = symbols
+            .get_table_by_name(indices[1])
+            .or_else(|| parse_wat_nat(indices[1]).and_then(|i| symbols.tables.get(i as usize)));
+        (addr(dst), addr(src))
+    } else {
+        let t = symbols.tables.first();
+        (addr(t), addr(t))
+    }
+}
+
+/// Check if an array mutation instruction targets an immutable array type.
+fn check_immutable_array(
+    instr_name: &str,
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+    checker: &mut TypeChecker,
+) {
+    // Only check mutation instructions
+    if !matches!(
+        instr_name,
+        "array.set" | "array.fill" | "array.copy" | "array.init_data" | "array.init_elem"
+    ) {
+        return;
+    }
+
+    // Resolve the first type index to a TypeDef
+    if let Some(type_def) = resolve_first_type_index(node, symbols, source) {
+        if let TypeKind::Array { mutable, .. } = &type_def.kind {
+            if !mutable {
+                checker.diagnostics.push(
+                    Diagnostic::error(node_to_range(node), "immutable array".to_string())
+                        .with_code("immutable-array"),
+                );
+            }
+        }
+    }
+}
+
+/// Resolve the first type index in an instruction to a TypeDef.
+fn resolve_first_type_index<'a>(
+    node: &Node,
+    symbols: &'a SymbolTable,
+    source: &str,
+) -> Option<&'a TypeDef> {
+    let index = get_index_from_node(node, source)?;
+    if let Some(t) = symbols.get_type_by_name(index) {
+        return Some(t);
+    }
+    if let Some(idx) = parse_wat_nat(index) {
+        return symbols.types.get(idx as usize);
+    }
+    None
+}
+
+/// Check if source ref type is compatible with destination ref type.
+fn ref_types_compatible(src: ValueType, dst: ValueType) -> bool {
+    if src == dst {
+        return true;
+    }
+    super::type_check::types_compatible(&src, &dst)
 }

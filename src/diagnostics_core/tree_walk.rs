@@ -219,7 +219,7 @@ pub fn walk_tree_for_diagnostics(
             &node, source,
         ));
         diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
-            &node, source,
+            &node, source, symbols,
         ));
         diagnostics.extend(
             crate::diagnostics_core::gc_checks::check_struct_field_access(&node, source, symbols),
@@ -233,7 +233,7 @@ pub fn walk_tree_for_diagnostics(
                     &child, source,
                 ));
                 diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
-                    &child, source,
+                    &child, source, symbols,
                 ));
                 diagnostics.extend(
                     crate::diagnostics_core::gc_checks::check_struct_field_access(

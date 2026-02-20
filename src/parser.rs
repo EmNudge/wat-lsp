@@ -1346,23 +1346,7 @@ fn extract_type_from_single_node(
             kind = TypeKind::Struct { fields };
         }
         "array_type" => {
-            // Extract array field
-            let mut element_type = ValueType::Unknown;
-            let mut mutable = false;
-            let mut cursor = type_node.walk();
-            for child in type_node.children(&mut cursor) {
-                if child.kind() == "field_type" {
-                    let extracted = extract_field_types(&child, source);
-                    if let Some((_, ft, m)) = extracted.into_iter().next() {
-                        element_type = ft;
-                        mutable = m;
-                    }
-                }
-            }
-            kind = TypeKind::Array {
-                element_type,
-                mutable,
-            };
+            kind = extract_array_kind(type_node, source);
         }
         "type_field" => {
             // type_field wraps a def_type: func_type, struct_type, array_type, or sub_type
@@ -1551,24 +1535,7 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
             }
             kind = TypeKind::Struct { fields };
         } else if child.kind() == "array_type" {
-            // Extract array field directly
-            let mut element_type = ValueType::Unknown;
-            let mut mutable = false;
-
-            let mut array_cursor = child.walk();
-            for array_child in child.children(&mut array_cursor) {
-                if array_child.kind() == "field_type" {
-                    let extracted = extract_field_types(&array_child, source);
-                    if let Some((_, ft, m)) = extracted.into_iter().next() {
-                        element_type = ft;
-                        mutable = m;
-                    }
-                }
-            }
-            kind = TypeKind::Array {
-                element_type,
-                mutable,
-            };
+            kind = extract_array_kind(&child, source);
         } else if child.kind() == "type_field" {
             let mut field_cursor = child.walk();
             for field_child in child.children(&mut field_cursor) {
@@ -1592,25 +1559,7 @@ fn extract_type(type_node: &Node, source: &str, index: usize) -> Option<TypeDef>
                     }
                     kind = TypeKind::Struct { fields };
                 } else if field_child.kind() == "array_type" {
-                    // Extract array field
-                    // array_type: (array field_type)
-                    let mut element_type = ValueType::Unknown;
-                    let mut mutable = false;
-
-                    let mut array_cursor = field_child.walk();
-                    for array_child in field_child.children(&mut array_cursor) {
-                        if array_child.kind() == "field_type" {
-                            let extracted = extract_field_types(&array_child, source);
-                            if let Some((_, ft, m)) = extracted.into_iter().next() {
-                                element_type = ft;
-                                mutable = m;
-                            }
-                        }
-                    }
-                    kind = TypeKind::Array {
-                        element_type,
-                        mutable,
-                    };
+                    kind = extract_array_kind(&field_child, source);
                 } else if field_child.kind() == "sub_type" {
                     // Handle sub_type inside type_field: (sub final? index? def_type)
                     let mut sub_cursor = field_child.walk();
@@ -1686,19 +1635,18 @@ fn extract_struct_kind(struct_node: &Node, source: &str) -> TypeKind {
     TypeKind::Struct { fields }
 }
 
-/// Helper to extract array kind from an array_type node
+/// Helper to extract array kind from an array_type node.
+/// Grammar: `array_type: (array storage_type)` — storage_type is a direct child.
 fn extract_array_kind(array_node: &Node, source: &str) -> TypeKind {
     let mut element_type = ValueType::Unknown;
     let mut mutable = false;
 
     let mut array_cursor = array_node.walk();
     for array_child in array_node.children(&mut array_cursor) {
-        if array_child.kind() == "field_type" {
-            let extracted = extract_field_types(&array_child, source);
-            if let Some((_, ft, m)) = extracted.into_iter().next() {
-                element_type = ft;
-                mutable = m;
-            }
+        if array_child.kind() == "storage_type" {
+            let (ft, m) = extract_storage_type_with_mut(&array_child, source);
+            element_type = ft;
+            mutable = m;
         }
     }
     TypeKind::Array {
@@ -1922,7 +1870,15 @@ fn extract_memory(memory_node: &Node, source: &str, index: usize) -> Option<Memo
         if child.kind() == "memory64_type" {
             is_memory64 = true;
         }
-        if child.kind() == "memory_fields_type" {
+        if child.kind() == "memory_fields_data" {
+            // Inline data form: check for memory64_type
+            let mut fields_cursor = child.walk();
+            for fields_child in child.children(&mut fields_cursor) {
+                if fields_child.kind() == "memory64_type" {
+                    is_memory64 = true;
+                }
+            }
+        } else if child.kind() == "memory_fields_type" {
             let mut fields_cursor = child.walk();
             for fields_child in child.children(&mut fields_cursor) {
                 // Check for memory64_type in memory_fields_type
@@ -2489,13 +2445,53 @@ fn extract_elem_segment(elem_node: &Node, source: &str, index: usize) -> Option<
         }
     }
 
+    // Determine elem segment ref type
+    let ref_type = extract_elem_ref_type(elem_node, source);
+
     Some(ElemSegment {
         name,
         index,
+        ref_type,
         func_names,
         line: elem_node.range().start_point.row as u32,
         range: name_range,
     })
+}
+
+/// Extract the ref type from an elem segment node.
+/// Detects `funcref`, `externref`, `(ref func)`, `(ref extern)`, etc.
+/// Defaults to Funcref if no explicit type is found.
+fn extract_elem_ref_type(node: &Node, source: &str) -> ValueType {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind == "elem_list" {
+            // elem_list may contain a ref_type or value_type child
+            let mut inner = child.walk();
+            for gc in child.children(&mut inner) {
+                let gk = gc.kind();
+                if gk == "ref_type"
+                    || gk == "value_type"
+                    || gk == "ref_type_ref"
+                    || gk == "ref_type_concrete"
+                {
+                    let text = node_text(&gc, source).trim().to_string();
+                    if let Some(vt) = ValueType::try_parse(&text) {
+                        return vt;
+                    }
+                }
+            }
+        }
+        // Check for inline ref type keywords at top level
+        if kind == "ref_type" || kind == "value_type" {
+            let text = node_text(&child, source).trim().to_string();
+            if let Some(vt) = ValueType::try_parse(&text) {
+                return vt;
+            }
+        }
+    }
+    // If elem uses `func` keyword (abbreviated), it's funcref
+    ValueType::Funcref
 }
 
 /// Find identifier in data or elem segment nodes.

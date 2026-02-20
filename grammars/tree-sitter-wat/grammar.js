@@ -745,7 +745,7 @@ module.exports = grammar({
         optional($.share),
       ),
 
-    memory_fields_data: $ => seq("(", "data", repeat($.string), ")"),
+    memory_fields_data: $ => seq(optional($.memory64_type), "(", "data", repeat($.string), ")"),
 
     memory_fields_type: $ => seq(optional($.import), $.memory_type),
 
@@ -975,7 +975,7 @@ module.exports = grammar({
 
     array_type: $ => seq("(", "array", $.storage_type, ")"),
 
-    field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), repeat1($.storage_type), ")"),
+    field_type: $ => seq("(", "field", optional(field("identifier", $.identifier)), repeat($.storage_type), ")"),
 
     // Packed types (i8/i16) are only valid as storage types in struct/array fields
     packed_type: $ => choice("i8", "i16"),

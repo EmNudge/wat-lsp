@@ -453,6 +453,7 @@ fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Ve
             }
             "module_field_tag" => {
                 check_identifier_dup(field, source, &mut seen_tag, "tag", diagnostics);
+                check_tag_no_results(field, source, diagnostics);
             }
             "module_field_rec" => {
                 // Types inside rec groups share the type index space
@@ -542,12 +543,36 @@ fn check_import_identifier_dup(
                     }
                     "import_desc_tag_type" => {
                         check_identifier_dup(&desc, source, seen_tag, "tag", diagnostics);
+                        check_tag_no_results(&desc, source, diagnostics);
                     }
                     _ => {}
                 }
             }
         }
     }
+}
+
+/// Check that a tag (or imported tag) has no result types.
+fn check_tag_no_results(node: &Node, _source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    // Recursively search for func_type_results nodes
+    fn has_results(node: &Node, diagnostics: &mut Vec<Diagnostic>) -> bool {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            node_kind!(ck = child);
+            if ck == "func_type_results" {
+                diagnostics.push(Diagnostic::error(
+                    node_to_range(&child),
+                    "non-empty tag result type".to_string(),
+                ));
+                return true;
+            }
+            if has_results(&child, diagnostics) {
+                return true;
+            }
+        }
+        false
+    }
+    has_results(node, diagnostics);
 }
 
 // ============================================================================
@@ -2734,6 +2759,53 @@ fn check_const_expr_type_for_global(
     }
 }
 
+/// Resolve the expected offset type for a data segment's target memory.
+/// Checks for `memory_use` child (explicit memory ref) or defaults to memory 0.
+fn resolve_data_offset_type(node: &Node, source: &str, symbols: &SymbolTable) -> ValueType {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(ck = child);
+        if ck == "memory_use" {
+            // Explicit (memory $idx) — resolve against symbol table
+            let mut inner = child.walk();
+            for gc in child.children(&mut inner) {
+                node_kind!(gk = gc);
+                if gk == "index" || gk == "identifier" {
+                    let idx_text = node_text(&gc, source);
+                    if let Some(mem) = symbols.get_memory_by_name(idx_text) {
+                        return if mem.is_memory64 {
+                            ValueType::I64
+                        } else {
+                            ValueType::I32
+                        };
+                    }
+                    if let Some(n) = crate::parser::parse_wat_nat(idx_text) {
+                        if let Some(mem) = symbols.memories.get(n as usize) {
+                            return if mem.is_memory64 {
+                                ValueType::I64
+                            } else {
+                                ValueType::I32
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Default to memory 0
+    symbols
+        .memories
+        .first()
+        .map(|m| {
+            if m.is_memory64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            }
+        })
+        .unwrap_or(ValueType::I32)
+}
+
 /// Check data segment offset expression type.
 fn check_data_offset_type(
     node: &Node,
@@ -2741,13 +2813,12 @@ fn check_data_offset_type(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let expected = resolve_data_offset_type(node, source, symbols);
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
         if ck == "offset" {
             let (count, ty) = count_const_instrs_deep(&child, source, symbols);
-            // Expected: i32 for memory32, i64 for memory64
-            let expected = ValueType::I32; // default to i32
             if count != 1 {
                 diagnostics.push(
                     Diagnostic::error(node_to_range(node), "type mismatch")
@@ -2765,6 +2836,52 @@ fn check_data_offset_type(
     }
 }
 
+/// Resolve the expected offset type for an elem segment's target table.
+/// Checks for `table_use` child (explicit table ref) or defaults to table 0.
+fn resolve_elem_offset_type(node: &Node, source: &str, symbols: &SymbolTable) -> ValueType {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(ck = child);
+        if ck == "table_use" {
+            let mut inner = child.walk();
+            for gc in child.children(&mut inner) {
+                node_kind!(gk = gc);
+                if gk == "index" || gk == "identifier" {
+                    let idx_text = node_text(&gc, source);
+                    if let Some(table) = symbols.get_table_by_name(idx_text) {
+                        return if table.is_table64 {
+                            ValueType::I64
+                        } else {
+                            ValueType::I32
+                        };
+                    }
+                    if let Some(n) = crate::parser::parse_wat_nat(idx_text) {
+                        if let Some(table) = symbols.tables.get(n as usize) {
+                            return if table.is_table64 {
+                                ValueType::I64
+                            } else {
+                                ValueType::I32
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Default to table 0
+    symbols
+        .tables
+        .first()
+        .map(|t| {
+            if t.is_table64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            }
+        })
+        .unwrap_or(ValueType::I32)
+}
+
 /// Check elem segment offset expression type.
 fn check_elem_offset_type(
     node: &Node,
@@ -2772,12 +2889,12 @@ fn check_elem_offset_type(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let expected = resolve_elem_offset_type(node, source, symbols);
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
         if ck == "offset" {
             let (count, ty) = count_const_instrs_deep(&child, source, symbols);
-            let expected = ValueType::I32;
             if count != 1 {
                 diagnostics.push(
                     Diagnostic::error(node_to_range(node), "type mismatch")
