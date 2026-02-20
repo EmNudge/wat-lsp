@@ -407,6 +407,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
     let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut ref_type = ValueType::Funcref;
+    let mut ref_type_non_nullable = false;
     let mut min_limit: u64 = 0;
     let mut max_limit: Option<u64> = None;
     let mut is_table64 = false;
@@ -434,6 +435,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
                     }
                 } else if type_child.kind() == "ref_type" {
                     ref_type = extract_ref_type(&type_child, source);
+                    ref_type_non_nullable = is_ref_type_non_nullable(&type_child, source);
                 } else if type_child.kind() == "table64_type" {
                     is_table64 = true;
                 }
@@ -445,6 +447,7 @@ fn extract_imported_table(desc_node: &Node, source: &str, index: usize) -> Optio
         name,
         index,
         ref_type,
+        ref_type_non_nullable,
         limits: (min_limit, max_limit),
         is_table64,
         line: desc_node.range().start_point.row as u32,
@@ -1753,6 +1756,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
     let (name, name_range) = extract_identifier_info(table_node, source);
 
     let mut ref_type = ValueType::Funcref;
+    let mut ref_type_non_nullable = false;
     let mut min_limit: u64 = 0;
     let mut max_limit: Option<u64> = None;
     let mut is_table64 = false;
@@ -1783,8 +1787,8 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                                 }
                             }
                         } else if type_child.kind() == "ref_type" {
-                            // Extract ref type from nested structure
                             ref_type = extract_ref_type(&type_child, source);
+                            ref_type_non_nullable = is_ref_type_non_nullable(&type_child, source);
                         } else if type_child.kind() == "table64_type" {
                             is_table64 = true;
                         }
@@ -1813,6 +1817,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
                     }
                 } else if type_child.kind() == "ref_type" {
                     ref_type = extract_ref_type(&type_child, source);
+                    ref_type_non_nullable = is_ref_type_non_nullable(&type_child, source);
                 } else if type_child.kind() == "table64_type" {
                     is_table64 = true;
                 }
@@ -1824,6 +1829,7 @@ fn extract_table(table_node: &Node, source: &str, index: usize) -> Option<Table>
         name,
         index,
         ref_type,
+        ref_type_non_nullable,
         limits: (min_limit, max_limit),
         is_table64,
         line: table_node.range().start_point.row as u32,
@@ -2165,6 +2171,50 @@ fn extract_storage_type_with_mut(storage_node: &Node, source: &str) -> (ValueTyp
 #[inline]
 fn simple_type_from_str(s: &str) -> Option<ValueType> {
     ValueType::try_parse(s)
+}
+
+/// Check if a ref_type AST node represents a non-nullable reference type.
+/// Returns true for `(ref func)`, `(ref $t)`, etc. (without `null`).
+/// Returns false for `funcref`, `externref`, `(ref null func)`, etc.
+fn is_ref_type_non_nullable(node: &Node, source: &str) -> bool {
+    node_kind!(kind = node);
+    match kind {
+        "ref_type_ref" | "ref_type_concrete" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if &source[child.byte_range()] == "null" {
+                    return false;
+                }
+            }
+            true
+        }
+        "ref_type_funcref" | "ref_type_externref" => false,
+        _ => {
+            let text = source[node.byte_range()].trim();
+            if matches!(
+                text,
+                "funcref"
+                    | "externref"
+                    | "anyref"
+                    | "eqref"
+                    | "i31ref"
+                    | "structref"
+                    | "arrayref"
+                    | "nullref"
+                    | "nullfuncref"
+                    | "nullexternref"
+            ) {
+                return false;
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if is_ref_type_non_nullable(&child, source) {
+                    return true;
+                }
+            }
+            false
+        }
+    }
 }
 
 /// Extract reference type from a ref_type node (handles nested structure)

@@ -108,6 +108,15 @@ pub fn walk_tree_for_diagnostics(
             ));
         }
 
+        // Check for uninitialized non-nullable ref locals
+        if !has_inline_import(&node) {
+            diagnostics.extend(
+                crate::diagnostics_core::local_init::check_uninitialized_locals(
+                    &node, source, symbols,
+                ),
+            );
+        }
+
         // Check for unused locals and parameters
         if !has_inline_import(&node) {
             check_unused_locals(&node, source, symbols, diagnostics);
