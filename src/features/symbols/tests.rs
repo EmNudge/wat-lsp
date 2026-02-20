@@ -27,6 +27,7 @@ fn test_add_function() {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
 
     table.add_function(func);
@@ -104,6 +105,8 @@ fn test_add_type() {
         is_final: false,
         line: 0,
         range: None,
+        rec_group_id: 0,
+        rec_group_size: 1,
     };
 
     table.add_type(type_def);
@@ -139,6 +142,7 @@ fn test_get_function_by_index() {
             range: None,
             doc_comment: None,
             has_type_use: false,
+            type_index: None,
         };
         table.add_function(func);
     }
@@ -191,6 +195,7 @@ fn test_unnamed_symbols() {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
     table.add_function(func);
 
@@ -219,6 +224,7 @@ fn test_multiple_symbols_same_type() {
             range: None,
             doc_comment: None,
             has_type_use: false,
+            type_index: None,
         };
         table.add_function(func);
     }
@@ -323,6 +329,7 @@ fn test_complex_function() {
         range: None,
         doc_comment: None,
         has_type_use: false,
+        type_index: None,
     };
 
     assert_eq!(func.parameters.len(), 2);

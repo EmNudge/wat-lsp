@@ -628,6 +628,19 @@ fn process_instruction(
         return;
     }
 
+    // br_on_cast and br_on_cast_fail are conditional branches:
+    // They consume 1 ref value and push 1 ref value (the fallthrough type).
+    // br_on_cast: branches if cast succeeds, falls through with source type.
+    // br_on_cast_fail: branches if cast fails, falls through with target type.
+    if instr_name == "br_on_cast" || instr_name == "br_on_cast_fail" {
+        // Pop the source ref operand
+        checker.pop_expect(&ValueType::Unknown, node);
+        // Check cast types, validate against label, compute fallthrough (pushes result)
+        let is_fail = instr_name == "br_on_cast_fail";
+        check_br_on_cast_types(node, source, symbols, checker, is_fail);
+        return;
+    }
+
     if instr_name == "br_table" {
         // Pop i32 index
         checker.pop_expect(&ValueType::I32, node);
@@ -813,11 +826,6 @@ fn process_instruction(
 
     // Check array mutation/bulk instructions for mutability and type compatibility
     check_array_operations(instr_name, node, symbols, source, checker);
-
-    // Check br_on_cast/br_on_cast_fail cast type hierarchy
-    if instr_name == "br_on_cast" || instr_name == "br_on_cast_fail" {
-        check_br_on_cast_types(node, source, checker);
-    }
 
     let produced = infer_instruction_result_types(instr_name, node, symbols, source);
     // If we know the instruction produces N values but couldn't infer types, pad with Unknown
@@ -1128,7 +1136,7 @@ fn derive_consumed_types_from_name(
 
         // Ref test/cast
         "ref.test" | "ref.cast" | "ref.cast_null" => Some(vec![ValueType::Unknown]),
-        "br_on_cast" | "br_on_cast_fail" => Some(vec![ValueType::Unknown]),
+        // br_on_cast/br_on_cast_fail handled as branch instructions above
 
         // Exceptions
         "throw" => {
@@ -1813,15 +1821,9 @@ fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) ->
         };
 
         if let Some(func) = func {
-            // Find a matching type definition for this function's signature
-            let func_params: Vec<ValueType> =
-                func.parameters.iter().map(|p| p.param_type).collect();
-            for type_def in &symbols.types {
-                if let TypeKind::Func { params, results } = &type_def.kind {
-                    if *params == func_params && *results == func.results {
-                        return vec![ValueType::Ref(type_def.index as u32)];
-                    }
-                }
+            // Use pre-resolved type_index when available
+            if let Some(tidx) = func.type_index {
+                return vec![ValueType::Ref(tidx as u32)];
             }
         }
     }
@@ -3018,7 +3020,7 @@ fn check_table_init_types(
     let table = resolve_table_for_table_init(node, symbols, source);
     let elem = resolve_elem_for_table_init(node, symbols, source);
     if let (Some(table), Some(elem)) = (table, elem) {
-        if !ref_types_compatible(elem.ref_type, table.ref_type) {
+        if !ref_types_compatible(elem.ref_type, table.ref_type, symbols) {
             checker.diagnostics.push(
                 Diagnostic::error(node_to_range(node), "type mismatch".to_string())
                     .with_code("type-mismatch"),
@@ -3050,7 +3052,7 @@ fn check_table_copy_types(
     };
 
     if let (Some(dst), Some(src)) = (dst, src) {
-        if !ref_types_compatible(src.ref_type, dst.ref_type) {
+        if !ref_types_compatible(src.ref_type, dst.ref_type, symbols) {
             checker.diagnostics.push(
                 Diagnostic::error(node_to_range(node), "type mismatch".to_string())
                     .with_code("type-mismatch"),
@@ -3145,7 +3147,7 @@ fn check_array_operations(
                     _ => None,
                 });
             if let (Some(dst), Some(src)) = (dest_elem, src_elem) {
-                if dst != src && !ref_types_compatible(src, dst) {
+                if dst != src && !ref_types_compatible(src, dst, symbols) {
                     checker.diagnostics.push(
                         Diagnostic::error(
                             node_to_range(node),
@@ -3180,7 +3182,7 @@ fn check_array_operations(
             if let Some(type_def) = dest_type_def {
                 if let TypeKind::Array { element_type, .. } = &type_def.kind {
                     if let Some(elem_seg) = resolve_elem_for_array_init(node, symbols, source) {
-                        if !ref_types_compatible(elem_seg.ref_type, *element_type)
+                        if !ref_types_compatible(elem_seg.ref_type, *element_type, symbols)
                             && *element_type != elem_seg.ref_type
                         {
                             checker.diagnostics.push(
@@ -3276,34 +3278,271 @@ fn resolve_first_type_index<'a>(
     None
 }
 
-/// Check if source ref type is compatible with destination ref type.
-fn ref_types_compatible(src: ValueType, dst: ValueType) -> bool {
+/// Check if source ref type is compatible with destination ref type (with symbol table).
+fn ref_types_compatible(src: ValueType, dst: ValueType, symbols: &SymbolTable) -> bool {
     if src == dst {
         return true;
     }
-    super::type_check::types_compatible(&src, &dst)
+    super::type_check::types_compatible_with_symbols(&src, &dst, symbols)
 }
 
-/// Check br_on_cast / br_on_cast_fail cast type hierarchy.
+/// Check br_on_cast / br_on_cast_fail type validation.
 ///
-/// The instruction format is: `br_on_cast <label> <source_type> <target_type>`
-/// The target type must be a subtype of the source type.
-fn check_br_on_cast_types(node: &Node, source: &str, checker: &mut TypeChecker) {
-    // Extract the two heap type children (after the label index)
-    let heap_types = extract_heap_types_from_cast(node, source);
-    if heap_types.len() < 2 {
+/// The instruction format is: `br_on_cast <label> <rt1> <rt2>`
+/// Validation: rt2 must be a subtype of rt1 (including nullability).
+/// For br_on_cast: branch carries rt2, fallthrough gets diff(rt1, rt2).
+/// For br_on_cast_fail: branch carries diff(rt1, rt2), fallthrough gets rt2.
+fn check_br_on_cast_types(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+    is_fail: bool,
+) {
+    let cast_types = extract_cast_ref_types(node, source, symbols);
+    if cast_types.len() < 2 {
         return;
     }
-    let src_type = &heap_types[0];
-    let tgt_type = &heap_types[1];
+    let (rt1, rt1_nullable) = &cast_types[0];
+    let (rt2, rt2_nullable) = &cast_types[1];
 
-    // Target must be a subtype of source
-    if !is_heap_subtype(tgt_type, src_type) {
+    let mut has_error = false;
+
+    // Validate rt2 <: rt1: nullable rt2 can't be subtype of non-null rt1
+    if *rt2_nullable && !*rt1_nullable {
         checker.diagnostics.push(
             Diagnostic::error(node_to_range(node), "type mismatch".to_string())
                 .with_code("type-mismatch"),
         );
+        has_error = true;
     }
+
+    // Check heap type subtyping (use existing heap_types approach)
+    if !has_error {
+        let heap_types = extract_heap_types_from_cast(node, source);
+        if heap_types.len() >= 2 && !is_heap_subtype(heap_types[1], heap_types[0]) {
+            checker.diagnostics.push(
+                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                    .with_code("type-mismatch"),
+            );
+            has_error = true;
+        }
+    }
+
+    // Resolve branch label depth and check branch/fallthrough types
+    let label_depth = resolve_cast_label_depth(node, source, checker);
+
+    if !has_error {
+        if let Some(depth) = label_depth {
+            // Compute diff nullability: nullable iff rt1 nullable and rt2 not nullable
+            let diff_nullable = *rt1_nullable && !*rt2_nullable;
+
+            // Branch type
+            let (branch_type, branch_nullable) = if !is_fail {
+                (*rt2, *rt2_nullable)
+            } else {
+                (*rt1, diff_nullable)
+            };
+
+            // Check branch type against label
+            if let Some(label_types) = checker.label_types(depth) {
+                let label_types = label_types.to_vec();
+                if label_types.len() == 1 {
+                    let label_type = &label_types[0];
+                    let branch_vt = if branch_nullable {
+                        make_nullable(&branch_type)
+                    } else {
+                        branch_type
+                    };
+                    if !types_compatible_with_symbols(&branch_vt, label_type, symbols) {
+                        checker.diagnostics.push(
+                            Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                                .with_code("type-mismatch"),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Always push fallthrough type regardless of errors
+    if label_depth.is_some() {
+        let diff_nullable = *rt1_nullable && !*rt2_nullable;
+        let (ft_type, ft_nullable) = if !is_fail {
+            (*rt1, diff_nullable)
+        } else {
+            (*rt2, *rt2_nullable)
+        };
+        let ft_vt = if ft_nullable {
+            make_nullable(&ft_type)
+        } else {
+            ft_type
+        };
+        checker.push_val(ft_vt);
+    } else {
+        checker.push_val(ValueType::Unknown);
+    }
+}
+
+/// Make a ValueType nullable (Ref→RefNull, abstract→nullable variant).
+fn make_nullable(vt: &ValueType) -> ValueType {
+    match vt {
+        ValueType::Ref(n) => ValueType::RefNull(*n),
+        // Abstract types: funcref/anyref/etc. are already nullable in our representation
+        other => *other,
+    }
+}
+
+/// Extract the label depth from a br_on_cast/br_on_cast_fail instruction node.
+fn resolve_cast_label_depth(node: &Node, source: &str, checker: &TypeChecker) -> Option<usize> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind == "index" || kind == "identifier" {
+            let text = source[child.byte_range()].trim();
+            if text.starts_with('$') {
+                return checker.resolve_label_depth(text);
+            } else {
+                return text.parse::<usize>().ok();
+            }
+        }
+        // Also look inside op_ nodes
+        if kind.starts_with("op_") {
+            let mut inner = child.walk();
+            for ic in child.children(&mut inner) {
+                if ic.kind() == "index" || ic.kind() == "identifier" {
+                    let text = source[ic.byte_range()].trim();
+                    if text.starts_with('$') {
+                        return checker.resolve_label_depth(text);
+                    } else {
+                        return text.parse::<usize>().ok();
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract ref type arguments from br_on_cast/br_on_cast_fail as (ValueType, is_nullable) pairs.
+fn extract_cast_ref_types(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Vec<(ValueType, bool)> {
+    let mut types = Vec::new();
+    let mut cursor = node.walk();
+    let mut past_index = false;
+
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        // Skip the op_ prefix and label index
+        if (kind == "index" || kind == "identifier") && !past_index {
+            past_index = true;
+            continue;
+        }
+        if !past_index {
+            if kind.starts_with("op_") {
+                let mut inner = child.walk();
+                for ic in child.children(&mut inner) {
+                    if ic.kind() == "index" || ic.kind() == "identifier" {
+                        past_index = true;
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        // After the label, parse ref type nodes
+        if kind == "ref_type_ref" {
+            // Full form: (ref null? heap_type)
+            // Parse directly: iterate children for null, ref_kind, index
+            let mut is_null = false;
+            let mut vt = ValueType::Unknown;
+            let mut inner = child.walk();
+            for gc in child.children(&mut inner) {
+                let gk = gc.kind();
+                if gk == "null" || source[gc.byte_range()].trim() == "null" {
+                    is_null = true;
+                } else if gk == "ref_kind" {
+                    let text = source[gc.byte_range()].trim();
+                    vt = match text {
+                        "func" => ValueType::Funcref,
+                        "extern" => ValueType::Externref,
+                        "any" => ValueType::Anyref,
+                        "eq" => ValueType::Eqref,
+                        "i31" => ValueType::I31ref,
+                        "struct" => ValueType::Structref,
+                        "array" => ValueType::Arrayref,
+                        "null" | "none" => ValueType::Nullref,
+                        "nofunc" => ValueType::NullFuncref,
+                        "noextern" => ValueType::NullExternref,
+                        _ => ValueType::Unknown,
+                    };
+                } else if gk == "index" || gk == "identifier" {
+                    let text = source[gc.byte_range()].trim();
+                    if text.starts_with('$') {
+                        if let Some(t) = symbols.get_type_by_name(text) {
+                            vt = if is_null {
+                                ValueType::RefNull(t.index as u32)
+                            } else {
+                                ValueType::Ref(t.index as u32)
+                            };
+                        }
+                    } else if let Some(n) = parse_wat_nat(text) {
+                        vt = if is_null {
+                            ValueType::RefNull(n as u32)
+                        } else {
+                            ValueType::Ref(n as u32)
+                        };
+                    }
+                }
+            }
+            // For ref_kind-based types, apply nullability
+            if is_null && !matches!(vt, ValueType::Ref(_) | ValueType::RefNull(_)) {
+                vt = make_nullable(&vt);
+            }
+            types.push((vt, is_null));
+        } else if kind == "ref_kind" {
+            // Bare heap type: func, any, struct, etc. → non-nullable
+            let text = source[child.byte_range()].trim();
+            let vt = match text {
+                "func" => ValueType::Funcref,
+                "extern" => ValueType::Externref,
+                "any" => ValueType::Anyref,
+                "eq" => ValueType::Eqref,
+                "i31" => ValueType::I31ref,
+                "struct" => ValueType::Structref,
+                "array" => ValueType::Arrayref,
+                "null" | "none" => ValueType::Nullref,
+                "nofunc" => ValueType::NullFuncref,
+                "noextern" => ValueType::NullExternref,
+                _ => ValueType::Unknown,
+            };
+            // ref_kind in br_on_cast context means non-nullable (ref ht)
+            types.push((vt, false));
+        } else if kind == "index" || kind == "identifier" {
+            // Concrete type index — non-nullable
+            let text = source[child.byte_range()].trim();
+            if text.starts_with('$') {
+                if let Some(t) = symbols.get_type_by_name(text) {
+                    types.push((ValueType::Ref(t.index as u32), false));
+                } else {
+                    types.push((ValueType::Unknown, false));
+                }
+            } else if let Some(n) = parse_wat_nat(text) {
+                types.push((ValueType::Ref(n as u32), false));
+            } else {
+                types.push((ValueType::Unknown, false));
+            }
+        } else if kind.ends_with("ref") {
+            // Abbreviated forms: funcref, anyref, etc. → nullable
+            let text = source[child.byte_range()].trim();
+            let vt = ValueType::try_parse(text).unwrap_or(ValueType::Unknown);
+            types.push((vt, true));
+        }
+    }
+    types
 }
 
 /// Validate catch clause types in try_table against the target label's expected types.

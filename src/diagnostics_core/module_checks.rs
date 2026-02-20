@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::types::{Diagnostic, Range};
-use crate::symbols::{SymbolTable, TypeKind, ValueType};
+use crate::symbols::{Function, SymbolTable, TypeKind, ValueType};
 use crate::utils::{node_text, node_to_range};
 
 #[cfg(feature = "native")]
@@ -2074,13 +2074,31 @@ fn check_type_forward_refs(
             check_type_body_for_forward_refs(node, source, symbols, type_index, diagnostics);
             type_index += 1;
         } else if kind == "module_field_rec" {
-            // Count types inside rec group but skip forward ref checks
-            // (forward references within rec groups are allowed)
+            // Count types inside rec group (grammar uses "type_field" inside rec)
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 node_kind!(ck = child);
-                if ck == "module_field_type" {
+                if ck == "type_field" {
                     type_index += 1;
+                }
+            }
+            let rec_end = type_index; // exclusive: types up to rec_end are defined
+
+            // Within rec groups, forward refs to types OUTSIDE the group are invalid.
+            // References within the group are allowed, as are previously defined types.
+            // References to types >= rec_end are "unknown type".
+            let max_allowed = rec_end.saturating_sub(1);
+            let mut cursor2 = node.walk();
+            for child in node.children(&mut cursor2) {
+                node_kind!(ck = child);
+                if ck == "type_field" {
+                    check_type_body_for_forward_refs(
+                        &child,
+                        source,
+                        symbols,
+                        max_allowed,
+                        diagnostics,
+                    );
                 }
             }
         }
@@ -2430,7 +2448,18 @@ fn infer_const_instr_type(
                 None => Some(ValueType::Unknown),
             }
         }
-        "ref.func" => Some(ValueType::Funcref),
+        "ref.func" => {
+            // Resolve to concrete Ref(type_index) when possible
+            if let Some(func) = resolve_ref_func_target(node, source, symbols) {
+                if let Some(tidx) = func.type_index {
+                    Some(ValueType::Ref(tidx as u32))
+                } else {
+                    Some(ValueType::Funcref)
+                }
+            } else {
+                Some(ValueType::Funcref)
+            }
+        }
         "ref.i31" => Some(ValueType::I31ref),
         "i31.get_s" | "i31.get_u" => Some(ValueType::I32),
         "any.convert_extern" => Some(ValueType::Anyref),
@@ -2481,6 +2510,36 @@ fn get_const_instr_type_index(node: &Node, source: &str, symbols: &SymbolTable) 
                 if ik == "nat" {
                     if let Ok(idx) = node_text(&idx_child, source).parse::<usize>() {
                         return Some(idx);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the target function of a ref.func instruction.
+fn resolve_ref_func_target<'a>(
+    node: &Node,
+    source: &str,
+    symbols: &'a SymbolTable,
+) -> Option<&'a Function> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(ck = child);
+        if ck == "identifier" {
+            return symbols.get_function_by_name(node_text(&child, source));
+        }
+        if ck == "index" {
+            let mut ic = child.walk();
+            for idx_child in child.children(&mut ic) {
+                node_kind!(ik = idx_child);
+                if ik == "identifier" {
+                    return symbols.get_function_by_name(node_text(&idx_child, source));
+                }
+                if ik == "nat" || ik == "dec_nat" {
+                    if let Ok(idx) = node_text(&idx_child, source).parse::<usize>() {
+                        return symbols.get_function_by_index(idx);
                     }
                 }
             }
@@ -2615,19 +2674,25 @@ fn check_constant_expression_types(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut global_idx = 0usize;
+    let mut table_idx = 0usize;
     for_each_module_field(module, |field| {
         node_kind!(fk = field);
 
         match fk {
             "module_field_global" => {
-                // Get expected type from global_type
+                // Use the symbol table's resolved type instead of re-parsing
                 if !has_inline_import(field) {
-                    if let Some(expected_type) = extract_global_value_type(field, source) {
+                    let expected = symbols
+                        .globals
+                        .get(global_idx)
+                        .map(|g| g.var_type)
+                        .unwrap_or(ValueType::Unknown);
+                    if expected != ValueType::Unknown {
                         check_const_expr_type_for_global(
                             field,
                             source,
                             symbols,
-                            &expected_type,
+                            &expected,
                             diagnostics,
                         );
                     }
@@ -2643,11 +2708,25 @@ fn check_constant_expression_types(
                 check_elem_offset_type(field, source, symbols, diagnostics);
             }
             "module_field_table" => {
-                // Table init expression must match table's ref type
-                check_table_init_type(field, source, symbols, diagnostics);
+                // Use the symbol table's resolved ref_type instead of re-parsing
+                if !has_inline_import(field) {
+                    let expected = symbols
+                        .tables
+                        .get(table_idx)
+                        .map(|t| t.ref_type)
+                        .unwrap_or(ValueType::Funcref);
+                    check_table_init_type_with_expected(
+                        field,
+                        source,
+                        symbols,
+                        &expected,
+                        diagnostics,
+                    );
+                }
+                table_idx += 1;
             }
             "module_field_import" => {
-                // Count imported globals for forward ref checking
+                // Count imported globals/tables for forward ref checking
                 let mut cursor = field.walk();
                 for child in field.children(&mut cursor) {
                     node_kind!(ck = child);
@@ -2657,6 +2736,8 @@ fn check_constant_expression_types(
                             node_kind!(dk = desc);
                             if dk == "import_desc_global_type" {
                                 global_idx += 1;
+                            } else if dk == "import_desc_table_type" {
+                                table_idx += 1;
                             }
                         }
                     }
@@ -2667,112 +2748,9 @@ fn check_constant_expression_types(
     });
 }
 
-/// Extract the value type from a global's global_type node.
-fn extract_global_value_type(node: &Node, source: &str) -> Option<ValueType> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(ck = child);
-        if ck == "global_type" {
-            // Search for value_type or ref_type inside global_type
-            return extract_type_from_global_type(&child, source);
-        }
-    }
-    None
-}
-
-/// Extract ValueType from a global_type node.
-fn extract_type_from_global_type(node: &Node, source: &str) -> Option<ValueType> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(ck = child);
-        if ck == "global_type_imm"
-            || ck == "global_type_mut"
-            || ck == "value_type"
-            || ck == "ref_type"
-        {
-            let text = node_text(&child, source);
-            // Strip "mut" wrapper if present
-            let type_text = if ck == "global_type_mut" {
-                // (mut i32) -> i32
-                let inner = text.trim();
-                if inner.starts_with("(mut") && inner.ends_with(')') {
-                    inner[4..inner.len() - 1].trim()
-                } else {
-                    inner
-                }
-            } else {
-                text.trim()
-            };
-            if let Some(vt) = ValueType::try_parse(type_text) {
-                return Some(vt);
-            }
-            // Try extracting from children
-            return extract_value_type_recursive(&child, source);
-        }
-    }
-    None
-}
-
-/// Recursively extract ValueType from a node tree.
-fn extract_value_type_recursive(node: &Node, source: &str) -> Option<ValueType> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(ck = child);
-        if ck == "value_type" || ck == "ref_type" {
-            let text = node_text(&child, source);
-            if let Some(vt) = ValueType::try_parse(text.trim()) {
-                return Some(vt);
-            }
-        }
-        if let Some(vt) = extract_value_type_recursive(&child, source) {
-            return Some(vt);
-        }
-    }
-    None
-}
-
 /// Simple type compatibility for const expression checking.
-fn const_types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
-    if *actual == ValueType::Unknown || *expected == ValueType::Unknown {
-        return true;
-    }
-    if actual == expected {
-        return true;
-    }
-    // Reference subtyping: funcref <: funcref, etc.
-    match (actual, expected) {
-        (ValueType::Funcref, ValueType::Funcref) => true,
-        (ValueType::Externref, ValueType::Externref) => true,
-        // Non-null ref subtypes nullable ref
-        (ValueType::Ref(a), ValueType::RefNull(b)) if a == b => true,
-        // Funcref covers Ref(n) and RefNull(n)
-        (ValueType::Ref(_) | ValueType::RefNull(_), ValueType::Funcref) => true,
-        // Anyref covers eqref, i31ref, structref, arrayref, Ref(n)
-        (
-            ValueType::Eqref | ValueType::I31ref | ValueType::Structref | ValueType::Arrayref,
-            ValueType::Anyref,
-        ) => true,
-        (ValueType::Ref(_), ValueType::Anyref | ValueType::Eqref) => true,
-        // Nullref is bottom for internal ref hierarchy
-        (
-            ValueType::Nullref,
-            ValueType::Anyref
-            | ValueType::Eqref
-            | ValueType::I31ref
-            | ValueType::Structref
-            | ValueType::Arrayref
-            | ValueType::Funcref
-            | ValueType::Externref,
-        ) => true,
-        // NullFuncref is bottom for func hierarchy
-        (
-            ValueType::NullFuncref,
-            ValueType::Funcref | ValueType::RefNull(_) | ValueType::Ref(_),
-        ) => true,
-        // NullExternref is bottom for extern hierarchy
-        (ValueType::NullExternref, ValueType::Externref) => true,
-        _ => false,
-    }
+fn const_types_compatible(actual: &ValueType, expected: &ValueType, symbols: &SymbolTable) -> bool {
+    super::type_check::types_compatible_with_symbols(actual, expected, symbols)
 }
 
 /// Check const expression type for a global initializer.
@@ -2815,7 +2793,7 @@ fn check_const_expr_type_for_global(
             Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
         );
     } else if let Some(ref actual) = last_type {
-        if !const_types_compatible(actual, expected) {
+        if !const_types_compatible(actual, expected, symbols) {
             diagnostics.push(
                 Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
             );
@@ -2889,7 +2867,7 @@ fn check_data_offset_type(
                         .with_code("type-mismatch"),
                 );
             } else if let Some(ref actual) = ty {
-                if !const_types_compatible(actual, &expected) {
+                if !const_types_compatible(actual, &expected, symbols) {
                     diagnostics.push(
                         Diagnostic::error(node_to_range(node), "type mismatch")
                             .with_code("type-mismatch"),
@@ -2965,7 +2943,7 @@ fn check_elem_offset_type(
                         .with_code("type-mismatch"),
                 );
             } else if let Some(ref actual) = ty {
-                if !const_types_compatible(actual, &expected) {
+                if !const_types_compatible(actual, &expected, symbols) {
                     diagnostics.push(
                         Diagnostic::error(node_to_range(node), "type mismatch")
                             .with_code("type-mismatch"),
@@ -2976,14 +2954,14 @@ fn check_elem_offset_type(
     }
 }
 
-/// Check table init expression type matches table's ref type.
-fn check_table_init_type(
+/// Check table init expression type matches the expected ref type from the symbol table.
+fn check_table_init_type_with_expected(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
+    expected: &ValueType,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Find the table's ref type and init expression
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
@@ -2993,12 +2971,9 @@ fn check_table_init_type(
                 node_kind!(gk = gc);
                 if gk == "expr" {
                     let (count, ty) = count_const_instrs_deep(&gc, source, symbols);
-                    // Get expected type from the table's ref_type
-                    let expected =
-                        extract_table_ref_type(&child, source).unwrap_or(ValueType::Funcref);
                     if count == 1 {
                         if let Some(ref actual) = ty {
-                            if !const_types_compatible(actual, &expected) {
+                            if !const_types_compatible(actual, expected, symbols) {
                                 diagnostics.push(
                                     Diagnostic::error(node_to_range(node), "type mismatch")
                                         .with_code("type-mismatch"),
@@ -3010,48 +2985,6 @@ fn check_table_init_type(
             }
         }
     }
-}
-
-/// Extract the ref type from a table_fields_type node.
-fn extract_table_ref_type(node: &Node, source: &str) -> Option<ValueType> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(ck = child);
-        if ck == "table_type" {
-            return extract_ref_type_from_node(&child, source);
-        }
-        if ck == "ref_type" || ck == "value_type" {
-            let text = node_text(&child, source);
-            return ValueType::try_parse(text.trim());
-        }
-    }
-    None
-}
-
-/// Extract a ref type from a table_type or similar node.
-fn extract_ref_type_from_node(node: &Node, source: &str) -> Option<ValueType> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(ck = child);
-        if ck == "ref_type" || ck == "value_type" {
-            let text = node_text(&child, source);
-            if let Some(vt) = ValueType::try_parse(text.trim()) {
-                return Some(vt);
-            }
-        }
-        // Also check for abbreviated ref types like funcref, externref
-        if ck == "_heap_type_or_ref" {
-            let text = node_text(&child, source);
-            if let Some(vt) = ValueType::try_parse(text.trim()) {
-                return Some(vt);
-            }
-        }
-        // Recurse
-        if let Some(vt) = extract_ref_type_from_node(&child, source) {
-            return Some(vt);
-        }
-    }
-    None
 }
 
 // ============================================================================

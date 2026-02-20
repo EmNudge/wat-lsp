@@ -306,6 +306,18 @@ fn get_diagnostics(wat_text: &str) -> (usize, Vec<String>) {
 // Directive processing
 // ---------------------------------------------------------------------------
 
+/// Strip the WAST-only `definition` keyword from `(module definition ...)` text,
+/// producing standard WAT `(module ...)`.
+fn strip_module_definition(text: &str) -> String {
+    if let Some(pos) = text.find("definition") {
+        let before = &text[..pos];
+        let after = &text[pos + "definition".len()..];
+        format!("{}{}", before, after.trim_start())
+    } else {
+        text.to_string()
+    }
+}
+
 fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> DirectiveResult {
     let span = directive.span();
     let (line, _) = span.linecol_in(source);
@@ -313,6 +325,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
 
     match directive {
         wast::WastDirective::Module(qw) | wast::WastDirective::ModuleDefinition(qw) => {
+            let is_definition = matches!(directive, wast::WastDirective::ModuleDefinition(_));
             if is_binary_module(qw) || is_component(qw) {
                 return DirectiveResult {
                     line: line_1based,
@@ -324,6 +337,13 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
             }
             match extract_wat_text(qw, source) {
                 Some(text) => {
+                    // Strip WAST-only `definition` keyword:
+                    // `(module definition $M ...)` -> `(module $M ...)`
+                    let text = if is_definition {
+                        strip_module_definition(&text)
+                    } else {
+                        text
+                    };
                     let (errors, diags) = get_diagnostics(&text);
                     if errors == 0 {
                         DirectiveResult {
