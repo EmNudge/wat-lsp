@@ -16,7 +16,7 @@ use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
     infer_simd_instruction_arity, is_terminating_instruction, lookup_instruction_arity, OperandMode,
 };
-use crate::symbols::{Memory, SymbolTable, Table, TypeDef, TypeKind, ValueType};
+use crate::symbols::{ElemSegment, Memory, SymbolTable, Table, TypeDef, TypeKind, ValueType};
 use crate::utils::node_to_range;
 
 use super::sequence_always_terminates;
@@ -386,8 +386,8 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
                 process_block_body(&child, source, symbols, checker);
             }
             "catch_clause" => {
-                // Catch clauses in try_table are label declarations, not code blocks.
-                // Reference checking is handled in tree_walk.rs.
+                // Validate catch clause types against the target label's expected types.
+                check_catch_clause_types(&child, source, symbols, checker);
             }
             "instr_else" | "else" => {
                 // At else: validate then branch, reset stack for else branch
@@ -688,7 +688,8 @@ fn process_instruction(
             checker.pop_function_return_types(node, instr_name);
         }
         // For 'throw', pop tag parameter types
-        if instr_name == "throw" {
+        // For 'throw_ref', pop exnref operand
+        if instr_name == "throw" || instr_name == "throw_ref" {
             let consumed = get_instruction_consumed_types(node, instr_name, symbols, source);
             if !consumed.is_empty() {
                 checker.pop_vals_for_instr(&consumed, node, instr_name);
@@ -810,8 +811,13 @@ fn process_instruction(
         check_table_copy_types(node, symbols, source, checker);
     }
 
-    // Check immutable array for array mutation instructions
-    check_immutable_array(instr_name, node, symbols, source, checker);
+    // Check array mutation/bulk instructions for mutability and type compatibility
+    check_array_operations(instr_name, node, symbols, source, checker);
+
+    // Check br_on_cast/br_on_cast_fail cast type hierarchy
+    if instr_name == "br_on_cast" || instr_name == "br_on_cast_fail" {
+        check_br_on_cast_types(node, source, checker);
+    }
 
     let produced = infer_instruction_result_types(instr_name, node, symbols, source);
     // If we know the instruction produces N values but couldn't infer types, pad with Unknown
@@ -1087,12 +1093,24 @@ fn derive_consumed_types_from_name(
         } // arrayref, index
         "array.set" => Some(vec![ValueType::Unknown, ValueType::I32, ValueType::Unknown]), // arrayref, index, value
         "array.len" => Some(vec![ValueType::Unknown]), // arrayref
-        "array.fill" => Some(vec![
-            ValueType::Unknown,
-            ValueType::I32,
-            ValueType::Unknown,
-            ValueType::I32,
-        ]), // arrayref, index, value, len
+        "array.fill" => {
+            // arrayref, i32 offset, value, i32 length
+            // Resolve element type from the type index to type-check the value operand
+            let val_ty = resolve_first_type_index(node, symbols, source)
+                .and_then(|td| match &td.kind {
+                    TypeKind::Array { element_type, .. } => {
+                        Some(unpack_storage_type(*element_type))
+                    }
+                    _ => None,
+                })
+                .unwrap_or(ValueType::Unknown);
+            Some(vec![
+                ValueType::Unknown,
+                ValueType::I32,
+                val_ty,
+                ValueType::I32,
+            ])
+        }
         "array.copy" => Some(vec![
             ValueType::Unknown,
             ValueType::I32,
@@ -2162,6 +2180,10 @@ fn process_folded_block_body(
                 // folded ifs are handled by process_folded_block_expr, but handle as fallback)
                 process_folded_if_bodies_from_if_block(&child, source, symbols, checker);
             }
+            "catch_clause" => {
+                // Validate catch clause types against the target label's expected types.
+                check_catch_clause_types(&child, source, symbols, checker);
+            }
             // Direct instruction children (body without instr_list wrapper)
             "instr" | "instr_plain" | "expr" | "instr_block" | "instr_loop" | "instr_if"
             | "instr_call" | "instr_list_call" => {
@@ -3071,15 +3093,22 @@ fn resolve_table_copy_addr_types(
     }
 }
 
-/// Check if an array mutation instruction targets an immutable array type.
-fn check_immutable_array(
+/// Check array mutation instructions for mutability and type compatibility.
+///
+/// Validates:
+/// - array.set/fill/copy/init_data/init_elem: destination array must be mutable
+/// - array.copy: source and destination element types must match
+/// - array.fill: value type must match element type
+/// - array.init_data: element type must be numeric or vector
+/// - array.init_elem: elem segment type must match element type
+fn check_array_operations(
     instr_name: &str,
     node: &Node,
     symbols: &SymbolTable,
     source: &str,
     checker: &mut TypeChecker,
 ) {
-    // Only check mutation instructions
+    // Only check array mutation/bulk instructions
     if !matches!(
         instr_name,
         "array.set" | "array.fill" | "array.copy" | "array.init_data" | "array.init_elem"
@@ -3087,17 +3116,148 @@ fn check_immutable_array(
         return;
     }
 
-    // Resolve the first type index to a TypeDef
-    if let Some(type_def) = resolve_first_type_index(node, symbols, source) {
+    // Resolve the first (destination) type index
+    let dest_type_def = resolve_first_type_index(node, symbols, source);
+
+    // Check mutability for destination array
+    if let Some(type_def) = dest_type_def {
         if let TypeKind::Array { mutable, .. } = &type_def.kind {
             if !mutable {
                 checker.diagnostics.push(
                     Diagnostic::error(node_to_range(node), "immutable array".to_string())
                         .with_code("immutable-array"),
                 );
+                return; // Don't report additional errors after mutability failure
             }
         }
     }
+
+    match instr_name {
+        "array.copy" => {
+            // Both type indices must resolve to array types with compatible element types
+            let dest_elem = dest_type_def.and_then(|td| match &td.kind {
+                TypeKind::Array { element_type, .. } => Some(*element_type),
+                _ => None,
+            });
+            let src_elem =
+                resolve_nth_type_index(node, symbols, source, 1).and_then(|td| match &td.kind {
+                    TypeKind::Array { element_type, .. } => Some(*element_type),
+                    _ => None,
+                });
+            if let (Some(dst), Some(src)) = (dest_elem, src_elem) {
+                if dst != src && !ref_types_compatible(src, dst) {
+                    checker.diagnostics.push(
+                        Diagnostic::error(
+                            node_to_range(node),
+                            "array types do not match".to_string(),
+                        )
+                        .with_code("type-mismatch"),
+                    );
+                }
+            }
+        }
+        "array.fill" => {
+            // Type checking handled via consumed types in get_instruction_consumed_types
+        }
+        "array.init_data" => {
+            // Element type must be numeric or vector (not a reference type)
+            if let Some(type_def) = dest_type_def {
+                if let TypeKind::Array { element_type, .. } = &type_def.kind {
+                    if !is_numeric_or_vector(*element_type) {
+                        checker.diagnostics.push(
+                            Diagnostic::error(
+                                node_to_range(node),
+                                "array type is not numeric or vector".to_string(),
+                            )
+                            .with_code("type-mismatch"),
+                        );
+                    }
+                }
+            }
+        }
+        "array.init_elem" => {
+            // Elem segment type must be compatible with array element type
+            if let Some(type_def) = dest_type_def {
+                if let TypeKind::Array { element_type, .. } = &type_def.kind {
+                    if let Some(elem_seg) = resolve_elem_for_array_init(node, symbols, source) {
+                        if !ref_types_compatible(elem_seg.ref_type, *element_type)
+                            && *element_type != elem_seg.ref_type
+                        {
+                            checker.diagnostics.push(
+                                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                                    .with_code("type-mismatch"),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        _ => {} // array.set handled by mutability check only
+    }
+}
+
+/// Unpack packed storage types (i8, i16) to their stack representation (i32).
+fn unpack_storage_type(ty: ValueType) -> ValueType {
+    match ty {
+        ValueType::I8 | ValueType::I16 => ValueType::I32,
+        other => other,
+    }
+}
+
+/// Check if a ValueType is numeric (i32, i64, f32, f64) or packed (i8, i16).
+fn is_numeric_type(ty: ValueType) -> bool {
+    matches!(
+        ty,
+        ValueType::I32
+            | ValueType::I64
+            | ValueType::F32
+            | ValueType::F64
+            | ValueType::I8
+            | ValueType::I16
+    )
+}
+
+/// Check if a ValueType is numeric or vector (valid for array.init_data).
+fn is_numeric_or_vector(ty: ValueType) -> bool {
+    is_numeric_type(ty) || ty == ValueType::V128
+}
+
+/// Resolve the Nth type index (0-based) in an instruction to a TypeDef.
+fn resolve_nth_type_index<'a>(
+    node: &Node,
+    symbols: &'a SymbolTable,
+    source: &str,
+    n: usize,
+) -> Option<&'a TypeDef> {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+    let index_str = indices.get(n)?;
+    if let Some(t) = symbols.get_type_by_name(index_str) {
+        return Some(t);
+    }
+    if let Some(idx) = parse_wat_nat(index_str) {
+        return symbols.types.get(idx as usize);
+    }
+    None
+}
+
+/// Resolve the elem segment for array.init_elem instruction.
+/// array.init_elem $type $elem: first index is type, second is elem segment.
+fn resolve_elem_for_array_init<'a>(
+    node: &Node,
+    symbols: &'a SymbolTable,
+    source: &str,
+) -> Option<&'a ElemSegment> {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+    let elem_ref = indices.get(1)?;
+    if let Some(elem) = symbols.get_elem_by_name(elem_ref) {
+        return Some(elem);
+    }
+    if let Some(idx) = parse_wat_nat(elem_ref) {
+        return symbols.elem_segments.get(idx as usize);
+    }
+    None
 }
 
 /// Resolve the first type index in an instruction to a TypeDef.
@@ -3122,4 +3282,252 @@ fn ref_types_compatible(src: ValueType, dst: ValueType) -> bool {
         return true;
     }
     super::type_check::types_compatible(&src, &dst)
+}
+
+/// Check br_on_cast / br_on_cast_fail cast type hierarchy.
+///
+/// The instruction format is: `br_on_cast <label> <source_type> <target_type>`
+/// The target type must be a subtype of the source type.
+fn check_br_on_cast_types(node: &Node, source: &str, checker: &mut TypeChecker) {
+    // Extract the two heap type children (after the label index)
+    let heap_types = extract_heap_types_from_cast(node, source);
+    if heap_types.len() < 2 {
+        return;
+    }
+    let src_type = &heap_types[0];
+    let tgt_type = &heap_types[1];
+
+    // Target must be a subtype of source
+    if !is_heap_subtype(tgt_type, src_type) {
+        checker.diagnostics.push(
+            Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                .with_code("type-mismatch"),
+        );
+    }
+}
+
+/// Validate catch clause types in try_table against the target label's expected types.
+///
+/// Grammar: `(catch $tag $label)` / `(catch_ref $tag $label)` / `(catch_all $label)` / `(catch_all_ref $label)`
+///
+/// The types routed to the label are:
+/// - catch: tag parameter types
+/// - catch_ref: tag parameter types + exnref
+/// - catch_all: (empty)
+/// - catch_all_ref: exnref
+fn check_catch_clause_types(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    checker: &mut TypeChecker,
+) {
+    let mut cursor = node.walk();
+    let mut catch_kind: Option<&str> = None;
+    let mut indices: Vec<&str> = Vec::new();
+
+    for child in node.children(&mut cursor) {
+        node_kind!(kind = child);
+        match kind.as_ref() {
+            "catch" | "catch_ref" | "catch_all" | "catch_all_ref" => {
+                catch_kind = Some(match kind.as_ref() {
+                    "catch" => "catch",
+                    "catch_ref" => "catch_ref",
+                    "catch_all" => "catch_all",
+                    _ => "catch_all_ref",
+                });
+            }
+            "index" | "identifier" => {
+                indices.push(source[child.byte_range()].trim());
+            }
+            _ => {}
+        }
+    }
+
+    let catch_kind = match catch_kind {
+        Some(k) => k,
+        None => return,
+    };
+
+    // Determine what types are sent to the label
+    let sent_types = match catch_kind {
+        "catch" | "catch_ref" => {
+            // First index is tag, second is label
+            let tag_ref = match indices.first() {
+                Some(r) => *r,
+                None => return,
+            };
+            let tag = symbols
+                .get_tag_by_name(tag_ref)
+                .or_else(|| parse_wat_nat(tag_ref).and_then(|i| symbols.tags.get(i as usize)));
+            let mut types = tag.map(|t| t.params.clone()).unwrap_or_default();
+            if catch_kind == "catch_ref" {
+                types.push(ValueType::Unknown); // exnref — no Exnref variant yet, Unknown matches anything
+            }
+            types
+        }
+        "catch_all" => vec![],
+        "catch_all_ref" => vec![ValueType::Unknown], // exnref placeholder
+        _ => return,
+    };
+
+    // Resolve the label index
+    let label_ref = match catch_kind {
+        "catch" | "catch_ref" => indices.get(1),
+        _ => indices.first(),
+    };
+    let label_ref = match label_ref {
+        Some(r) => *r,
+        None => return,
+    };
+
+    // Catch clause labels are relative to the scope OUTSIDE the try_table.
+    // Inside the type checker, the try_table frame is on top of the stack,
+    // so we add 1 to convert from the catch clause's perspective to the checker's.
+    let label_depth = if label_ref.starts_with('$') {
+        checker.resolve_label_depth(label_ref)
+    } else {
+        label_ref.parse::<usize>().ok().map(|d| d + 1)
+    };
+
+    let label_depth = match label_depth {
+        Some(d) => d,
+        None => return,
+    };
+
+    // Get expected label types
+    let label_types = match checker.label_types(label_depth) {
+        Some(t) => t.to_vec(),
+        None => return,
+    };
+
+    // Compare: sent types must match label types in count and type
+    if sent_types.len() != label_types.len() {
+        checker.diagnostics.push(
+            Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                .with_code("type-mismatch"),
+        );
+        return;
+    }
+
+    for (sent, expected) in sent_types.iter().zip(label_types.iter()) {
+        if !types_compatible_with_symbols(sent, expected, symbols) {
+            checker.diagnostics.push(
+                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                    .with_code("type-mismatch"),
+            );
+            return;
+        }
+    }
+}
+
+/// Extract heap type strings from br_on_cast/br_on_cast_fail instruction node.
+///
+/// Returns the two heap type text values (skipping the label index).
+fn extract_heap_types_from_cast<'a>(node: &Node, source: &'a str) -> Vec<&'a str> {
+    let mut types = Vec::new();
+    let mut cursor = node.walk();
+    let mut past_index = false;
+
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        // Skip the op_ prefix and label index
+        if (kind == "index" || kind == "identifier") && !past_index {
+            past_index = true; // First index is the label
+            continue;
+        }
+        if !past_index {
+            // Look inside op_ nodes for the label index
+            if kind.starts_with("op_") {
+                let mut inner = child.walk();
+                for ic in child.children(&mut inner) {
+                    if ic.kind() == "index" || ic.kind() == "identifier" {
+                        past_index = true;
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        // After the label, collect heap type values
+        if kind == "ref_kind" || kind == "ref_type_ref" || kind == "index" || kind == "identifier" {
+            types.push(source[child.byte_range()].trim());
+        } else if kind.ends_with("ref") {
+            // Abbreviated forms like "anyref", "funcref", etc.
+            types.push(source[child.byte_range()].trim());
+        }
+    }
+    types
+}
+
+/// Check if `sub` is a valid subtype of `sup` in the heap type hierarchy.
+///
+/// Hierarchy (from spec):
+/// - any > eq > {i31, struct, array, $concrete_struct, $concrete_array}
+/// - func > $concrete_func
+/// - extern
+/// - none (bottom of any), nofunc (bottom of func), noextern (bottom of extern)
+///
+/// Concrete type indices ($name or numeric) are considered subtypes of `any`/`eq`/`func`
+/// depending on what they define (struct/array/func), but without the symbol table
+/// we conservatively treat them as subtypes of both `any` and `func` hierarchies.
+fn is_heap_subtype(sub: &str, sup: &str) -> bool {
+    if sub == sup {
+        return true;
+    }
+    // Normalize abbreviated ref types
+    let sub = normalize_heap_type(sub);
+    let sup = normalize_heap_type(sup);
+    if sub == sup {
+        return true;
+    }
+
+    let sub_is_concrete = is_concrete_type_ref(&sub);
+    let sup_is_concrete = is_concrete_type_ref(&sup);
+
+    // If either is a concrete type index, we can't fully validate without
+    // symbol table — be conservative and only flag clearly invalid casts
+    if sub_is_concrete || sup_is_concrete {
+        // Concrete types are subtypes of most abstract supertypes
+        // We don't have enough info to flag these, so allow them
+        return true;
+    }
+
+    match sup.as_str() {
+        "any" => matches!(
+            sub.as_str(),
+            "eq" | "i31" | "struct" | "array" | "none" | "null"
+        ),
+        "eq" => matches!(sub.as_str(), "i31" | "struct" | "array" | "none" | "null"),
+        "func" => sub == "nofunc",
+        "extern" => sub == "noextern",
+        "exn" => sub == "noexn",
+        "struct" => sub == "none" || sub == "null",
+        "array" => sub == "none" || sub == "null",
+        "i31" => sub == "none" || sub == "null",
+        _ => false,
+    }
+}
+
+/// Check if a heap type string refers to a concrete type (index or ref form).
+fn is_concrete_type_ref(ty: &str) -> bool {
+    ty.starts_with('$') || ty.starts_with("(ref") || ty.parse::<u32>().is_ok()
+}
+
+/// Normalize abbreviated heap type names to their canonical form.
+fn normalize_heap_type(ty: &str) -> String {
+    match ty {
+        "anyref" => "any".to_string(),
+        "funcref" => "func".to_string(),
+        "externref" => "extern".to_string(),
+        "eqref" => "eq".to_string(),
+        "i31ref" => "i31".to_string(),
+        "structref" => "struct".to_string(),
+        "arrayref" => "array".to_string(),
+        "nullref" => "null".to_string(),
+        "nullfuncref" => "nofunc".to_string(),
+        "nullexternref" => "noextern".to_string(),
+        "exnref" => "exn".to_string(),
+        "nullexnref" => "noexn".to_string(),
+        other => other.to_string(),
+    }
 }
