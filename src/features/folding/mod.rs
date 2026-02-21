@@ -98,77 +98,53 @@ fn is_comment_kind(kind: &str) -> bool {
 }
 
 /// Recursively collect foldable nodes from the tree-sitter AST.
+macro_rules! collect_foldable_nodes_body {
+    ($node:ident, $cursor:ident, $ranges:ident) => {{
+        node_kind!(kind = $node);
+
+        let is_foldable = is_foldable_kind(kind);
+        let is_comment = is_comment_kind(kind);
+
+        if is_foldable || is_comment {
+            let start_line = $node.start_position().row as u32;
+            let end_line = $node.end_position().row as u32;
+
+            // Only fold if it spans multiple lines
+            if end_line > start_line {
+                $ranges.push(FoldingRangeResult {
+                    start_line,
+                    end_line,
+                    kind: if is_comment {
+                        FoldingRangeKind::Comment
+                    } else {
+                        FoldingRangeKind::Region
+                    },
+                });
+            }
+        }
+
+        // Recurse into children
+        for child in $node.children($cursor) {
+            let mut child_cursor = child.walk();
+            collect_foldable_nodes(child, &mut child_cursor, $ranges);
+        }
+    }};
+}
 #[cfg(feature = "native")]
 fn collect_foldable_nodes<'a>(
     node: Node<'a>,
     cursor: &mut TreeCursor<'a>,
     ranges: &mut Vec<FoldingRangeResult>,
 ) {
-    let kind = node.kind();
-
-    let is_foldable = is_foldable_kind(kind);
-    let is_comment = is_comment_kind(kind);
-
-    if is_foldable || is_comment {
-        let start_line = node.start_position().row as u32;
-        let end_line = node.end_position().row as u32;
-
-        // Only fold if it spans multiple lines
-        if end_line > start_line {
-            ranges.push(FoldingRangeResult {
-                start_line,
-                end_line,
-                kind: if is_comment {
-                    FoldingRangeKind::Comment
-                } else {
-                    FoldingRangeKind::Region
-                },
-            });
-        }
-    }
-
-    // Recurse into children
-    for child in node.children(cursor) {
-        let mut child_cursor = child.walk();
-        collect_foldable_nodes(child, &mut child_cursor, ranges);
-    }
+    collect_foldable_nodes_body!(node, cursor, ranges);
 }
-
-/// Recursively collect foldable nodes from the tree-sitter AST (WASM version).
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 fn collect_foldable_nodes(
     node: Node,
     cursor: &mut TreeCursor,
     ranges: &mut Vec<FoldingRangeResult>,
 ) {
-    let kind = node.kind();
-
-    let is_foldable = is_foldable_kind(&kind);
-    let is_comment = is_comment_kind(&kind);
-
-    if is_foldable || is_comment {
-        let start_line = node.start_position().row as u32;
-        let end_line = node.end_position().row as u32;
-
-        // Only fold if it spans multiple lines
-        if end_line > start_line {
-            ranges.push(FoldingRangeResult {
-                start_line,
-                end_line,
-                kind: if is_comment {
-                    FoldingRangeKind::Comment
-                } else {
-                    FoldingRangeKind::Region
-                },
-            });
-        }
-    }
-
-    // Recurse into children
-    for child in node.children(cursor) {
-        let mut child_cursor = child.walk();
-        collect_foldable_nodes(child, &mut child_cursor, ranges);
-    }
+    collect_foldable_nodes_body!(node, cursor, ranges);
 }
 
 #[cfg(feature = "native")]

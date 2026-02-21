@@ -52,9 +52,7 @@ pub(crate) fn check_uninitialized_locals(
     // Find and walk the instr_list
     let mut cursor = func_node.walk();
     for child in func_node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = &*kind;
+        node_kind!(kind = child);
         if kind == "instr_list" {
             walk_body(
                 &child,
@@ -80,9 +78,7 @@ fn find_non_defaultable_locals(func_node: &Node, source: &str, func: &Function) 
 
     let mut cursor = func_node.walk();
     for child in func_node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind = &*kind;
+        node_kind!(kind = child);
 
         if kind == "func_locals" || kind == "func_locals_one" || kind == "func_locals_many" {
             scan_locals_node(&child, source, num_params, &mut local_counter, &mut result);
@@ -101,9 +97,7 @@ fn scan_locals_node(
     local_counter: &mut usize,
     result: &mut HashSet<usize>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = &*kind;
+    node_kind!(kind = node);
 
     match kind {
         "value_type" | "value_type_ref_type" | "value_type_num_type" => {
@@ -125,9 +119,7 @@ fn scan_locals_node(
 /// Walks down through `value_type → value_type_ref_type → ref_type → ref_type_ref/ref_type_concrete`
 /// and checks for the absence of `null`.
 fn is_non_nullable_ref_in_ast(node: &Node, source: &str) -> bool {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = &*kind;
+    node_kind!(kind = node);
 
     match kind {
         "ref_type_ref" | "ref_type_concrete" => {
@@ -204,9 +196,7 @@ fn walk_node(
     initialized: &mut HashSet<usize>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = &*kind;
+    node_kind!(kind = node);
 
     match kind {
         "instr_plain" => {
@@ -225,9 +215,7 @@ fn walk_node(
             let mut cursor = node.walk();
             let mut instr_plain = None;
             for child in node.children(&mut cursor) {
-                let ck = child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ck = &*ck;
+                node_kind!(ck = child);
                 if ck == "expr" {
                     walk_node(
                         &child,
@@ -361,9 +349,7 @@ fn walk_if_body(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = &*ck;
+        node_kind!(ck = child);
 
         match ck {
             // Linear format: else branch is in a separate node
@@ -412,9 +398,7 @@ fn walk_if_body(
 fn is_block_if(node: &Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = &*ck;
+        node_kind!(ck = child);
         if ck == "block_if" {
             return true;
         }
@@ -458,9 +442,7 @@ fn check_local_instruction(
 fn resolve_local_index_from_node(node: &Node, source: &str, func: &Function) -> Option<usize> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = &*ck;
+        node_kind!(ck = child);
 
         if ck == "index" || ck == "identifier" || ck == "nat" {
             let text = source[child.byte_range()].trim();
@@ -470,9 +452,7 @@ fn resolve_local_index_from_node(node: &Node, source: &str, func: &Function) -> 
             // Check inside index node for identifier/nat children
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = &*ik;
+                node_kind!(ik = idx_child);
                 if ik == "identifier" || ik == "nat" {
                     let id_text = source[idx_child.byte_range()].trim();
                     if let Some(idx) = resolve_local_text(id_text, func) {
