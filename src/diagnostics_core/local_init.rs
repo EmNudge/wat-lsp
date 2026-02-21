@@ -279,7 +279,7 @@ fn walk_node(
             }
             *initialized = saved;
         }
-        "block_block" | "loop_block" | "block_try_table" | "block_try" => {
+        "block_block" | "block_loop" | "block_try_table" | "block_try" => {
             let saved = initialized.clone();
             walk_body(
                 node,

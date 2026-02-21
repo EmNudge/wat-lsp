@@ -74,14 +74,20 @@ pub fn check_folded_operand_count(
     };
 
     if let Some((operand_mode, check_dynamic)) = resolved {
+        // Compute how many child exprs are consumed by sibling exprs that need
+        // operands themselves (e.g. `(i31.get_u (local.get 0) (table.get $t))`
+        // — `table.get` needs 1 operand but has 0 child exprs, consuming a sibling).
+        let deficit = compute_child_expr_deficit(node, source, symbols);
+
         match operand_mode {
             OperandMode::Fixed(expected) => {
-                if operand_count > expected {
+                let effective = operand_count.saturating_sub(deficit);
+                if effective > expected {
                     diagnostics.push(Diagnostic::error(
                         node_to_range(node),
                         format!(
                             "Instruction '{}' expects at most {} operands, but got {}",
-                            instr_name, expected, operand_count
+                            instr_name, expected, effective
                         ),
                     ));
                 } else if operand_count > 0
@@ -103,6 +109,7 @@ pub fn check_folded_operand_count(
                     node,
                     &instr_name,
                     operand_count,
+                    deficit,
                     symbols,
                     source,
                     &mut diagnostics,
@@ -116,14 +123,20 @@ pub fn check_folded_operand_count(
 }
 
 /// Validate operand count for instructions with dynamic arity (call, throw, struct.new, call_ref, etc.)
+///
+/// For Dynamic-arity instructions we only check "too few" — extra exprs stay on the stack
+/// in folded syntax and the type checker in semantic.rs validates correctness.
+#[allow(clippy::too_many_arguments)]
 fn validate_dynamic_operands(
     node: &Node,
     instr_name: &str,
     operand_count: usize,
+    deficit: usize,
     symbols: &SymbolTable,
     source: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let effective = operand_count.saturating_sub(deficit);
     match instr_name {
         "struct.new" => {
             if let Some(type_name) = extract_instruction_index(node, source) {
@@ -141,9 +154,10 @@ fn validate_dynamic_operands(
                         emit_operand_diagnostic(
                             node,
                             instr_name,
-                            operand_count,
+                            effective,
                             expected,
                             Some(&format!("fields of struct {}", type_display)),
+                            false,
                             diagnostics,
                             source,
                         );
@@ -166,9 +180,10 @@ fn validate_dynamic_operands(
                     emit_operand_diagnostic(
                         node,
                         instr_name,
-                        operand_count,
+                        effective,
                         expected,
                         Some(&format!("params of function {}", func_display)),
+                        false,
                         diagnostics,
                         source,
                     );
@@ -190,9 +205,10 @@ fn validate_dynamic_operands(
                     emit_operand_diagnostic(
                         node,
                         instr_name,
-                        operand_count,
+                        effective,
                         expected,
                         Some(&format!("params of tag {}", tag_display)),
+                        false,
                         diagnostics,
                         source,
                     );
@@ -216,13 +232,14 @@ fn validate_dynamic_operands(
                         emit_operand_diagnostic(
                             node,
                             instr_name,
-                            operand_count,
+                            effective,
                             expected,
                             Some(&format!(
                                 "{} params + funcref for type {}",
                                 params.len(),
                                 type_display
                             )),
+                            false,
                             diagnostics,
                             source,
                         );
@@ -235,16 +252,21 @@ fn validate_dynamic_operands(
 }
 
 /// Emit a diagnostic for operand count mismatch (too many or too few in nested context).
+///
+/// When `check_too_many` is false, only the "too few" branch is checked. This is used
+/// for Dynamic-arity instructions where extra values stay on the stack in folded syntax.
+#[allow(clippy::too_many_arguments)]
 fn emit_operand_diagnostic(
     node: &Node,
     instr_name: &str,
     actual: usize,
     expected: usize,
     context_msg: Option<&str>,
+    check_too_many: bool,
     diagnostics: &mut Vec<Diagnostic>,
     source: &str,
 ) {
-    if actual > expected {
+    if check_too_many && actual > expected {
         let msg = if let Some(ctx) = context_msg {
             format!(
                 "Instruction '{}' expects at most {} operands ({}), but got {}",
@@ -269,6 +291,170 @@ fn emit_operand_diagnostic(
                 instr_name, expected, actual
             ),
         ));
+    }
+}
+
+/// Compute how many child `expr` nodes are consumed as operands by sibling exprs.
+///
+/// In folded WAT, `(instr e1 e2 ... en)` evaluates left-to-right. If a child expr's
+/// inner instruction needs operands but has fewer child exprs than required, it consumes
+/// results from preceding siblings. Each such shortfall reduces the "effective" operand
+/// count that the parent instruction sees.
+///
+/// Example: `(i31.get_u (local.get 0) (table.get $t))`
+/// - `local.get` needs 0 operands, has 0 → deficit 0
+/// - `table.get` needs 1 operand, has 0 → deficit 1
+/// - Total deficit = 1, so effective operand count = 2 - 1 = 1 (correct for i31.get_u)
+fn compute_child_expr_deficit(node: &Node, source: &str, symbols: &SymbolTable) -> usize {
+    let mut deficit = 0;
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor).skip(1) {
+        if child.kind() != "expr" {
+            continue;
+        }
+
+        // Navigate: expr → expr1 → expr1_plain → instr_plain
+        let mut child_cursor = child.walk();
+        let expr1_node = match child
+            .children(&mut child_cursor)
+            .find(|c| c.kind() == "expr1")
+        {
+            Some(c) => c,
+            None => continue,
+        };
+        let mut expr1_cursor = expr1_node.walk();
+        for expr_child in expr1_node.children(&mut expr1_cursor) {
+            if expr_child.kind() != "expr1_plain" {
+                continue;
+            }
+
+            // Count this child expr's own expr children
+            let mut inner_cursor = expr_child.walk();
+            let child_expr_count = expr_child
+                .children(&mut inner_cursor)
+                .skip(1)
+                .filter(|c| c.kind() == "expr")
+                .count();
+
+            // Get the inner instruction's expected operand count
+            let mut instr_cursor = expr_child.walk();
+            let inner_instr = match expr_child
+                .children(&mut instr_cursor)
+                .find(|c| c.kind() == "instr_plain")
+            {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let mut op_cursor = inner_instr.walk();
+            let first_op = match inner_instr.children(&mut op_cursor).next() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let op_kind = first_op.kind();
+            let inner_name = {
+                let name = match op_kind.as_ref() {
+                    "op_const" => {
+                        let mut cc = first_op.walk();
+                        let child = first_op.children(&mut cc).next();
+                        match child {
+                            Some(c) => source[c.byte_range()].trim().to_string(),
+                            None => continue,
+                        }
+                    }
+                    _ => source[first_op.byte_range()].trim().to_string(),
+                };
+                name
+            };
+
+            let expected = if let Some(arity) = lookup_instruction_arity(inner_name.as_str()) {
+                match arity.operand_mode {
+                    OperandMode::Fixed(n) => n,
+                    OperandMode::Dynamic => {
+                        // For dynamic, try to resolve actual param count
+                        resolve_dynamic_expected(&expr_child, &inner_name, source, symbols)
+                            .unwrap_or(0)
+                    }
+                }
+            } else if let Some((c, _)) = infer_simd_instruction_arity(&inner_name) {
+                c
+            } else {
+                continue;
+            };
+
+            if expected > child_expr_count {
+                deficit += expected - child_expr_count;
+            }
+        }
+    }
+
+    deficit
+}
+
+/// Resolve expected operand count for a dynamic-arity instruction.
+fn resolve_dynamic_expected(
+    node: &Node,
+    instr_name: &str,
+    source: &str,
+    symbols: &SymbolTable,
+) -> Option<usize> {
+    let index_name = extract_instruction_index(node, source)?;
+    match instr_name {
+        "call" | "return_call" => {
+            let func = if index_name.starts_with('$') {
+                symbols.get_function_by_name(&index_name)
+            } else if let Ok(idx) = index_name.parse::<usize>() {
+                symbols.get_function_by_index(idx)
+            } else {
+                None
+            };
+            func.map(|f| f.parameters.len())
+        }
+        "call_ref" | "return_call_ref" => {
+            let type_def = if index_name.starts_with('$') {
+                symbols.get_type_by_name(&index_name)
+            } else if let Ok(idx) = index_name.parse::<usize>() {
+                symbols.get_type_by_index(idx)
+            } else {
+                None
+            };
+            type_def.and_then(|t| {
+                if let TypeKind::Func { params, .. } = &t.kind {
+                    Some(params.len() + 1)
+                } else {
+                    None
+                }
+            })
+        }
+        "struct.new" => {
+            let type_def = if index_name.starts_with('$') {
+                symbols.get_type_by_name(&index_name)
+            } else if let Ok(idx) = index_name.parse::<usize>() {
+                symbols.get_type_by_index(idx)
+            } else {
+                None
+            };
+            type_def.and_then(|t| {
+                if let TypeKind::Struct { fields } = &t.kind {
+                    Some(fields.len())
+                } else {
+                    None
+                }
+            })
+        }
+        "throw" => {
+            let tag = if index_name.starts_with('$') {
+                symbols.get_tag_by_name(&index_name)
+            } else if let Ok(idx) = index_name.parse::<usize>() {
+                symbols.get_tag_by_index(idx)
+            } else {
+                None
+            };
+            tag.map(|t| t.params.len())
+        }
+        _ => None,
     }
 }
 

@@ -72,7 +72,7 @@ pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
         "instr_block" | "block_block" => block_body_always_terminates(node, source),
 
         // Loop: check if the body terminates (loops can run forever but body might terminate)
-        "instr_loop" | "loop_block" => block_body_always_terminates(node, source),
+        "instr_loop" | "block_loop" => block_body_always_terminates(node, source),
 
         // If: terminates only if BOTH then AND else branches exist AND both terminate
         // block_if is the linear format (if ... else ... end)
@@ -129,8 +129,8 @@ fn block_body_always_terminates(node: &Node, source: &str) -> bool {
         if child_kind == "instr_list" {
             return sequence_always_terminates(&child, source);
         }
-        // For linear format blocks like block_block, loop_block
-        if (child_kind == "block_block" || child_kind == "loop_block")
+        // For linear format blocks like block_block, block_loop
+        if (child_kind == "block_block" || child_kind == "block_loop")
             && block_body_always_terminates(&child, source)
         {
             return true;

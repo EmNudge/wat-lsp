@@ -651,7 +651,8 @@ mod tests {
 
     #[test]
     fn test_call_with_too_many_operands() {
-        // Should still catch too many operands in folded style
+        // Extra operands in folded call stay on the stack; the type checker
+        // catches the resulting stack mismatch at the function level.
         let document = r#"(module
   (func $single (param i32) (result i32)
     local.get 0)
@@ -664,14 +665,16 @@ mod tests {
         let symbols = parse_document(document).unwrap();
 
         let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
-        let operand_errors: Vec<_> = diagnostics
+        let type_errors: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("operand"))
+            .filter(|d| {
+                d.message.contains("type mismatch") || d.message.contains("Stack underflow")
+            })
             .collect();
-        assert_eq!(
-            operand_errors.len(),
-            1,
-            "Call with too many operands should produce an error"
+        assert!(
+            !type_errors.is_empty(),
+            "Call with extra operands should produce a type checker error: {:?}",
+            diagnostics
         );
     }
 
@@ -736,8 +739,10 @@ mod tests {
     }
 
     #[test]
-    fn test_throw_with_wrong_operand_count() {
-        // Tag with 0 params, throw with 1 operand - should be invalid
+    fn test_throw_with_extra_operands() {
+        // Tag with 0 params, throw with 1 operand in folded form — the extra
+        // value stays on the stack. Since throw transfers control, this is valid
+        // WAT (the type checker accepts unreachable stack states).
         let document = r#"(module
   (tag $empty_error)
 
@@ -761,8 +766,9 @@ mod tests {
             .collect();
         assert_eq!(
             operand_errors.len(),
-            1,
-            "throw with wrong operand count should produce an error"
+            0,
+            "Extra operands before throw are valid in folded form: {:?}",
+            operand_errors
         );
     }
 
@@ -945,7 +951,8 @@ mod tests {
 
     #[test]
     fn test_call_ref_with_too_many_operands() {
-        // Function type with 1 param, call_ref with 4 operands should error
+        // Function type with 1 param, call_ref with 4 operands — extra values
+        // stay on the stack and the type checker catches the mismatch.
         let document = r#"(module
   (type $unary (func (param i32) (result i32)))
 
@@ -959,16 +966,17 @@ mod tests {
         let symbols = parse_document(document).unwrap();
 
         let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
-        let operand_errors: Vec<_> = diagnostics
+        let type_errors: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("call_ref") && d.message.contains("operand"))
+            .filter(|d| {
+                d.message.contains("type mismatch") || d.message.contains("Stack underflow")
+            })
             .collect();
-        assert_eq!(
-            operand_errors.len(),
-            1,
-            "call_ref with too many operands should produce one error"
+        assert!(
+            !type_errors.is_empty(),
+            "call_ref with extra operands should produce a type checker error: {:?}",
+            diagnostics
         );
-        assert!(operand_errors[0].message.contains("at most 2 operands"));
     }
 
     #[test]

@@ -373,7 +373,7 @@ fn process_block_body(node: &Node, source: &str, symbols: &SymbolTable, checker:
                     }
                 }
             }
-            "block_block" | "loop_block" => {
+            "block_block" | "block_loop" => {
                 // Nested block in linear format
                 process_block_body(&child, source, symbols, checker);
             }
@@ -435,7 +435,7 @@ fn get_block_label(node: &Node, source: &str) -> Option<String> {
         }
         // Check inside block_block, loop_block, block_if, block_try_table, etc.
         let is_inner_block = kind == "block_block"
-            || kind == "loop_block"
+            || kind == "block_loop"
             || kind == "if_block"
             || kind == "block_if"
             || kind == "block_try_table"
@@ -453,7 +453,7 @@ fn get_block_label(node: &Node, source: &str) -> Option<String> {
     None
 }
 
-/// Check if a node is a loop (instr_loop or contains loop_block)
+/// Check if a node is a loop (instr_loop or contains block_loop)
 fn is_loop_node(node: &Node) -> bool {
     node_kind!(kind = node);
 
@@ -463,7 +463,7 @@ fn is_loop_node(node: &Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
-        if ck == "loop_block" {
+        if ck == "block_loop" {
             return true;
         }
     }
@@ -2588,7 +2588,7 @@ fn resolve_block_type_use<'a>(
             return resolve_type_use_node(&child, source, symbols);
         }
         if kind == "block_block"
-            || kind == "loop_block"
+            || kind == "block_loop"
             || kind == "if_block"
             || kind == "block_if"
             || kind == "block_try_table"
@@ -2689,7 +2689,7 @@ fn get_block_result_types(
             return parse_result_types(&child, source);
         }
         if kind == "block_block"
-            || kind == "loop_block"
+            || kind == "block_loop"
             || kind == "if_block"
             || kind == "block_if"
             || kind == "block_try_table"
@@ -2730,7 +2730,7 @@ fn get_block_param_types(block_node: &Node, source: &str, symbols: &SymbolTable)
             types.extend(parse_func_type_results(&child, source));
         }
         if kind == "block_block"
-            || kind == "loop_block"
+            || kind == "block_loop"
             || kind == "if_block"
             || kind == "block_if"
             || kind == "block_try_table"
