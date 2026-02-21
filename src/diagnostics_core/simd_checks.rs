@@ -20,11 +20,7 @@ pub fn check_simd_lane_index(node: &Node, source: &str) -> Vec<Diagnostic> {
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         if kind_ref == "op_simd_lane" {
             // op_simd_lane contains instr_name + int children
@@ -34,11 +30,7 @@ pub fn check_simd_lane_index(node: &Node, source: &str) -> Vec<Diagnostic> {
                 // Collect all int children and validate
                 let mut int_cursor = child.walk();
                 for int_child in child.children(&mut int_cursor) {
-                    let int_kind = int_child.kind();
-                    #[cfg(feature = "native")]
-                    let int_kind_ref = int_kind;
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let int_kind_ref = &*int_kind;
+                    node_kind!(int_kind_ref = int_child);
 
                     if int_kind_ref == "int" {
                         if let Some(diag) = validate_lane_value(&int_child, source, max_lane) {
@@ -55,11 +47,7 @@ pub fn check_simd_lane_index(node: &Node, source: &str) -> Vec<Diagnostic> {
                 // Find the int sibling (last int child of the instr_plain parent)
                 let mut parent_cursor = node.walk();
                 for sibling in node.children(&mut parent_cursor) {
-                    let sib_kind = sibling.kind();
-                    #[cfg(feature = "native")]
-                    let sib_kind_ref = sib_kind;
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let sib_kind_ref = &*sib_kind;
+                    node_kind!(sib_kind_ref = sibling);
 
                     if sib_kind_ref == "int" {
                         if let Some(diag) = validate_lane_value(&sibling, source, max_lane) {
@@ -81,11 +69,7 @@ fn find_instr_name(node: &Node, source: &str) -> String {
     let mut name = String::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         if kind_ref == "instr_name" {
             name.push_str(&source[child.byte_range()]);

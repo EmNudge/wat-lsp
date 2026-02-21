@@ -201,15 +201,8 @@ fn find_undefined_identifiers(
         let in_index = node
             .parent()
             .map(|p| {
-                let pk = p.kind();
-                #[cfg(feature = "native")]
-                {
-                    pk == "index"
-                }
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                {
-                    &*pk == "index"
-                }
+                node_kind!(pk = p);
+                pk == "index"
             })
             .unwrap_or(false);
 

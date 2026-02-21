@@ -26,12 +26,7 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
     }
 
     let first_child = &children[0];
-    let instr_kind = first_child.kind();
-
-    #[cfg(feature = "native")]
-    let instr_kind_ref = instr_kind;
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let instr_kind_ref = &*instr_kind;
+    node_kind!(instr_kind_ref = first_child);
 
     match instr_kind_ref {
         "op_index" | "op_index_opt" | "op_gc" | "op_exception" => {
@@ -40,11 +35,7 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                 .iter()
                 .skip(1)
                 .filter(|c| {
-                    let k = c.kind();
-                    #[cfg(feature = "native")]
-                    let k_ref = k;
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let k_ref = &*k;
+                    node_kind!(k_ref = c);
                     k_ref == "index" || k_ref == "ref_type"
                 })
                 .count();
@@ -63,11 +54,7 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                 .iter()
                 .skip(1)
                 .filter(|c| {
-                    let k = c.kind();
-                    #[cfg(feature = "native")]
-                    let k_ref = k;
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let k_ref = &*k;
+                    node_kind!(k_ref = c);
                     matches!(k_ref, "int" | "float")
                 })
                 .count();
@@ -79,11 +66,7 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                 .iter()
                 .skip(1)
                 .filter(|c| {
-                    let k = c.kind();
-                    #[cfg(feature = "native")]
-                    let k_ref = k;
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let k_ref = &*k;
+                    node_kind!(k_ref = c);
                     matches!(k_ref, "index" | "expr")
                 })
                 .count();
@@ -95,11 +78,7 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                 .iter()
                 .skip(1)
                 .filter(|c| {
-                    let k = c.kind();
-                    #[cfg(feature = "native")]
-                    let k_ref = k;
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let k_ref = &*k;
+                    node_kind!(k_ref = c);
                     k_ref == "index"
                 })
                 .count();
