@@ -3148,7 +3148,7 @@ fn walk_for_block_type_use_mismatches(
     if matches!(
         kind,
         "block_block"
-            | "loop_block"
+            | "block_loop"
             | "block_if"
             | "if_block"
             | "block_try_table"
@@ -3224,7 +3224,7 @@ macro_rules! check_block_children_for_type_use_body {
                     *$has_inline_sig = true;
                     collect_value_types_recursive(&child, $source, $inline_results);
                 }
-                "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
+                "block_block" | "block_loop" | "block_if" | "if_block" | "block_try_table"
                 | "block_try" => {
                     check_block_children_for_type_use(
                         &child,
