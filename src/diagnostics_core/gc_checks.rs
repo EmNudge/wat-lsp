@@ -124,11 +124,7 @@ fn extract_two_indices(node: &Node, source: &str) -> Option<(String, String)> {
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         if kind_ref == "index" {
             // Index node may contain identifier or nat child
@@ -151,11 +147,7 @@ fn extract_two_indices(node: &Node, source: &str) -> Option<(String, String)> {
 fn extract_index_value(node: &Node, source: &str) -> String {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         if kind_ref == "identifier" || kind_ref == "nat" {
             return source[child.byte_range()].trim().to_string();

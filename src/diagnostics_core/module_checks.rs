@@ -667,14 +667,7 @@ fn check_inline_type_mismatches(
             node_kind!(ck = child);
             match ck {
                 "type_use" => {
-                    #[cfg(feature = "native")]
-                    {
-                        type_use_node = Some(child);
-                    }
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    {
-                        type_use_node = Some(child.clone());
-                    }
+                    type_use_node = Some(node_copy!(&child));
                 }
                 "func_type_params" => {
                     has_inline_sig = true;
@@ -1302,7 +1295,7 @@ fn has_explicit_nullable_type(elem_node: &Node, source: &str) -> bool {
     for child in elem_node.children(&mut cursor) {
         node_kind!(ck = child);
         if ck == "elem_list" || ck == "ref_type" || ck == "value_type" {
-            let text = node_text(&child, source).trim().to_string();
+            let text = node_text(&child, source).trim();
             if text == "funcref" || text == "externref" {
                 return true;
             }
@@ -1311,7 +1304,7 @@ fn has_explicit_nullable_type(elem_node: &Node, source: &str) -> bool {
             for gc in child.children(&mut ec) {
                 node_kind!(gk = gc);
                 if gk == "ref_type" || gk == "ref_type_funcref" || gk == "ref_type_externref" {
-                    let gtext = node_text(&gc, source).trim().to_string();
+                    let gtext = node_text(&gc, source).trim();
                     if gtext == "funcref" || gtext == "externref" {
                         return true;
                     }
@@ -1580,41 +1573,23 @@ fn check_ref_func_declarations(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Step 1: Collect all functions declared in element segments
+    // Step 1: Collect all functions declared via elem segments, tables, globals, and exports
     let mut declared_funcs: HashSet<usize> = HashSet::new();
     for_each_module_field(module, |field| {
         node_kind!(fk = field);
-        if fk != "module_field_elem" {
-            return;
-        }
-        collect_elem_declared_funcs(field, source, symbols, &mut declared_funcs);
-    });
-
-    // Also collect functions referenced in inline elem expressions on tables
-    for_each_module_field(module, |field| {
-        node_kind!(fk = field);
-        if fk != "module_field_table" {
-            return;
-        }
-        collect_inline_table_elem_funcs(field, source, symbols, &mut declared_funcs);
-    });
-
-    // Also collect functions referenced via ref.func in global/table init expressions
-    // Per spec, ref.func in const init contexts counts as a function declaration
-    for_each_module_field(module, |field| {
-        node_kind!(fk = field);
-        if fk == "module_field_global" || fk == "module_field_table" {
-            collect_ref_func_in_const_expr(field, source, symbols, &mut declared_funcs);
-        }
-    });
-
-    // Also collect exported functions — per spec, exported functions are considered "declared"
-    for_each_module_field(module, |field| {
-        node_kind!(fk = field);
         match fk {
+            "module_field_elem" => {
+                collect_elem_declared_funcs(field, source, symbols, &mut declared_funcs);
+            }
+            "module_field_table" => {
+                collect_inline_table_elem_funcs(field, source, symbols, &mut declared_funcs);
+                collect_ref_func_in_const_expr(field, source, symbols, &mut declared_funcs);
+            }
+            "module_field_global" => {
+                collect_ref_func_in_const_expr(field, source, symbols, &mut declared_funcs);
+            }
             "module_field_export" => {
-                // Standalone export: (export "name" (func $idx))
-                collect_exported_func(field, source, symbols, &mut declared_funcs);
+                find_exported_func_recursive(field, source, symbols, &mut declared_funcs);
             }
             "module_field_func" => {
                 // Inline export: (func $f (export "name") ...)
@@ -1628,7 +1603,6 @@ fn check_ref_func_declarations(
                     }
                 }
                 if has_export {
-                    // Find the function's index from its identifier or position
                     let mut cursor2 = field.walk();
                     for child in field.children(&mut cursor2) {
                         node_kind!(ck = child);
@@ -1650,17 +1624,7 @@ fn check_ref_func_declarations(
     collect_ref_func_errors(module, source, symbols, &declared_funcs, diagnostics);
 }
 
-/// Collect function index from a standalone export node: (export "name" (func $idx))
-fn collect_exported_func(
-    export_node: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    declared: &mut HashSet<usize>,
-) {
-    // Walk recursively to find export_desc_func (nested inside export_desc)
-    find_exported_func_recursive(export_node, source, symbols, declared);
-}
-
+/// Find export_desc_func nodes recursively and collect their function indices.
 fn find_exported_func_recursive(
     node: &Node,
     source: &str,
@@ -2005,34 +1969,22 @@ fn check_duplicate_locals(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnosti
     for func in &symbols.functions {
         let mut seen: HashMap<&str, Range> = HashMap::new();
 
-        // Check parameters first
-        for param in &func.parameters {
-            if let Some(ref name) = param.name {
-                if let Some(ref range) = param.range {
-                    if let Some(_first) = seen.get(name.as_str()) {
-                        diagnostics.push(Diagnostic::error(
-                            *range,
-                            format!("duplicate local {}", name),
-                        ));
-                    } else {
-                        seen.insert(name, *range);
-                    }
-                }
-            }
-        }
+        // Check parameters then locals (locals also conflict with params)
+        let entries = func
+            .parameters
+            .iter()
+            .map(|p| (&p.name, &p.range))
+            .chain(func.locals.iter().map(|l| (&l.name, &l.range)));
 
-        // Check locals (also conflicts with params)
-        for local in &func.locals {
-            if let Some(ref name) = local.name {
-                if let Some(ref range) = local.range {
-                    if let Some(_first) = seen.get(name.as_str()) {
-                        diagnostics.push(Diagnostic::error(
-                            *range,
-                            format!("duplicate local {}", name),
-                        ));
-                    } else {
-                        seen.insert(name, *range);
-                    }
+        for (name, range) in entries {
+            if let (Some(name), Some(range)) = (name, range) {
+                if seen.contains_key(name.as_str()) {
+                    diagnostics.push(Diagnostic::error(
+                        *range,
+                        format!("duplicate local {}", name),
+                    ));
+                } else {
+                    seen.insert(name, *range);
                 }
             }
         }
@@ -2196,8 +2148,7 @@ fn check_ref_for_forward_type(
 /// Count unique implicit function types (signatures not matching any explicit type).
 /// Only functions with inline signatures (no type_use) create implicit types.
 fn count_unique_implicit_types(symbols: &SymbolTable) -> usize {
-    // Use HashSet for O(1) dedup instead of O(n) Vec.any()
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: HashSet<(Vec<ValueType>, Vec<ValueType>)> = HashSet::new();
     for type_def in &symbols.types {
         if let TypeKind::Func { params, results } = &type_def.kind {
             seen.insert((params.clone(), results.clone()));
@@ -3258,6 +3209,37 @@ fn check_block_node_type_use(
     }
 }
 
+macro_rules! check_block_children_for_type_use_body {
+    ($node:ident, $source:ident, $type_use_node:ident, $has_inline_sig:ident, $inline_params:ident, $inline_results:ident) => {{
+        let mut cursor = $node.walk();
+        for child in $node.children(&mut cursor) {
+            node_kind!(ck = child);
+            match ck {
+                "type_use" => *$type_use_node = Some(node_copy!(&child)),
+                "func_type_params" | "func_type_params_many" => {
+                    *$has_inline_sig = true;
+                    collect_value_types_recursive(&child, $source, $inline_params);
+                }
+                "func_type_results" => {
+                    *$has_inline_sig = true;
+                    collect_value_types_recursive(&child, $source, $inline_results);
+                }
+                "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
+                | "block_try" => {
+                    check_block_children_for_type_use(
+                        &child,
+                        $source,
+                        $type_use_node,
+                        $has_inline_sig,
+                        $inline_params,
+                        $inline_results,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }};
+}
 #[cfg(feature = "native")]
 fn check_block_children_for_type_use<'a>(
     node: &Node<'a>,
@@ -3267,36 +3249,15 @@ fn check_block_children_for_type_use<'a>(
     inline_params: &mut Vec<String>,
     inline_results: &mut Vec<String>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        match ck {
-            "type_use" => *type_use_node = Some(child),
-            "func_type_params" | "func_type_params_many" => {
-                *has_inline_sig = true;
-                collect_value_types_recursive(&child, source, inline_params);
-            }
-            "func_type_results" => {
-                *has_inline_sig = true;
-                collect_value_types_recursive(&child, source, inline_results);
-            }
-            "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
-            | "block_try" => {
-                // Recurse one level
-                check_block_children_for_type_use(
-                    &child,
-                    source,
-                    type_use_node,
-                    has_inline_sig,
-                    inline_params,
-                    inline_results,
-                );
-            }
-            _ => {}
-        }
-    }
+    check_block_children_for_type_use_body!(
+        node,
+        source,
+        type_use_node,
+        has_inline_sig,
+        inline_params,
+        inline_results
+    )
 }
-
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 fn check_block_children_for_type_use(
     node: &Node,
@@ -3306,34 +3267,14 @@ fn check_block_children_for_type_use(
     inline_params: &mut Vec<String>,
     inline_results: &mut Vec<String>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        let ck = ck.as_str();
-        match ck {
-            "type_use" => *type_use_node = Some(child.clone()),
-            "func_type_params" | "func_type_params_many" => {
-                *has_inline_sig = true;
-                collect_value_types_recursive(&child, source, inline_params);
-            }
-            "func_type_results" => {
-                *has_inline_sig = true;
-                collect_value_types_recursive(&child, source, inline_results);
-            }
-            "block_block" | "loop_block" | "block_if" | "if_block" | "block_try_table"
-            | "block_try" => {
-                check_block_children_for_type_use(
-                    &child,
-                    source,
-                    type_use_node,
-                    has_inline_sig,
-                    inline_params,
-                    inline_results,
-                );
-            }
-            _ => {}
-        }
-    }
+    check_block_children_for_type_use_body!(
+        node,
+        source,
+        type_use_node,
+        has_inline_sig,
+        inline_params,
+        inline_results
+    )
 }
 
 // ============================================================================

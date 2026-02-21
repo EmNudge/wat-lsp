@@ -581,37 +581,17 @@ fn provide_annotation_hover(
                 node_kind!(child_kind = child);
 
                 if child_kind == "identifier_pattern" {
-                    #[cfg(feature = "native")]
-                    let start = child.start_byte();
-                    #[cfg(feature = "native")]
-                    let end = child.end_byte();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let start = child.start_byte();
-                    #[cfg(all(feature = "wasm", not(feature = "native")))]
-                    let end = child.end_byte();
-
-                    let annotation_name = &document[start..end];
+                    let annotation_name = &document[child.start_byte()..child.end_byte()];
                     return Some(format_annotation_hover(annotation_name));
                 }
             }
             return None;
         }
 
-        #[cfg(feature = "native")]
-        {
-            if let Some(parent) = current.parent() {
-                current = parent;
-            } else {
-                break;
-            }
-        }
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        {
-            if let Some(parent) = current.parent() {
-                current = parent;
-            } else {
-                break;
-            }
+        if let Some(parent) = current.parent() {
+            current = parent;
+        } else {
+            break;
         }
     }
 

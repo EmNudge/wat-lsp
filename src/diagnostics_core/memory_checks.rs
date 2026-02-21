@@ -103,11 +103,7 @@ fn get_memory_for_instruction<'a>(
 ) -> Option<&'a crate::symbols::Memory> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         if kind_ref == "index" {
             let index_text = &source[child.byte_range()];

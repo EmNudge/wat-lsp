@@ -27,11 +27,7 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         match kind_ref {
             "op_index_opt_offset_opt_align_opt"
@@ -101,11 +97,7 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
 fn parse_align_value_u64(node: &Node, source: &str) -> Option<u64> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         if kind_ref == "align_offset_value" {
             let text = &source[child.byte_range()];
@@ -119,11 +111,7 @@ fn parse_align_value_u64(node: &Node, source: &str) -> Option<u64> {
 fn parse_offset_value(node: &Node, source: &str) -> Option<u64> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        #[cfg(feature = "native")]
-        let kind_ref = kind;
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let kind_ref = &*kind;
+        node_kind!(kind_ref = child);
 
         if kind_ref == "align_offset_value" {
             let text = &source[child.byte_range()];

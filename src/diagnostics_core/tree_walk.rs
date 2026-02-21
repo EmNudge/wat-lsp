@@ -45,13 +45,7 @@ pub fn walk_tree_for_diagnostics(
     config: &DiagnosticConfig,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = node.kind();
-
-    // Normalize kind for cross-platform matching
-    #[cfg(feature = "native")]
-    let kind_str = kind;
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind_str = &*kind;
+    node_kind!(kind_str = node);
 
     // Check for packed types (i8/i16) used in value type positions (params, results, locals, globals)
     if kind_str == "ERROR" {
