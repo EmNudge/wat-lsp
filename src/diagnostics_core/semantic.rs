@@ -30,6 +30,12 @@ use tree_sitter::Node;
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 use crate::ts_facade::Node;
 
+#[cfg(feature = "native")]
+type RetNode<'a> = Node<'a>;
+
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+type RetNode<'a> = Node;
+
 /// Get the ValueType corresponding to an instruction's prefix (i32., i64., f32., f64., v128.).
 fn type_from_prefix(name: &str) -> Option<ValueType> {
     if name.starts_with("i32.") {
@@ -1162,6 +1168,19 @@ fn derive_consumed_types_from_name(
             ValueType::I32,
             ValueType::I32,
         ]),
+        "array.new_fixed" => {
+            // array.new_fixed $type N: consumes N elements of the array's element type
+            let elem_ty = resolve_first_type_index(node, symbols, source)
+                .and_then(|td| match &td.kind {
+                    TypeKind::Array { element_type, .. } => {
+                        Some(unpack_storage_type(*element_type))
+                    }
+                    _ => None,
+                })
+                .unwrap_or(ValueType::Unknown);
+            let count = get_array_new_fixed_count(node, source);
+            Some(vec![elem_ty; count])
+        }
         "array.new_data" | "array.new_elem" => Some(vec![ValueType::I32, ValueType::I32]), // offset, length
         "array.init_data" | "array.init_elem" => Some(vec![
             ValueType::Unknown,
@@ -1313,7 +1332,7 @@ fn get_call_indirect_consumed_types(
         node_kind!(kind = child);
 
         if kind == "func_type_params_many" {
-            params.extend(parse_func_type_results(&child, source));
+            params.extend(parse_func_type_results(&child, source, Some(symbols)));
         }
     }
     params.push(table_idx_type);
@@ -1498,6 +1517,7 @@ fn get_dynamic_operand_count(
             }
             0
         }
+        "array.new_fixed" => get_array_new_fixed_count(node, source),
         "throw" => {
             if let Some(tag_ref) = get_index_from_node(node, source) {
                 if let Some(tag) = symbols.get_tag_by_name(tag_ref) {
@@ -1710,6 +1730,17 @@ fn infer_instruction_result_types(
             } else {
                 vec![ValueType::Unknown]
             }
+        }
+
+        "struct.get" | "struct.get_s" | "struct.get_u" => {
+            get_struct_field_result_type(node, symbols, source)
+        }
+
+        "struct.new" | "struct.new_default" | "array.new" | "array.new_default"
+        | "array.new_fixed" | "array.new_data" | "array.new_elem" => {
+            resolve_first_type_index(node, symbols, source)
+                .map(|td| vec![ValueType::Ref(td.index as u32)])
+                .unwrap_or_else(|| vec![ValueType::Unknown])
         }
 
         name if type_from_prefix(name).is_some() => {
@@ -1953,7 +1984,7 @@ fn get_call_indirect_result_types(
         node_kind!(kind = child);
 
         if kind == "func_type_results" {
-            results.extend(parse_func_type_results(&child, source));
+            results.extend(parse_func_type_results(&child, source, Some(symbols)));
         }
     }
     results
@@ -2714,12 +2745,11 @@ fn get_block_result_types(
     let mut cursor = block_node.walk();
     for child in block_node.children(&mut cursor) {
         node_kind!(kind = child);
-
         if kind == "func_type_results" {
-            types.extend(parse_func_type_results(&child, source));
+            types.extend(parse_func_type_results(&child, source, Some(symbols)));
         }
         if kind == "block_type" {
-            return parse_result_types(&child, source);
+            return parse_result_types(&child, source, symbols);
         }
         if kind == "block_block"
             || kind == "block_loop"
@@ -2733,7 +2763,7 @@ fn get_block_result_types(
                 node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "func_type_results" {
-                    types.extend(parse_func_type_results(&inner_child, source));
+                    types.extend(parse_func_type_results(&inner_child, source, Some(symbols)));
                 }
             }
         }
@@ -2760,7 +2790,7 @@ fn get_block_param_types(block_node: &Node, source: &str, symbols: &SymbolTable)
 
         if kind == "func_type_params_many" {
             has_explicit_params = true;
-            types.extend(parse_func_type_results(&child, source));
+            types.extend(parse_func_type_results(&child, source, Some(symbols)));
         }
         if kind == "block_block"
             || kind == "block_loop"
@@ -2775,7 +2805,7 @@ fn get_block_param_types(block_node: &Node, source: &str, symbols: &SymbolTable)
 
                 if inner_kind == "func_type_params_many" {
                     has_explicit_params = true;
-                    types.extend(parse_func_type_results(&inner_child, source));
+                    types.extend(parse_func_type_results(&inner_child, source, Some(symbols)));
                 }
             }
         }
@@ -2791,96 +2821,84 @@ fn get_block_param_types(block_node: &Node, source: &str, symbols: &SymbolTable)
     types
 }
 
-/// Parse a ref_type node from the tree-sitter AST into a ValueType.
-/// Handles `(ref null? heap_type)` forms that `try_parse` can't handle.
-fn parse_ref_type_from_node(node: &Node, source: &str) -> ValueType {
-    // First try the simple text-based parse for abbreviated forms
-    let type_text = source[node.byte_range()].trim();
-    if let Some(t) = ValueType::try_parse(type_text) {
-        return t;
-    }
-
-    // Look for ref_type_ref child (handles `(ref null? (ref_kind | index))`)
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        node_kind!(kind = child);
-        match kind.as_ref() {
-            "ref_type_ref" => return parse_ref_type_ref_node(&child, source),
-            "value_type_ref_type" | "ref_type" => {
-                return parse_ref_type_from_node(&child, source);
-            }
-            _ => {}
-        }
-    }
-
-    // If the node itself is a ref_type_ref, parse directly
-    if node.kind() == "ref_type_ref" {
-        return parse_ref_type_ref_node(node, source);
-    }
-
-    ValueType::Unknown
-}
-
-/// Parse a `ref_type_ref` node: `(ref null? (ref_kind | index))`
-fn parse_ref_type_ref_node(node: &Node, source: &str) -> ValueType {
-    let mut is_null = false;
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        if ck == "null" || source[child.byte_range()].trim() == "null" {
-            is_null = true;
-        } else if ck == "ref_kind" {
-            let text = source[child.byte_range()].trim();
-            return match (text, is_null) {
-                ("func", true) => ValueType::Funcref,
-                ("func", false) => ValueType::FuncrefNN,
-                ("extern", true) => ValueType::Externref,
-                ("extern", false) => ValueType::ExternrefNN,
-                ("any", true) => ValueType::Anyref,
-                ("any", false) => ValueType::AnyrefNN,
-                ("eq", true) => ValueType::Eqref,
-                ("eq", false) => ValueType::EqrefNN,
-                ("i31", true) => ValueType::I31ref,
-                ("i31", false) => ValueType::I31refNN,
-                ("struct", true) => ValueType::Structref,
-                ("struct", false) => ValueType::StructrefNN,
-                ("array", true) => ValueType::Arrayref,
-                ("array", false) => ValueType::ArrayrefNN,
-                ("null" | "none", _) => ValueType::Nullref,
-                ("nofunc", _) => ValueType::NullFuncref,
-                ("noextern", _) => ValueType::NullExternref,
-                _ => ValueType::Unknown,
-            };
-        } else if ck == "index" || ck == "identifier" {
-            let text = source[child.byte_range()].trim();
-            if let Some(n) = parse_wat_nat(text) {
-                return if is_null {
-                    ValueType::RefNull(n as u32)
-                } else {
-                    ValueType::Ref(n as u32)
-                };
-            }
-        }
-    }
-    ValueType::Unknown
-}
-
-/// Parse result types from a func_type_results node
-fn parse_func_type_results(results_node: &Node, source: &str) -> Vec<ValueType> {
+/// Parse result types from a func_type_results node.
+/// Uses the full ref type parser for complex types like `(ref $t)` and `(ref null func)`.
+/// When `symbols` is provided, named type references like `$t` are resolved.
+fn parse_func_type_results(
+    results_node: &Node,
+    source: &str,
+    symbols: Option<&SymbolTable>,
+) -> Vec<ValueType> {
     let mut types = Vec::new();
     let mut cursor = results_node.walk();
     for child in results_node.children(&mut cursor) {
         node_kind!(kind = child);
 
-        if kind == "value_type" || kind == "ref_type" {
-            types.push(parse_ref_type_from_node(&child, source));
+        if kind == "ref_type" {
+            let vt = resolve_parsed_ref_type(&child, source, symbols);
+            types.push(vt);
+        } else if kind == "value_type" {
+            let type_text = &source[child.byte_range()];
+            if let Some(t) = ValueType::try_parse(type_text.trim()) {
+                types.push(t);
+            } else {
+                // May be a value_type wrapping a ref_type
+                let vt = resolve_parsed_ref_type(&child, source, symbols);
+                types.push(vt);
+            }
         }
     }
     types
 }
 
+/// Parse a ref type node with optional symbol resolution for named types.
+/// Handles both `ref_type` and `value_type` nodes.
+fn resolve_parsed_ref_type(node: &Node, source: &str, symbols: Option<&SymbolTable>) -> ValueType {
+    // First try symbol resolution for named types (works on any node by recursing)
+    if let Some(syms) = symbols {
+        if let Some(resolved) = crate::parser::try_resolve_named_ref_in_subtree(node, source, syms)
+        {
+            return resolved;
+        }
+    }
+    // Fall back to extract_ref_type for abstract types and numeric indices.
+    // For `value_type` nodes, find the nested `ref_type` child and extract from there.
+    extract_ref_type_from_any_node(node, source)
+}
+
+/// Extract a ref type from any node, handling value_type wrappers.
+/// Unlike `extract_ref_type` which expects a `ref_type` node, this handles
+/// value_type → value_type_ref_type → ref_type nesting.
+fn extract_ref_type_from_any_node(node: &Node, source: &str) -> ValueType {
+    let kind = node.kind();
+    if kind == "ref_type" || kind.starts_with("ref_type_") {
+        return crate::parser::extract_ref_type(node, source);
+    }
+    // Search for nested ref_type children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        if ck == "ref_type" || ck.starts_with("ref_type_") {
+            return crate::parser::extract_ref_type(&child, source);
+        }
+        if ck == "value_type_ref_type" {
+            // Recurse into value_type_ref_type wrapper
+            let mut inner = child.walk();
+            for inner_child in child.children(&mut inner) {
+                if inner_child.kind() == "ref_type" || inner_child.kind().starts_with("ref_type_") {
+                    return crate::parser::extract_ref_type(&inner_child, source);
+                }
+            }
+            // Try extract_ref_type on the wrapper itself
+            return crate::parser::extract_ref_type(&child, source);
+        }
+    }
+    // Last resort: try extract_ref_type on the node itself
+    crate::parser::extract_ref_type(node, source)
+}
+
 /// Parse result types from a block_type node
-fn parse_result_types(block_type: &Node, source: &str) -> Vec<ValueType> {
+fn parse_result_types(block_type: &Node, source: &str, symbols: &SymbolTable) -> Vec<ValueType> {
     let mut types = Vec::new();
     let mut cursor = block_type.walk();
 
@@ -2888,17 +2906,19 @@ fn parse_result_types(block_type: &Node, source: &str) -> Vec<ValueType> {
         node_kind!(kind = child);
 
         if kind == "func_type_results" {
-            let mut inner_cursor = child.walk();
-            for inner_child in child.children(&mut inner_cursor) {
-                node_kind!(inner_kind = inner_child);
-
-                if inner_kind == "value_type" || inner_kind == "ref_type" {
-                    types.push(parse_ref_type_from_node(&inner_child, source));
-                }
-            }
+            types.extend(parse_func_type_results(&child, source, Some(symbols)));
         }
-        if kind == "value_type" || kind == "ref_type" {
-            types.push(parse_ref_type_from_node(&child, source));
+        if kind == "ref_type" {
+            let vt = resolve_parsed_ref_type(&child, source, Some(symbols));
+            types.push(vt);
+        } else if kind == "value_type" {
+            let type_text = &source[child.byte_range()];
+            if let Some(t) = ValueType::try_parse(type_text.trim()) {
+                types.push(t);
+            } else {
+                let vt = resolve_parsed_ref_type(&child, source, Some(symbols));
+                types.push(vt);
+            }
         }
     }
 
@@ -2996,7 +3016,6 @@ fn validate_tail_call_return_types(
 ) -> Option<Diagnostic> {
     let func_line = node.start_position().row as u32;
     let enclosing_func = symbols.find_function_containing_line(func_line)?;
-    let enclosing_results = &enclosing_func.results;
 
     let callee_results = match instr_name {
         "return_call" => get_call_result_types(node, symbols, source),
@@ -3008,6 +3027,14 @@ fn validate_tail_call_return_types(
     if callee_results.contains(&ValueType::Unknown) {
         return None;
     }
+
+    // Apply NonNull refinement to both sides for abstract heap types.
+    // The symbol table stores (ref func) and funcref both as Funcref, losing the
+    // nullability distinction. We recover it from the AST by checking for the
+    // explicit `(ref ...)` syntax (without `null`).
+    let enclosing_results = apply_nonnull_from_ast_func(node, &enclosing_func.results, source);
+    let callee_results =
+        apply_nonnull_to_callee_results(instr_name, node, &callee_results, symbols, source);
 
     // Check result type compatibility using subtyping
     let types_mismatch = callee_results.len() != enclosing_results.len()
@@ -3030,13 +3057,169 @@ fn validate_tail_call_return_types(
                     "type mismatch: '{}' returns {} but enclosing function returns {}",
                     label,
                     format_types(&callee_results),
-                    format_types(enclosing_results),
+                    format_types(&enclosing_results),
                 ),
             )
             .with_code("type-mismatch"),
         );
     }
 
+    None
+}
+
+/// Apply NonNull refinement to enclosing function result types by finding the function's
+/// AST node and checking each result type's `value_type` node for non-nullable ref syntax.
+fn apply_nonnull_from_ast_func(
+    instr_node: &Node,
+    base_results: &[ValueType],
+    source: &str,
+) -> Vec<ValueType> {
+    // Walk up from the instruction to find the enclosing module_field_func node
+    let func_node = {
+        let mut current = instr_node.parent();
+        loop {
+            match current {
+                Some(n) => {
+                    node_kind!(k = n);
+                    if k == "module_field_func" {
+                        break Some(n);
+                    }
+                    current = n.parent();
+                }
+                None => break None,
+            }
+        }
+    };
+    let func_node = match func_node {
+        Some(f) => f,
+        None => return base_results.to_vec(),
+    };
+    apply_nonnull_to_func_results(&func_node, base_results, source)
+}
+
+/// Apply NonNull refinement to callee type result types for tail call validation.
+/// Finds the callee type definition's AST node by looking for the type_use or type index
+/// on the instruction, then locates the corresponding type definition in the tree.
+fn apply_nonnull_to_callee_results(
+    instr_name: &str,
+    node: &Node,
+    base_results: &[ValueType],
+    symbols: &SymbolTable,
+    source: &str,
+) -> Vec<ValueType> {
+    // Find the callee's type definition
+    let type_def = match instr_name {
+        "return_call_ref" => get_index_from_node(node, source).and_then(|type_ref| {
+            symbols.get_type_by_name(type_ref).or_else(|| {
+                type_ref
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|idx| symbols.get_type_by_index(idx))
+            })
+        }),
+        "return_call" => {
+            // For return_call, get the function's type via its type_index
+            get_index_from_node(node, source).and_then(|func_ref| {
+                let func = symbols.get_function_by_name(func_ref).or_else(|| {
+                    func_ref
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|idx| symbols.get_function_by_index(idx))
+                })?;
+                func.type_index
+                    .and_then(|tidx| symbols.get_type_by_index(tidx))
+            })
+        }
+        _ => None,
+    };
+    let type_def = match type_def {
+        Some(td) => td,
+        None => return base_results.to_vec(),
+    };
+
+    // Find the type definition's AST node in the tree by searching from root
+    let type_line = type_def.line as usize;
+    let root = {
+        let mut current = match node.parent() {
+            Some(n) => n,
+            None => return base_results.to_vec(),
+        };
+        while let Some(parent) = current.parent() {
+            current = parent;
+        }
+        current
+    };
+
+    // Search for the module_field_type at the right line
+    if let Some(type_node) = find_type_node_at_line(&root, type_line) {
+        // Find the func_type within the type definition and apply NonNull
+        if let Some(func_type_node) = find_func_type_in_type_def(&type_node) {
+            return apply_nonnull_to_func_results(&func_type_node, base_results, source);
+        }
+    }
+
+    base_results.to_vec()
+}
+
+/// Walk func_type_results children and apply NonNull conversion to abstract types
+/// where the source uses explicit non-nullable ref syntax.
+fn apply_nonnull_to_func_results(
+    func_node: &Node,
+    base_results: &[ValueType],
+    source: &str,
+) -> Vec<ValueType> {
+    let mut results = base_results.to_vec();
+    let mut result_idx = 0;
+    let mut cursor = func_node.walk();
+    for child in func_node.children(&mut cursor) {
+        if child.kind() == "func_type_results" {
+            let mut results_cursor = child.walk();
+            for result_child in child.children(&mut results_cursor) {
+                if result_child.kind() == "value_type" && result_idx < results.len() {
+                    if crate::parser::is_ref_type_non_nullable(&result_child, source) {
+                        results[result_idx] =
+                            crate::parser::to_nonnull_variant(results[result_idx]);
+                    }
+                    result_idx += 1;
+                }
+            }
+        }
+    }
+    results
+}
+
+/// Find a module_field_type node at the given line in the tree.
+fn find_type_node_at_line<'a>(node: &RetNode<'a>, line: usize) -> Option<RetNode<'a>> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(k = child);
+        if k == "module_field_type" && child.start_position().row == line {
+            return Some(child);
+        }
+        if k == "module" || k == "module_field" || k == "module_field_rec" {
+            if let Some(found) = find_type_node_at_line(&child, line) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// Find the func_type node within a type definition (handles sub_type, def_type, type_field).
+fn find_func_type_in_type_def<'a>(node: &RetNode<'a>) -> Option<RetNode<'a>> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(k = child);
+        if k == "func_type" {
+            return Some(child);
+        }
+        // Recurse into sub_type, def_type, type_field containers
+        if matches!(k, "sub_type" | "def_type" | "type_field") {
+            if let Some(found) = find_func_type_in_type_def(&child) {
+                return Some(found);
+            }
+        }
+    }
     None
 }
 
@@ -3290,6 +3473,36 @@ fn check_array_operations(
     }
 }
 
+/// Get the element count (second immediate) from an array.new_fixed instruction.
+/// Format: `array.new_fixed $type N` — the N is a nat child after the type index.
+fn get_array_new_fixed_count(node: &Node, source: &str) -> usize {
+    let mut cursor = node.walk();
+    let mut past_index = false;
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind == "index" || kind == "identifier" {
+            past_index = true;
+        } else if kind == "nat" && past_index {
+            let text = &source[child.byte_range()];
+            return text.trim().parse::<usize>().unwrap_or(0);
+        }
+        // Also check inside op_ wrappers
+        if kind.starts_with("op_") {
+            let mut inner = child.walk();
+            for inner_child in child.children(&mut inner) {
+                let ik = inner_child.kind();
+                if ik == "index" || ik == "identifier" {
+                    past_index = true;
+                } else if ik == "nat" && past_index {
+                    let text = &source[inner_child.byte_range()];
+                    return text.trim().parse::<usize>().unwrap_or(0);
+                }
+            }
+        }
+    }
+    0
+}
+
 /// Unpack packed storage types (i8, i16) to their stack representation (i32).
 fn unpack_storage_type(ty: ValueType) -> ValueType {
     match ty {
@@ -3368,6 +3581,60 @@ fn resolve_first_type_index<'a>(
         return symbols.types.get(idx as usize);
     }
     None
+}
+
+/// Resolve the struct field type for struct.get/struct.get_s/struct.get_u.
+/// Extracts both indices (type_ref, field_ref), resolves the struct type,
+/// and returns the unpacked field type.
+fn get_struct_field_result_type(
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+) -> Vec<ValueType> {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+    if indices.len() < 2 {
+        return vec![ValueType::Unknown];
+    }
+    let type_ref = indices[0];
+    let field_ref = indices[1];
+
+    // Resolve the type def
+    let type_def = if type_ref.starts_with('$') {
+        symbols.get_type_by_name(type_ref)
+    } else {
+        type_ref
+            .parse::<usize>()
+            .ok()
+            .and_then(|idx| symbols.get_type_by_index(idx))
+    };
+
+    let type_def = match type_def {
+        Some(td) => td,
+        None => return vec![ValueType::Unknown],
+    };
+
+    let fields = match &type_def.kind {
+        TypeKind::Struct { fields } => fields,
+        _ => return vec![ValueType::Unknown],
+    };
+
+    // Resolve the field index
+    let field_idx = if field_ref.starts_with('$') {
+        fields
+            .iter()
+            .position(|(name, _, _)| name.as_deref() == Some(field_ref))
+    } else {
+        field_ref
+            .parse::<usize>()
+            .ok()
+            .filter(|&idx| idx < fields.len())
+    };
+
+    match field_idx {
+        Some(idx) => vec![unpack_storage_type(fields[idx].1)],
+        None => vec![ValueType::Unknown],
+    }
 }
 
 /// Check if source ref type is compatible with destination ref type (with symbol table).
@@ -3480,13 +3747,13 @@ fn check_br_on_cast_types(
 fn make_nullable(vt: &ValueType) -> ValueType {
     match vt {
         ValueType::Ref(n) => ValueType::RefNull(*n),
-        ValueType::FuncrefNN => ValueType::Funcref,
-        ValueType::ExternrefNN => ValueType::Externref,
-        ValueType::AnyrefNN => ValueType::Anyref,
-        ValueType::EqrefNN => ValueType::Eqref,
-        ValueType::I31refNN => ValueType::I31ref,
-        ValueType::StructrefNN => ValueType::Structref,
-        ValueType::ArrayrefNN => ValueType::Arrayref,
+        ValueType::NonNullFuncref => ValueType::Funcref,
+        ValueType::NonNullExternref => ValueType::Externref,
+        ValueType::NonNullAnyref => ValueType::Anyref,
+        ValueType::NonNullEqref => ValueType::Eqref,
+        ValueType::NonNullI31ref => ValueType::I31ref,
+        ValueType::NonNullStructref => ValueType::Structref,
+        ValueType::NonNullArrayref => ValueType::Arrayref,
         // Already nullable or not a ref
         other => *other,
     }
@@ -3496,13 +3763,13 @@ fn make_nullable(vt: &ValueType) -> ValueType {
 fn make_non_nullable(vt: &ValueType) -> ValueType {
     match vt {
         ValueType::RefNull(n) => ValueType::Ref(*n),
-        ValueType::Funcref => ValueType::FuncrefNN,
-        ValueType::Externref => ValueType::ExternrefNN,
-        ValueType::Anyref => ValueType::AnyrefNN,
-        ValueType::Eqref => ValueType::EqrefNN,
-        ValueType::I31ref => ValueType::I31refNN,
-        ValueType::Structref => ValueType::StructrefNN,
-        ValueType::Arrayref => ValueType::ArrayrefNN,
+        ValueType::Funcref => ValueType::NonNullFuncref,
+        ValueType::Externref => ValueType::NonNullExternref,
+        ValueType::Anyref => ValueType::NonNullAnyref,
+        ValueType::Eqref => ValueType::NonNullEqref,
+        ValueType::I31ref => ValueType::NonNullI31ref,
+        ValueType::Structref => ValueType::NonNullStructref,
+        ValueType::Arrayref => ValueType::NonNullArrayref,
         // Already non-nullable or not a ref
         other => *other,
     }
@@ -3616,6 +3883,8 @@ fn extract_cast_ref_types(
             // For ref_kind-based types, apply nullability
             if is_null && !matches!(vt, ValueType::Ref(_) | ValueType::RefNull(_)) {
                 vt = make_nullable(&vt);
+            } else if !is_null && !matches!(vt, ValueType::Ref(_) | ValueType::RefNull(_)) {
+                vt = make_non_nullable(&vt);
             }
             types.push((vt, is_null));
         } else if kind == "ref_kind" {

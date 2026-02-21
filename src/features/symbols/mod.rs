@@ -24,16 +24,15 @@ pub enum ValueType {
     Nullref,
     NullFuncref,
     NullExternref,
-    // Non-nullable abstract ref variants: (ref func), (ref extern), etc.
-    FuncrefNN,
-    ExternrefNN,
-    AnyrefNN,
-    EqrefNN,
-    I31refNN,
-    StructrefNN,
-    ArrayrefNN,
-    Ref(u32),     // Typed reference to a type index
-    RefNull(u32), // Nullable typed reference
+    NonNullFuncref,   // (ref func)
+    NonNullExternref, // (ref extern)
+    NonNullAnyref,    // (ref any)
+    NonNullEqref,     // (ref eq)
+    NonNullStructref, // (ref struct)
+    NonNullArrayref,  // (ref array)
+    NonNullI31ref,    // (ref i31)
+    Ref(u32),         // Typed reference to a type index
+    RefNull(u32),     // Nullable typed reference
     Unknown,
 }
 
@@ -57,13 +56,13 @@ impl std::fmt::Display for ValueType {
             ValueType::Nullref => write!(f, "nullref"),
             ValueType::NullFuncref => write!(f, "nullfuncref"),
             ValueType::NullExternref => write!(f, "nullexternref"),
-            ValueType::FuncrefNN => write!(f, "(ref func)"),
-            ValueType::ExternrefNN => write!(f, "(ref extern)"),
-            ValueType::AnyrefNN => write!(f, "(ref any)"),
-            ValueType::EqrefNN => write!(f, "(ref eq)"),
-            ValueType::I31refNN => write!(f, "(ref i31)"),
-            ValueType::StructrefNN => write!(f, "(ref struct)"),
-            ValueType::ArrayrefNN => write!(f, "(ref array)"),
+            ValueType::NonNullFuncref => write!(f, "(ref func)"),
+            ValueType::NonNullExternref => write!(f, "(ref extern)"),
+            ValueType::NonNullAnyref => write!(f, "(ref any)"),
+            ValueType::NonNullEqref => write!(f, "(ref eq)"),
+            ValueType::NonNullStructref => write!(f, "(ref struct)"),
+            ValueType::NonNullArrayref => write!(f, "(ref array)"),
+            ValueType::NonNullI31ref => write!(f, "(ref i31)"),
             ValueType::Ref(idx) => write!(f, "(ref {})", idx),
             ValueType::RefNull(idx) => write!(f, "(ref null {})", idx),
             ValueType::Unknown => write!(f, "unknown"),
@@ -118,49 +117,49 @@ impl From<&wast::core::ValType<'_>> for ValueType {
                             if nullable {
                                 ValueType::Funcref
                             } else {
-                                ValueType::FuncrefNN
+                                ValueType::NonNullFuncref
                             }
                         }
                         wast::core::AbstractHeapType::Extern => {
                             if nullable {
                                 ValueType::Externref
                             } else {
-                                ValueType::ExternrefNN
+                                ValueType::NonNullExternref
                             }
                         }
                         wast::core::AbstractHeapType::Struct => {
                             if nullable {
                                 ValueType::Structref
                             } else {
-                                ValueType::StructrefNN
+                                ValueType::NonNullStructref
                             }
                         }
                         wast::core::AbstractHeapType::Array => {
                             if nullable {
                                 ValueType::Arrayref
                             } else {
-                                ValueType::ArrayrefNN
+                                ValueType::NonNullArrayref
                             }
                         }
                         wast::core::AbstractHeapType::I31 => {
                             if nullable {
                                 ValueType::I31ref
                             } else {
-                                ValueType::I31refNN
+                                ValueType::NonNullI31ref
                             }
                         }
                         wast::core::AbstractHeapType::Any => {
                             if nullable {
                                 ValueType::Anyref
                             } else {
-                                ValueType::AnyrefNN
+                                ValueType::NonNullAnyref
                             }
                         }
                         wast::core::AbstractHeapType::Eq => {
                             if nullable {
                                 ValueType::Eqref
                             } else {
-                                ValueType::EqrefNN
+                                ValueType::NonNullEqref
                             }
                         }
                         wast::core::AbstractHeapType::None => ValueType::Nullref,
