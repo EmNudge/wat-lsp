@@ -182,7 +182,7 @@ fn local_to_symbol(local: &Variable) -> DocumentSymbolInfo {
 fn block_to_symbol(block: &BlockLabel) -> DocumentSymbolInfo {
     DocumentSymbolInfo {
         name: block.label.clone(),
-        detail: Some(block.block_type.clone()),
+        detail: Some(block.block_type.to_string()),
         kind: SymbolKindCore::Key,
         range: range_or_line(&block.range, block.line),
         children: None,
@@ -216,12 +216,10 @@ fn table_to_symbol(table: &Table) -> DocumentSymbolInfo {
         .clone()
         .unwrap_or_else(|| format!("(table {})", table.index));
 
-    let detail = format!(
-        "{} {} {}",
-        table.limits.0,
-        table.limits.1.map_or("".to_string(), |m| m.to_string()),
-        table.ref_type
-    );
+    let detail = match table.limits.1 {
+        Some(m) => format!("{} {} {}", table.limits.0, m, table.ref_type),
+        None => format!("{} {}", table.limits.0, table.ref_type),
+    };
 
     DocumentSymbolInfo {
         name,
@@ -238,14 +236,10 @@ fn memory_to_symbol(memory: &Memory) -> DocumentSymbolInfo {
         .clone()
         .unwrap_or_else(|| format!("(memory {})", memory.index));
 
-    let detail = format!(
-        "{}{}",
-        memory.limits.0,
-        memory
-            .limits
-            .1
-            .map_or("".to_string(), |m| format!(" {}", m))
-    );
+    let detail = match memory.limits.1 {
+        Some(m) => format!("{} {}", memory.limits.0, m),
+        None => memory.limits.0.to_string(),
+    };
 
     DocumentSymbolInfo {
         name,

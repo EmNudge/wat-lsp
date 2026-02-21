@@ -205,7 +205,7 @@ pub struct Parameter {
 #[derive(Debug, Clone)]
 pub struct BlockLabel {
     pub label: String,
-    pub block_type: String, // "block", "loop", "if", "try", "try_table"
+    pub block_type: &'static str, // "block", "loop", "if", "try", "try_table"
     pub line: u32,
     pub range: Option<Range>, // Used by symbol_lookup for go-to-definition
 }

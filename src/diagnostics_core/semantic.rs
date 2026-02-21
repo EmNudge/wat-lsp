@@ -2130,13 +2130,11 @@ macro_rules! find_folded_block_child_body {
     }};
 }
 #[cfg(feature = "native")]
-fn find_folded_block_child<'a>(expr: &'a Node, source: &str) -> Option<(Node<'a>, &'static str)> {
-    let _ = source;
+fn find_folded_block_child<'a>(expr: &'a Node) -> Option<(Node<'a>, &'static str)> {
     find_folded_block_child_body!(expr)
 }
 #[cfg(all(feature = "wasm", not(feature = "native")))]
-fn find_folded_block_child(expr: &Node, source: &str) -> Option<(Node, &'static str)> {
-    let _ = source;
+fn find_folded_block_child(expr: &Node) -> Option<(Node, &'static str)> {
     find_folded_block_child_body!(expr)
 }
 
@@ -2435,7 +2433,7 @@ fn process_folded_expr(
 ) {
     // Check if this is a block-type expression (block, loop, if, try_table)
     // These need control frame tracking for proper stack validation.
-    if let Some((block_node, block_kind)) = find_folded_block_child(expr, source) {
+    if let Some((block_node, block_kind)) = find_folded_block_child(expr) {
         process_folded_block_expr(expr, &block_node, block_kind, source, symbols, checker);
         return;
     }

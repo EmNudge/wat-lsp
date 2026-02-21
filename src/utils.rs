@@ -300,32 +300,26 @@ fn determine_catch_clause_context(node: &Node, document: &str) -> Option<Instruc
 /// - An instruction (e.g., "call ", "local.get", "memory.grow")
 /// - A declaration (e.g., "(func ", "(global ", "(memory ")
 fn line_contains_keyword(line: &str, keyword: &str) -> bool {
+    let bytes = line.as_bytes();
     for (i, _) in line.match_indices(keyword) {
-        // Check character before the match (if any)
-        let char_before = if i > 0 { line.chars().nth(i - 1) } else { None };
-
-        // Check character after the match (if any)
-        let char_after = line.chars().nth(i + keyword.len());
-
-        // The keyword should be preceded by non-identifier char or start of string
-        let valid_before = match char_before {
-            None => true,       // Start of line
-            Some('(') => true,  // Declaration like (func
-            Some(' ') => true,  // Instruction
-            Some('\t') => true, // Tab
-            Some(_) => false,   // Part of identifier like $my_array
+        // Check byte before the match (all boundary chars are ASCII, so byte indexing is safe)
+        let valid_before = if i > 0 {
+            matches!(bytes[i - 1], b'(' | b' ' | b'\t')
+        } else {
+            true // Start of line
         };
 
-        // The keyword should be followed by non-identifier char
-        let valid_after = match char_after {
-            None => true,                          // End of line
-            Some(' ') => true,                     // Keyword followed by space
-            Some('.') => true,                     // Instruction like local.get
-            Some('_') if keyword == "br" => true,  // br_if, br_table
-            Some(')') => true,                     // End of s-expr
-            Some('$') => true,                     // Keyword followed by identifier
-            Some(c) if c.is_ascii_digit() => true, // Like br0, call0
-            Some(_) => false,                      // Part of identifier
+        // Check byte after the match
+        let after = i + keyword.len();
+        let valid_after = if after < bytes.len() {
+            match bytes[after] {
+                b' ' | b'.' | b')' | b'$' => true,
+                b'_' if keyword == "br" => true, // br_if, br_table
+                c if c.is_ascii_digit() => true, // Like br0, call0
+                _ => false,
+            }
+        } else {
+            true // End of line
         };
 
         if valid_before && valid_after {

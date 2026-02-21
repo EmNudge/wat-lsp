@@ -272,7 +272,7 @@ fn test_variable_creation() {
 fn test_block_label_creation() {
     let block = BlockLabel {
         label: "$exit".to_string(),
-        block_type: "block".to_string(),
+        block_type: "block",
         line: 42,
         range: None,
     };
@@ -318,7 +318,7 @@ fn test_complex_function() {
         }],
         blocks: vec![BlockLabel {
             label: "$exit".to_string(),
-            block_type: "block".to_string(),
+            block_type: "block",
             line: 10,
             range: None,
         }],

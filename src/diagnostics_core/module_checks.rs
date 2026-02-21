@@ -41,15 +41,14 @@ pub fn validate_module_structure(
 
     check_memory_limits(symbols, &mut diagnostics);
     check_table_limits(symbols, &mut diagnostics);
-    check_min_gt_max(symbols, &mut diagnostics);
     check_duplicate_locals(symbols, &mut diagnostics);
 
     // Find the module node for AST-based checks
     if let Some(module_node) = find_module_node(root) {
-        check_multiple_starts(&module_node, source, &mut diagnostics);
+        check_multiple_starts(&module_node, &mut diagnostics);
         check_start_signature(&module_node, source, symbols, &mut diagnostics);
         check_duplicate_exports(&module_node, source, &mut diagnostics);
-        check_import_ordering(&module_node, source, &mut diagnostics);
+        check_import_ordering(&module_node, &mut diagnostics);
         check_duplicate_identifiers(&module_node, source, &mut diagnostics);
         check_inline_type_mismatches(&module_node, source, symbols, &mut diagnostics);
         check_constant_expressions(&module_node, source, symbols, &mut diagnostics);
@@ -160,35 +159,7 @@ fn check_memory_limits(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnostic>)
                     ),
                 ));
             }
-        }
-    }
-}
-
-// ============================================================================
-// 2. Min > max for memories and tables
-// ============================================================================
-
-fn check_min_gt_max(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnostic>) {
-    for memory in &symbols.memories {
-        if let Some(max) = memory.limits.1 {
             if memory.limits.0 > max {
-                let range = memory
-                    .range
-                    .unwrap_or_else(|| Range::from_coords(memory.line, 0, memory.line, 0));
-                diagnostics.push(Diagnostic::error(
-                    range,
-                    "Size minimum must not be greater than maximum",
-                ));
-            }
-        }
-    }
-
-    for table in &symbols.tables {
-        if let Some(max) = table.limits.1 {
-            if table.limits.0 > max {
-                let range = table
-                    .range
-                    .unwrap_or_else(|| Range::from_coords(table.line, 0, table.line, 0));
                 diagnostics.push(Diagnostic::error(
                     range,
                     "Size minimum must not be greater than maximum",
@@ -199,11 +170,10 @@ fn check_min_gt_max(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 // ============================================================================
-// 3. Multiple start sections
+// 2. Multiple start sections
 // ============================================================================
 
-fn check_multiple_starts(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let _ = source;
+fn check_multiple_starts(module: &Node, diagnostics: &mut Vec<Diagnostic>) {
     let mut seen_start = false;
     for_each_module_field(module, |field| {
         node_kind!(fk = field);
@@ -355,8 +325,7 @@ fn check_export_name(
 // 5. Import ordering
 // ============================================================================
 
-fn check_import_ordering(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let _ = source;
+fn check_import_ordering(module: &Node, diagnostics: &mut Vec<Diagnostic>) {
     let mut seen_non_import = false;
 
     for_each_module_field(module, |field| {
@@ -1991,13 +1960,16 @@ fn check_duplicate_locals(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnosti
 
         for (name, range) in entries {
             if let (Some(name), Some(range)) = (name, range) {
-                if seen.contains_key(name.as_str()) {
-                    diagnostics.push(Diagnostic::error(
-                        *range,
-                        format!("duplicate local {}", name),
-                    ));
-                } else {
-                    seen.insert(name, *range);
+                match seen.entry(name) {
+                    std::collections::hash_map::Entry::Occupied(_) => {
+                        diagnostics.push(Diagnostic::error(
+                            *range,
+                            format!("duplicate local {}", name),
+                        ));
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(*range);
+                    }
                 }
             }
         }
@@ -2335,28 +2307,36 @@ fn check_table_limits(symbols: &SymbolTable, diagnostics: &mut Vec<Diagnostic>) 
     const MAX_TABLE32_SIZE: u64 = 0xFFFF_FFFF; // 2^32 - 1
 
     for table in &symbols.tables {
-        // table64 has a much higher limit; skip the 32-bit check
-        if table.is_table64 {
-            continue;
-        }
-
         let range = table
             .range
             .unwrap_or_else(|| Range::from_coords(table.line, 0, table.line, 0));
 
-        if table.limits.0 > MAX_TABLE32_SIZE {
-            diagnostics.push(
-                Diagnostic::error(range, "table size must be at most 2^32-1")
-                    .with_code("table-size"),
-            );
-        }
-
-        if let Some(max) = table.limits.1 {
-            if max > MAX_TABLE32_SIZE {
+        // table64 has a much higher limit; skip the 32-bit size check
+        if !table.is_table64 {
+            if table.limits.0 > MAX_TABLE32_SIZE {
                 diagnostics.push(
                     Diagnostic::error(range, "table size must be at most 2^32-1")
                         .with_code("table-size"),
                 );
+            }
+
+            if let Some(max) = table.limits.1 {
+                if max > MAX_TABLE32_SIZE {
+                    diagnostics.push(
+                        Diagnostic::error(range, "table size must be at most 2^32-1")
+                            .with_code("table-size"),
+                    );
+                }
+            }
+        }
+
+        // Min > max check (applies to all tables including table64)
+        if let Some(max) = table.limits.1 {
+            if table.limits.0 > max {
+                diagnostics.push(Diagnostic::error(
+                    range,
+                    "Size minimum must not be greater than maximum",
+                ));
             }
         }
     }
