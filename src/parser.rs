@@ -1146,7 +1146,7 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
         // Check if it has a label
         if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
             let label = normalize_identifier(node_text(&id_node, source));
-            let block_type = block_type_from_kind(kind_str).to_string();
+            let block_type = block_type_from_kind(kind_str);
 
             blocks.push(BlockLabel {
                 label,
@@ -3018,8 +3018,8 @@ fn extract_elem_ref_type(node: &Node, source: &str) -> ValueType {
                     || gk == "ref_type_ref"
                     || gk == "ref_type_concrete"
                 {
-                    let text = node_text(&gc, source).trim().to_string();
-                    if let Some(vt) = ValueType::try_parse(&text) {
+                    let text = node_text(&gc, source).trim();
+                    if let Some(vt) = ValueType::try_parse(text) {
                         return vt;
                     }
                 }
@@ -3027,8 +3027,8 @@ fn extract_elem_ref_type(node: &Node, source: &str) -> ValueType {
         }
         // Check for inline ref type keywords at top level
         if kind == "ref_type" || kind == "value_type" {
-            let text = node_text(&child, source).trim().to_string();
-            if let Some(vt) = ValueType::try_parse(&text) {
+            let text = node_text(&child, source).trim();
+            if let Some(vt) = ValueType::try_parse(text) {
                 return vt;
             }
         }

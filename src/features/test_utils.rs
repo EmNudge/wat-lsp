@@ -57,7 +57,7 @@ pub fn create_test_symbols() -> SymbolTable {
         }],
         blocks: vec![BlockLabel {
             label: "$exit".to_string(),
-            block_type: "block".to_string(),
+            block_type: "block",
             line: 5,
             range: None,
         }],
