@@ -70,19 +70,43 @@ pub fn types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
 fn is_ref_subtype(sub: &ValueType, sup: &ValueType) -> bool {
     use ValueType::*;
     match (sub, sup) {
-        // nullref is bottom for internal ref hierarchy
+        // nullref is bottom for internal ref hierarchy (nullable only)
         (Nullref, Anyref | Eqref | I31ref | Structref | Arrayref) => true,
-        // nullfuncref is bottom for func hierarchy
+        // nullfuncref is bottom for func hierarchy (nullable only)
         (NullFuncref, Funcref) => true,
-        // nullexternref is bottom for extern hierarchy
+        // nullexternref is bottom for extern hierarchy (nullable only)
         (NullExternref, Externref) => true,
-        // i31ref, structref, arrayref <: eqref <: anyref
+        // NOTE: Nullref/NullFuncref/NullExternref are NOT subtypes of NN variants
+        // (they carry null, NN variants don't accept null)
+
+        // NN variants are subtypes of their nullable counterparts
+        (FuncrefNN, Funcref) => true,
+        (ExternrefNN, Externref) => true,
+        (AnyrefNN, Anyref) => true,
+        (EqrefNN, Eqref) => true,
+        (I31refNN, I31ref) => true,
+        (StructrefNN, Structref) => true,
+        (ArrayrefNN, Arrayref) => true,
+
+        // NN hierarchy mirrors nullable: EqrefNN <: AnyrefNN, etc.
+        (I31refNN | StructrefNN | ArrayrefNN | EqrefNN, AnyrefNN) => true,
+        (I31refNN | StructrefNN | ArrayrefNN, EqrefNN) => true,
+        // NN <: nullable supertype (cross-nullability)
+        (I31refNN | StructrefNN | ArrayrefNN | EqrefNN, Anyref) => true,
+        (I31refNN | StructrefNN | ArrayrefNN, Eqref) => true,
+
+        // i31ref, structref, arrayref <: eqref <: anyref (nullable hierarchy)
         (I31ref | Structref | Arrayref | Eqref, Anyref) => true,
         (I31ref | Structref | Arrayref, Eqref) => true,
-        // Concrete Ref(n)/RefNull(n) are subtypes of all abstract ref supertypes.
+
+        // Concrete Ref(n)/RefNull(n) are subtypes of nullable abstract ref supertypes.
         // Without symbol table we can't distinguish struct/array/func kinds, so we
         // accept all abstract supertypes (precise checking done by types_compatible_with_symbols).
         (Ref(_) | RefNull(_), Funcref | Anyref | Eqref | Arrayref | Structref) => true,
+        // Non-null concrete ref is also subtype of NN abstract supertypes
+        (Ref(_), FuncrefNN | AnyrefNN | EqrefNN | ArrayrefNN | StructrefNN) => true,
+        // RefNull(n) is NOT a subtype of NN variants (implicit by absence)
+
         // NullFuncref is bottom of func hierarchy — subtype of all nullable func refs
         (NullFuncref, RefNull(_) | Structref) => true,
         // Nullref is bottom of internal ref hierarchy — subtype of all nullable internal refs
@@ -166,19 +190,34 @@ fn is_concrete_ref_subtype(sub: &ValueType, sup: &ValueType, symbols: &SymbolTab
     }
 
     // Check concrete type against abstract supertypes
-    // In the Wasm spec, abstract types like structref/arrayref/funcref are nullable,
-    // so both Ref(n) and RefNull(n) are subtypes.
     let type_def = match symbols.get_type_by_index(sub_idx as usize) {
         Some(td) => td,
         None => return false,
     };
 
-    matches!(
+    // Nullable abstract supertypes: both Ref(n) and RefNull(n) are subtypes
+    if matches!(
         (&type_def.kind, sup),
         (TypeKind::Struct { .. }, Structref | Eqref | Anyref)
             | (TypeKind::Array { .. }, Arrayref | Eqref | Anyref)
             | (TypeKind::Func { .. }, Funcref)
-    )
+    ) {
+        return true;
+    }
+
+    // Non-nullable abstract supertypes: only Ref(n) (non-null) is a subtype
+    if !sub_nullable
+        && matches!(
+            (&type_def.kind, sup),
+            (TypeKind::Struct { .. }, StructrefNN | EqrefNN | AnyrefNN)
+                | (TypeKind::Array { .. }, ArrayrefNN | EqrefNN | AnyrefNN)
+                | (TypeKind::Func { .. }, FuncrefNN)
+        )
+    {
+        return true;
+    }
+
+    false
 }
 
 /// Check if `child_idx` is a declared subtype of `parent_idx` via the parent chain.
