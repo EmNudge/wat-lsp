@@ -149,7 +149,7 @@ fn process_import_field(
             }
         }
         "module_field_tag" if node_has_import_child(field_child) => {
-            if let Some(tag) = extract_tag(field_child, source, counts.tags) {
+            if let Some(tag) = extract_tag(field_child, source, counts.tags, symbol_table) {
                 symbol_table.add_tag(tag);
                 counts.tags += 1;
             }
@@ -280,7 +280,9 @@ fn extract_single_import(
                     }
                     "import_desc_tag_type" => {
                         // Imported tag: (tag $name? (param ...)?)
-                        if let Some(tag) = extract_imported_tag(&desc_child, source, counts.tags) {
+                        if let Some(tag) =
+                            extract_imported_tag(&desc_child, source, counts.tags, symbol_table)
+                        {
                             symbol_table.add_tag(tag);
                             counts.tags += 1;
                         }
@@ -528,7 +530,12 @@ fn extract_imported_memory(desc_node: &Node, source: &str, index: usize) -> Opti
 }
 
 /// Extract an imported tag
-fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<Tag> {
+fn extract_imported_tag(
+    desc_node: &Node,
+    source: &str,
+    index: usize,
+    symbols: &SymbolTable,
+) -> Option<Tag> {
     let (name, name_range) = extract_identifier_info(desc_node, source);
 
     let mut params = Vec::new();
@@ -545,12 +552,12 @@ fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<
                     let mut param_type_cursor = param_child.walk();
                     for type_child in param_child.children(&mut param_type_cursor) {
                         if type_child.kind() == "value_type" {
-                            params.push(extract_value_type(&type_child, source));
+                            params.push(extract_value_type_resolved(&type_child, source, symbols));
                         }
                     }
                 } else if param_child.kind() == "value_type" {
                     // Direct value_type children
-                    params.push(extract_value_type(&param_child, source));
+                    params.push(extract_value_type_resolved(&param_child, source, symbols));
                 }
             }
         }
@@ -886,6 +893,21 @@ fn extract_parameters(
     }
 
     parameters
+}
+
+/// Convert a nullable abstract ref type to its non-nullable variant.
+/// Used when the source explicitly uses `(ref func)` syntax (without `null`).
+pub(crate) fn to_nonnull_variant(vt: ValueType) -> ValueType {
+    match vt {
+        ValueType::Funcref => ValueType::NonNullFuncref,
+        ValueType::Externref => ValueType::NonNullExternref,
+        ValueType::Anyref => ValueType::NonNullAnyref,
+        ValueType::Eqref => ValueType::NonNullEqref,
+        ValueType::Structref => ValueType::NonNullStructref,
+        ValueType::Arrayref => ValueType::NonNullArrayref,
+        ValueType::I31ref => ValueType::NonNullI31ref,
+        other => other, // Ref/RefNull, numeric types, etc. — unchanged
+    }
 }
 
 /// Extract result types from a function node.
@@ -2369,7 +2391,9 @@ fn extract_tags_with_offset(
                         if field_child.kind() == "module_field_tag"
                             && !node_has_import_child(&field_child)
                         {
-                            if let Some(tag) = extract_tag(&field_child, source, tag_index) {
+                            if let Some(tag) =
+                                extract_tag(&field_child, source, tag_index, symbol_table)
+                            {
                                 symbol_table.add_tag(tag);
                                 tag_index += 1;
                             }
@@ -2382,7 +2406,7 @@ fn extract_tags_with_offset(
             for field_child in child.children(&mut field_cursor) {
                 if field_child.kind() == "module_field_tag" && !node_has_import_child(&field_child)
                 {
-                    if let Some(tag) = extract_tag(&field_child, source, tag_index) {
+                    if let Some(tag) = extract_tag(&field_child, source, tag_index, symbol_table) {
                         symbol_table.add_tag(tag);
                         tag_index += 1;
                     }
@@ -2393,7 +2417,7 @@ fn extract_tags_with_offset(
 }
 
 /// Extract a single tag from a tag node
-fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
+fn extract_tag(tag_node: &Node, source: &str, index: usize, symbols: &SymbolTable) -> Option<Tag> {
     let (name, name_range) = extract_identifier_info(tag_node, source);
 
     let mut params = Vec::new();
@@ -2410,7 +2434,7 @@ fn extract_tag(tag_node: &Node, source: &str, index: usize) -> Option<Tag> {
                     let mut param_type_cursor = param_child.walk();
                     for type_child in param_child.children(&mut param_type_cursor) {
                         if type_child.kind() == "value_type" {
-                            params.push(extract_value_type(&type_child, source));
+                            params.push(extract_value_type_resolved(&type_child, source, symbols));
                         }
                     }
                 }
@@ -2660,7 +2684,7 @@ fn simple_type_from_str(s: &str) -> Option<ValueType> {
 /// Check if a ref_type AST node represents a non-nullable reference type.
 /// Returns true for `(ref func)`, `(ref $t)`, etc. (without `null`).
 /// Returns false for `funcref`, `externref`, `(ref null func)`, etc.
-fn is_ref_type_non_nullable(node: &Node, source: &str) -> bool {
+pub(crate) fn is_ref_type_non_nullable(node: &Node, source: &str) -> bool {
     node_kind!(kind = node);
     match kind {
         "ref_type_ref" | "ref_type_concrete" => {

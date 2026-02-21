@@ -3554,7 +3554,7 @@ mod tests {
         let document = r#"(module
   (type $t (sub (struct)))
   (func (param (ref $t)) (result (ref struct))
-    (block (result (ref $t))
+    (block (result (ref struct))
       (br_on_cast 0 (ref struct) (ref $t) (local.get 0))
     )
   )

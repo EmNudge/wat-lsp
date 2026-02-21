@@ -70,43 +70,43 @@ pub fn types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
 fn is_ref_subtype(sub: &ValueType, sup: &ValueType) -> bool {
     use ValueType::*;
     match (sub, sup) {
-        // nullref is bottom for internal ref hierarchy (nullable only)
+        // nullref is bottom for internal ref hierarchy (nullable variants only)
         (Nullref, Anyref | Eqref | I31ref | Structref | Arrayref) => true,
-        // nullfuncref is bottom for func hierarchy (nullable only)
+        // nullfuncref is bottom for func hierarchy (nullable variants only)
         (NullFuncref, Funcref) => true,
-        // nullexternref is bottom for extern hierarchy (nullable only)
+        // nullexternref is bottom for extern hierarchy (nullable variants only)
         (NullExternref, Externref) => true,
-        // NOTE: Nullref/NullFuncref/NullExternref are NOT subtypes of NN variants
-        // (they carry null, NN variants don't accept null)
+        // Bottom types are NOT subtypes of non-nullable variants
+        (
+            Nullref,
+            NonNullAnyref | NonNullEqref | NonNullI31ref | NonNullStructref | NonNullArrayref,
+        ) => false,
+        (NullFuncref, NonNullFuncref) => false,
+        (NullExternref, NonNullExternref) => false,
 
-        // NN variants are subtypes of their nullable counterparts
-        (FuncrefNN, Funcref) => true,
-        (ExternrefNN, Externref) => true,
-        (AnyrefNN, Anyref) => true,
-        (EqrefNN, Eqref) => true,
-        (I31refNN, I31ref) => true,
-        (StructrefNN, Structref) => true,
-        (ArrayrefNN, Arrayref) => true,
+        // Non-nullable <: nullable (same hierarchy)
+        (NonNullFuncref, Funcref) => true,
+        (NonNullExternref, Externref) => true,
+        (NonNullAnyref, Anyref) => true,
+        (NonNullEqref, Eqref | Anyref | NonNullAnyref) => true,
+        (NonNullStructref, Structref | Eqref | Anyref | NonNullEqref | NonNullAnyref) => true,
+        (NonNullArrayref, Arrayref | Eqref | Anyref | NonNullEqref | NonNullAnyref) => true,
+        (NonNullI31ref, I31ref | Eqref | Anyref | NonNullEqref | NonNullAnyref) => true,
 
-        // NN hierarchy mirrors nullable: EqrefNN <: AnyrefNN, etc.
-        (I31refNN | StructrefNN | ArrayrefNN | EqrefNN, AnyrefNN) => true,
-        (I31refNN | StructrefNN | ArrayrefNN, EqrefNN) => true,
-        // NN <: nullable supertype (cross-nullability)
-        (I31refNN | StructrefNN | ArrayrefNN | EqrefNN, Anyref) => true,
-        (I31refNN | StructrefNN | ArrayrefNN, Eqref) => true,
-
-        // i31ref, structref, arrayref <: eqref <: anyref (nullable hierarchy)
+        // Nullable abstract hierarchy (existing rules)
+        // i31ref, structref, arrayref <: eqref <: anyref
         (I31ref | Structref | Arrayref | Eqref, Anyref) => true,
         (I31ref | Structref | Arrayref, Eqref) => true,
 
-        // Concrete Ref(n)/RefNull(n) are subtypes of nullable abstract ref supertypes.
+        // Concrete Ref(n)/RefNull(n) are subtypes of all abstract ref supertypes.
         // Without symbol table we can't distinguish struct/array/func kinds, so we
         // accept all abstract supertypes (precise checking done by types_compatible_with_symbols).
         (Ref(_) | RefNull(_), Funcref | Anyref | Eqref | Arrayref | Structref) => true,
-        // Non-null concrete ref is also subtype of NN abstract supertypes
-        (Ref(_), FuncrefNN | AnyrefNN | EqrefNN | ArrayrefNN | StructrefNN) => true,
-        // RefNull(n) is NOT a subtype of NN variants (implicit by absence)
-
+        // Non-null concrete refs are subtypes of non-nullable abstract supertypes
+        (
+            Ref(_),
+            NonNullFuncref | NonNullAnyref | NonNullEqref | NonNullArrayref | NonNullStructref,
+        ) => true,
         // NullFuncref is bottom of func hierarchy — subtype of all nullable func refs
         (NullFuncref, RefNull(_) | Structref) => true,
         // Nullref is bottom of internal ref hierarchy — subtype of all nullable internal refs
@@ -195,29 +195,16 @@ fn is_concrete_ref_subtype(sub: &ValueType, sup: &ValueType, symbols: &SymbolTab
         None => return false,
     };
 
-    // Nullable abstract supertypes: both Ref(n) and RefNull(n) are subtypes
-    if matches!(
-        (&type_def.kind, sup),
-        (TypeKind::Struct { .. }, Structref | Eqref | Anyref)
-            | (TypeKind::Array { .. }, Arrayref | Eqref | Anyref)
-            | (TypeKind::Func { .. }, Funcref)
-    ) {
-        return true;
+    match (&type_def.kind, sup) {
+        (TypeKind::Struct { .. }, Structref | Eqref | Anyref) => true,
+        (TypeKind::Array { .. }, Arrayref | Eqref | Anyref) => true,
+        (TypeKind::Func { .. }, Funcref) => true,
+        // Non-null concrete refs can satisfy non-nullable abstract supertypes
+        (TypeKind::Struct { .. }, NonNullStructref | NonNullEqref | NonNullAnyref) => !sub_nullable,
+        (TypeKind::Array { .. }, NonNullArrayref | NonNullEqref | NonNullAnyref) => !sub_nullable,
+        (TypeKind::Func { .. }, NonNullFuncref) => !sub_nullable,
+        _ => false,
     }
-
-    // Non-nullable abstract supertypes: only Ref(n) (non-null) is a subtype
-    if !sub_nullable
-        && matches!(
-            (&type_def.kind, sup),
-            (TypeKind::Struct { .. }, StructrefNN | EqrefNN | AnyrefNN)
-                | (TypeKind::Array { .. }, ArrayrefNN | EqrefNN | AnyrefNN)
-                | (TypeKind::Func { .. }, FuncrefNN)
-        )
-    {
-        return true;
-    }
-
-    false
 }
 
 /// Check if `child_idx` is a declared subtype of `parent_idx` via the parent chain.
