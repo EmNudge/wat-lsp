@@ -3467,4 +3467,133 @@ mod tests {
             "table.fill with invalid index should be flagged"
         );
     }
+
+    #[test]
+    fn test_br_on_null_type_narrowing() {
+        // br_on_null pops (ref null ht), branches to label with t*, pushes (ref ht) on fallthrough
+        let document = r#"(module
+  (type $t (func))
+  (func (param (ref null $t)) (result (ref $t))
+    (block
+      (br_on_null 0 (local.get 0))
+      (return)
+    )
+    (unreachable)
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "br_on_null should narrow type to non-nullable, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_br_on_non_null_valid() {
+        // br_on_non_null pops (ref null ht), branches with label types, falls through with t*
+        let document = r#"(module
+  (type $t (func))
+  (func (param (ref null $t)) (result)
+    (block (result (ref $t))
+      (br_on_non_null 0 (local.get 0))
+      (unreachable)
+    )
+    (drop)
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "br_on_non_null should be valid, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_ref_as_non_null_type_narrowing() {
+        // ref.as_non_null converts (ref null ht) to (ref ht)
+        let document = r#"(module
+  (type $t (func))
+  (func (param (ref null $t)) (result (ref $t))
+    (ref.as_non_null (local.get 0))
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "ref.as_non_null should narrow to non-nullable type, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_br_on_cast_non_nullable_diff_type() {
+        // br_on_cast with non-nullable cast type should produce non-nullable fallthrough
+        let document = r#"(module
+  (type $t (sub (struct)))
+  (func (param (ref $t)) (result (ref struct))
+    (block (result (ref $t))
+      (br_on_cast 0 (ref struct) (ref $t) (local.get 0))
+    )
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "br_on_cast with non-nullable types should be valid, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_block_result_ref_non_nullable() {
+        // Block result type (ref any) should be parsed as non-nullable
+        let document = r#"(module
+  (func (param anyref) (result (ref any))
+    (ref.as_non_null (local.get 0))
+  )
+)"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "Function with (ref any) result should accept non-nullable anyref, got: {:?}",
+            errors
+        );
+    }
 }

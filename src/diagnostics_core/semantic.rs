@@ -628,6 +628,35 @@ fn process_instruction(
         return;
     }
 
+    if instr_name == "br_on_null" {
+        // br_on_null l : [t* (ref null ht)] -> [t* (ref ht)]
+        // Pop ref operand, validate label types, push non-nullable ref
+        let ref_type = checker.pop_val().unwrap_or(ValueType::Unknown);
+        if let Some(depth) = get_branch_depth(node, source, checker) {
+            if let Some(label_types) = checker.pop_label_types_for_instr(depth, node, instr_name) {
+                checker.push_vals(&label_types);
+            }
+        }
+        checker.push_val(make_non_nullable(&ref_type));
+        return;
+    }
+
+    if instr_name == "br_on_non_null" {
+        // br_on_non_null l : [t* (ref null ht)] -> [t*]
+        // The branch target label expects [t* (ref ht)]
+        checker.pop_expect(&ValueType::Unknown, node);
+        if let Some(depth) = get_branch_depth(node, source, checker) {
+            if let Some(label_types) = checker.label_types_vec(depth) {
+                if !label_types.is_empty() {
+                    let t_star = &label_types[..label_types.len() - 1];
+                    checker.pop_vals_for_instr(t_star, node, instr_name);
+                    checker.push_vals(t_star);
+                }
+            }
+        }
+        return;
+    }
+
     // br_on_cast and br_on_cast_fail are conditional branches:
     // They consume 1 ref value and push 1 ref value (the fallthrough type).
     // br_on_cast: branches if cast succeeds, falls through with source type.
@@ -787,6 +816,13 @@ fn process_instruction(
         );
         // Push the actual result type (not Unknown)
         checker.push_val(result_type);
+        return;
+    }
+
+    if instr_name == "ref.as_non_null" {
+        // ref.as_non_null : [(ref null ht)] -> [(ref ht)]
+        let ref_type = checker.pop_val().unwrap_or(ValueType::Unknown);
+        checker.push_val(make_non_nullable(&ref_type));
         return;
     }
 
@@ -1079,7 +1115,7 @@ fn derive_consumed_types_from_name(
         "ref.null" => Some(vec![]),
         "ref.func" => Some(vec![]),
         "ref.is_null" => Some(vec![ValueType::Unknown]), // any ref
-        "ref.as_non_null" => Some(vec![ValueType::Unknown]), // any nullable ref
+        // ref.as_non_null handled specially in process_instruction
         "ref.eq" => Some(vec![ValueType::Eqref, ValueType::Eqref]),
 
         // GC instructions
@@ -1223,8 +1259,7 @@ fn derive_consumed_types_from_name(
         "memory.atomic.wait64" => Some(vec![ValueType::I32, ValueType::I64, ValueType::I64]),
         "memory.atomic.notify" => Some(vec![ValueType::I32, ValueType::I32]),
 
-        // Br_on_null/non_null
-        "br_on_null" | "br_on_non_null" => Some(vec![ValueType::Unknown]),
+        // br_on_null/br_on_non_null handled specially in process_instruction
 
         // Scalar binary operations — 2 operands of prefix type
         name if is_binary_scalar(name) => {
@@ -2758,6 +2793,80 @@ fn get_block_param_types(block_node: &Node, source: &str, symbols: &SymbolTable)
     types
 }
 
+/// Parse a ref_type node from the tree-sitter AST into a ValueType.
+/// Handles `(ref null? heap_type)` forms that `try_parse` can't handle.
+fn parse_ref_type_from_node(node: &Node, source: &str) -> ValueType {
+    // First try the simple text-based parse for abbreviated forms
+    let type_text = source[node.byte_range()].trim();
+    if let Some(t) = ValueType::try_parse(type_text) {
+        return t;
+    }
+
+    // Look for ref_type_ref child (handles `(ref null? (ref_kind | index))`)
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(kind = child);
+        match kind.as_ref() {
+            "ref_type_ref" => return parse_ref_type_ref_node(&child, source),
+            "value_type_ref_type" | "ref_type" => {
+                return parse_ref_type_from_node(&child, source);
+            }
+            _ => {}
+        }
+    }
+
+    // If the node itself is a ref_type_ref, parse directly
+    if node.kind() == "ref_type_ref" {
+        return parse_ref_type_ref_node(node, source);
+    }
+
+    ValueType::Unknown
+}
+
+/// Parse a `ref_type_ref` node: `(ref null? (ref_kind | index))`
+fn parse_ref_type_ref_node(node: &Node, source: &str) -> ValueType {
+    let mut is_null = false;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let ck = child.kind();
+        if ck == "null" || source[child.byte_range()].trim() == "null" {
+            is_null = true;
+        } else if ck == "ref_kind" {
+            let text = source[child.byte_range()].trim();
+            return match (text, is_null) {
+                ("func", true) => ValueType::Funcref,
+                ("func", false) => ValueType::FuncrefNN,
+                ("extern", true) => ValueType::Externref,
+                ("extern", false) => ValueType::ExternrefNN,
+                ("any", true) => ValueType::Anyref,
+                ("any", false) => ValueType::AnyrefNN,
+                ("eq", true) => ValueType::Eqref,
+                ("eq", false) => ValueType::EqrefNN,
+                ("i31", true) => ValueType::I31ref,
+                ("i31", false) => ValueType::I31refNN,
+                ("struct", true) => ValueType::Structref,
+                ("struct", false) => ValueType::StructrefNN,
+                ("array", true) => ValueType::Arrayref,
+                ("array", false) => ValueType::ArrayrefNN,
+                ("null" | "none", _) => ValueType::Nullref,
+                ("nofunc", _) => ValueType::NullFuncref,
+                ("noextern", _) => ValueType::NullExternref,
+                _ => ValueType::Unknown,
+            };
+        } else if ck == "index" || ck == "identifier" {
+            let text = source[child.byte_range()].trim();
+            if let Some(n) = parse_wat_nat(text) {
+                return if is_null {
+                    ValueType::RefNull(n as u32)
+                } else {
+                    ValueType::Ref(n as u32)
+                };
+            }
+        }
+    }
+    ValueType::Unknown
+}
+
 /// Parse result types from a func_type_results node
 fn parse_func_type_results(results_node: &Node, source: &str) -> Vec<ValueType> {
     let mut types = Vec::new();
@@ -2766,12 +2875,7 @@ fn parse_func_type_results(results_node: &Node, source: &str) -> Vec<ValueType> 
         node_kind!(kind = child);
 
         if kind == "value_type" || kind == "ref_type" {
-            let type_text = &source[child.byte_range()];
-            if let Some(t) = ValueType::try_parse(type_text.trim()) {
-                types.push(t);
-            } else {
-                types.push(ValueType::Unknown);
-            }
+            types.push(parse_ref_type_from_node(&child, source));
         }
     }
     types
@@ -2791,22 +2895,12 @@ fn parse_result_types(block_type: &Node, source: &str) -> Vec<ValueType> {
                 node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "value_type" || inner_kind == "ref_type" {
-                    let type_text = &source[inner_child.byte_range()];
-                    if let Some(t) = ValueType::try_parse(type_text.trim()) {
-                        types.push(t);
-                    } else {
-                        types.push(ValueType::Unknown);
-                    }
+                    types.push(parse_ref_type_from_node(&inner_child, source));
                 }
             }
         }
         if kind == "value_type" || kind == "ref_type" {
-            let type_text = &source[child.byte_range()];
-            if let Some(t) = ValueType::try_parse(type_text.trim()) {
-                types.push(t);
-            } else {
-                types.push(ValueType::Unknown);
-            }
+            types.push(parse_ref_type_from_node(&child, source));
         }
     }
 
@@ -3352,7 +3446,7 @@ fn check_br_on_cast_types(
                     let branch_vt = if branch_nullable {
                         make_nullable(&branch_type)
                     } else {
-                        branch_type
+                        make_non_nullable(&branch_type)
                     };
                     if !types_compatible_with_symbols(&branch_vt, label_type, symbols) {
                         checker.diagnostics.push(
@@ -3376,7 +3470,7 @@ fn check_br_on_cast_types(
         let ft_vt = if ft_nullable {
             make_nullable(&ft_type)
         } else {
-            ft_type
+            make_non_nullable(&ft_type)
         };
         checker.push_val(ft_vt);
     } else {
@@ -3384,11 +3478,34 @@ fn check_br_on_cast_types(
     }
 }
 
-/// Make a ValueType nullable (Ref→RefNull, abstract→nullable variant).
+/// Make a ValueType nullable (Ref→RefNull, NN→nullable variant).
 fn make_nullable(vt: &ValueType) -> ValueType {
     match vt {
         ValueType::Ref(n) => ValueType::RefNull(*n),
-        // Abstract types: funcref/anyref/etc. are already nullable in our representation
+        ValueType::FuncrefNN => ValueType::Funcref,
+        ValueType::ExternrefNN => ValueType::Externref,
+        ValueType::AnyrefNN => ValueType::Anyref,
+        ValueType::EqrefNN => ValueType::Eqref,
+        ValueType::I31refNN => ValueType::I31ref,
+        ValueType::StructrefNN => ValueType::Structref,
+        ValueType::ArrayrefNN => ValueType::Arrayref,
+        // Already nullable or not a ref
+        other => *other,
+    }
+}
+
+/// Make a ValueType non-nullable (RefNull→Ref, nullable abstract→NN variant).
+fn make_non_nullable(vt: &ValueType) -> ValueType {
+    match vt {
+        ValueType::RefNull(n) => ValueType::Ref(*n),
+        ValueType::Funcref => ValueType::FuncrefNN,
+        ValueType::Externref => ValueType::ExternrefNN,
+        ValueType::Anyref => ValueType::AnyrefNN,
+        ValueType::Eqref => ValueType::EqrefNN,
+        ValueType::I31ref => ValueType::I31refNN,
+        ValueType::Structref => ValueType::StructrefNN,
+        ValueType::Arrayref => ValueType::ArrayrefNN,
+        // Already non-nullable or not a ref
         other => *other,
     }
 }

@@ -24,6 +24,14 @@ pub enum ValueType {
     Nullref,
     NullFuncref,
     NullExternref,
+    // Non-nullable abstract ref variants: (ref func), (ref extern), etc.
+    FuncrefNN,
+    ExternrefNN,
+    AnyrefNN,
+    EqrefNN,
+    I31refNN,
+    StructrefNN,
+    ArrayrefNN,
     Ref(u32),     // Typed reference to a type index
     RefNull(u32), // Nullable typed reference
     Unknown,
@@ -49,6 +57,13 @@ impl std::fmt::Display for ValueType {
             ValueType::Nullref => write!(f, "nullref"),
             ValueType::NullFuncref => write!(f, "nullfuncref"),
             ValueType::NullExternref => write!(f, "nullexternref"),
+            ValueType::FuncrefNN => write!(f, "(ref func)"),
+            ValueType::ExternrefNN => write!(f, "(ref extern)"),
+            ValueType::AnyrefNN => write!(f, "(ref any)"),
+            ValueType::EqrefNN => write!(f, "(ref eq)"),
+            ValueType::I31refNN => write!(f, "(ref i31)"),
+            ValueType::StructrefNN => write!(f, "(ref struct)"),
+            ValueType::ArrayrefNN => write!(f, "(ref array)"),
             ValueType::Ref(idx) => write!(f, "(ref {})", idx),
             ValueType::RefNull(idx) => write!(f, "(ref null {})", idx),
             ValueType::Unknown => write!(f, "unknown"),
@@ -96,19 +111,64 @@ impl From<&wast::core::ValType<'_>> for ValueType {
             wast::core::ValType::F64 => ValueType::F64,
             wast::core::ValType::V128 => ValueType::V128,
             wast::core::ValType::Ref(ref_type) => match &ref_type.heap {
-                wast::core::HeapType::Abstract { ty, .. } => match ty {
-                    wast::core::AbstractHeapType::Func => ValueType::Funcref,
-                    wast::core::AbstractHeapType::Extern => ValueType::Externref,
-                    wast::core::AbstractHeapType::Struct => ValueType::Structref,
-                    wast::core::AbstractHeapType::Array => ValueType::Arrayref,
-                    wast::core::AbstractHeapType::I31 => ValueType::I31ref,
-                    wast::core::AbstractHeapType::Any => ValueType::Anyref,
-                    wast::core::AbstractHeapType::Eq => ValueType::Eqref,
-                    wast::core::AbstractHeapType::None => ValueType::Nullref,
-                    wast::core::AbstractHeapType::NoFunc => ValueType::NullFuncref,
-                    wast::core::AbstractHeapType::NoExtern => ValueType::NullExternref,
-                    _ => ValueType::Unknown,
-                },
+                wast::core::HeapType::Abstract { ty, .. } => {
+                    let nullable = ref_type.nullable;
+                    match ty {
+                        wast::core::AbstractHeapType::Func => {
+                            if nullable {
+                                ValueType::Funcref
+                            } else {
+                                ValueType::FuncrefNN
+                            }
+                        }
+                        wast::core::AbstractHeapType::Extern => {
+                            if nullable {
+                                ValueType::Externref
+                            } else {
+                                ValueType::ExternrefNN
+                            }
+                        }
+                        wast::core::AbstractHeapType::Struct => {
+                            if nullable {
+                                ValueType::Structref
+                            } else {
+                                ValueType::StructrefNN
+                            }
+                        }
+                        wast::core::AbstractHeapType::Array => {
+                            if nullable {
+                                ValueType::Arrayref
+                            } else {
+                                ValueType::ArrayrefNN
+                            }
+                        }
+                        wast::core::AbstractHeapType::I31 => {
+                            if nullable {
+                                ValueType::I31ref
+                            } else {
+                                ValueType::I31refNN
+                            }
+                        }
+                        wast::core::AbstractHeapType::Any => {
+                            if nullable {
+                                ValueType::Anyref
+                            } else {
+                                ValueType::AnyrefNN
+                            }
+                        }
+                        wast::core::AbstractHeapType::Eq => {
+                            if nullable {
+                                ValueType::Eqref
+                            } else {
+                                ValueType::EqrefNN
+                            }
+                        }
+                        wast::core::AbstractHeapType::None => ValueType::Nullref,
+                        wast::core::AbstractHeapType::NoFunc => ValueType::NullFuncref,
+                        wast::core::AbstractHeapType::NoExtern => ValueType::NullExternref,
+                        _ => ValueType::Unknown,
+                    }
+                }
                 wast::core::HeapType::Concrete(idx) => match idx {
                     wast::token::Index::Num(n, _) => {
                         if ref_type.nullable {
