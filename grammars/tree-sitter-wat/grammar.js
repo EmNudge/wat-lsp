@@ -14,7 +14,7 @@ const imm = rule => token.immediate(rule);
 module.exports = grammar({
   name: "wat",
 
-  externals: $ => [$.comment_block, $.comment_block_annot],
+  externals: $ => [$.comment_block, $.comment_block_annot, $.annotation],
 
   extras: $ => [$.annotation, $.comment_block, $.comment_line, /[\s\uFEFF\u2060\u200B\u00A0]/],
 
@@ -27,16 +27,7 @@ module.exports = grammar({
 
     align_offset_value: $ => imm(/[0-9]+(_?[0-9]+)*|0x[0-9A-Fa-f]+(_?[0-9A-Fa-f]+)*/),
 
-    // proposal: annotations
-    annotation: $ => seq("(@", choice($.identifier_pattern, $.string), repeat($.annotation_part), ")"),
-
-    // proposal: annotations
-    annotation_parens: $ => seq("(", repeat($.annotation_part), ")"),
-
-    // proposal: annotations
-    // proposal: annotations
-    annotation_part: $ =>
-      choice($.comment_block_annot, $.comment_line_annot, $.annotation_parens, $.reserved, $.identifier, $.string),
+    // proposal: annotations (handled by external scanner)
 
     custom_annotation: $ => seq(
       /@[0-9A-Za-z!#$%&'*+-./:<=>?@\\^_'|~]+/,
@@ -73,7 +64,6 @@ module.exports = grammar({
 
     comment_line: $ => prec.left(token(seq(";;", /.*/))),
 
-    comment_line_annot: $ => prec.left(token(seq(";;", /.*/))),
 
     dec_float: $ =>
       token(
@@ -944,7 +934,7 @@ module.exports = grammar({
     string: $ => seq('"', repeat(choice(imm(prec(PREC.STRING, /[^"\\\n]+|\\\r?\n/)), $.escape_sequence)), '"'),
 
     table_fields_elem: $ =>
-      seq($.ref_type, "(", "elem", choice(repeat($.index), seq($.elem_expr, repeat($.elem_expr))), ")"),
+      seq(optional($.table64_type), $.ref_type, "(", "elem", choice(repeat($.index), seq($.elem_expr, repeat($.elem_expr))), ")"),
 
     table_fields_type: $ => seq(optional($.import), $.table_type, optional($.expr)),
 

@@ -568,24 +568,26 @@ fn provide_annotation_hover(
         node_kind!(kind = current);
 
         if kind == "annotation" {
-            // Found annotation - extract the name from identifier_pattern child
-            #[cfg(feature = "native")]
-            let mut cursor = current.walk();
-            #[cfg(feature = "native")]
-            let children_iter = current.children(&mut cursor);
-
-            #[cfg(all(feature = "wasm", not(feature = "native")))]
-            let children_iter = (0..current.child_count()).filter_map(|i| current.child(i));
-
-            for child in children_iter {
-                node_kind!(child_kind = child);
-
-                if child_kind == "identifier_pattern" {
-                    let annotation_name = &document[child.start_byte()..child.end_byte()];
-                    return Some(format_annotation_hover(annotation_name));
+            // Annotation is an opaque external token — extract name from raw text.
+            // Format: (@name ...) or (@"quoted name" ...)
+            let text = &document[current.start_byte()..current.end_byte()];
+            // Skip the leading "(@"
+            let after_prefix = &text[2..];
+            let annotation_name = if let Some(stripped) = after_prefix.strip_prefix('"') {
+                // Quoted name: extract content between quotes
+                if let Some(end_quote) = stripped.find('"') {
+                    &stripped[..end_quote]
+                } else {
+                    return None;
                 }
-            }
-            return None;
+            } else {
+                // Unquoted name: read until whitespace or ')'
+                let end = after_prefix
+                    .find(|c: char| c.is_whitespace() || c == ')')
+                    .unwrap_or(after_prefix.len());
+                &after_prefix[..end]
+            };
+            return Some(format_annotation_hover(annotation_name));
         }
 
         if let Some(parent) = current.parent() {

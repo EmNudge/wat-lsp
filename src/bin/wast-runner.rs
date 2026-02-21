@@ -142,16 +142,34 @@ fn find_matching_close_paren(source: &str, start: usize) -> Option<usize> {
             continue;
         }
         match bytes[i] {
-            b'(' => depth += 1,
+            b'"' => {
+                // String literal — skip, handling escape sequences
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1; // skip backslash
+                    }
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1; // skip closing '"'
+                }
+            }
+            b'(' => {
+                depth += 1;
+                i += 1;
+            }
             b')' => {
                 depth -= 1;
                 if depth == 0 {
                     return Some(i);
                 }
+                i += 1;
             }
-            _ => {}
+            _ => {
+                i += 1;
+            }
         }
-        i += 1;
     }
     None
 }
