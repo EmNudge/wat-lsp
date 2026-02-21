@@ -28,16 +28,7 @@ pub struct CallInfo {
 /// Walks up the tree from `node` to find a call instruction and extracts the
 /// function/type name and argument count.
 pub fn find_function_call_ast(node: &Node, document: &str) -> Option<CallInfo> {
-    let mut current = {
-        #[cfg(feature = "native")]
-        {
-            *node
-        }
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        {
-            node.clone()
-        }
-    };
+    let mut current = node_copy!(node);
 
     loop {
         let kind = current.kind();

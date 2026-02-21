@@ -303,9 +303,7 @@ pub fn walk_tree_for_diagnostics(
 /// Check if an ERROR node is in a value type context (params, results, locals, globals)
 fn is_value_type_context(node: &Node) -> bool {
     if let Some(parent) = node.parent() {
-        let pk = parent.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let pk = &*pk;
+        node_kind!(pk = parent);
         matches!(
             pk,
             "func_type_params_many"
@@ -387,9 +385,7 @@ fn collect_local_uses(
     func: &crate::symbols::Function,
     used: &mut HashSet<usize>,
 ) {
-    let kind = node.kind();
-    #[cfg(all(feature = "wasm", not(feature = "native")))]
-    let kind = &*kind;
+    node_kind!(kind = node);
 
     if kind == "instr_plain" || kind == "expr1_plain" {
         let text = &source[node.byte_range()];
@@ -435,9 +431,7 @@ fn resolve_local_index(
 ) -> Option<usize> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        let ck = child.kind();
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        let ck = &*ck;
+        node_kind!(ck = child);
 
         if ck == "index" || ck == "identifier" || ck == "nat" {
             let text = source[child.byte_range()].trim();
@@ -447,9 +441,7 @@ fn resolve_local_index(
             // Check inside index node for identifier/nat children
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
-                let ik = idx_child.kind();
-                #[cfg(all(feature = "wasm", not(feature = "native")))]
-                let ik = &*ik;
+                node_kind!(ik = idx_child);
                 if ik == "identifier" || ik == "nat" {
                     let id_text = source[idx_child.byte_range()].trim();
                     if let Some(idx) = resolve_local_text(id_text, func) {

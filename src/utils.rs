@@ -98,7 +98,7 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
     let mut current = node;
 
     loop {
-        let kind = current.kind();
+        node_kind!(kind = current);
 
         // Check for instruction contexts
         if kind == "instr_plain"
@@ -112,12 +112,7 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
         }
 
         // Check for block/loop contexts (both instr_* and block_* variants)
-        #[cfg(feature = "native")]
         if is_block_kind(kind) {
-            return InstructionContext::Block;
-        }
-        #[cfg(all(feature = "wasm", not(feature = "native")))]
-        if is_block_kind(kind.as_str()) {
             return InstructionContext::Block;
         }
 
@@ -465,18 +460,20 @@ pub fn position_to_byte(source: &str, position: Position) -> usize {
     byte_offset
 }
 
-/// Find the AST node at the given position (native version - returns borrowed node)
+/// Find the AST node at the given position.
+macro_rules! node_at_position_body {
+    ($tree:ident, $source:ident, $position:ident) => {{
+        let byte_offset = position_to_byte($source, $position);
+        find_deepest_node($tree.root_node(), byte_offset)
+    }};
+}
 #[cfg(feature = "native")]
 pub fn node_at_position<'a>(tree: &'a Tree, source: &str, position: Position) -> Option<Node<'a>> {
-    let byte_offset = position_to_byte(source, position);
-    find_deepest_node(tree.root_node(), byte_offset)
+    node_at_position_body!(tree, source, position)
 }
-
-/// Find the AST node at the given position (WASM version - returns owned node)
 #[cfg(all(feature = "wasm", not(feature = "native")))]
 pub fn node_at_position(tree: &Tree, source: &str, position: Position) -> Option<Node> {
-    let byte_offset = position_to_byte(source, position);
-    find_deepest_node(tree.root_node(), byte_offset)
+    node_at_position_body!(tree, source, position)
 }
 
 /// Check if the given position is inside a comment (block or line)
