@@ -17,6 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::types::{Diagnostic, Range};
+use crate::parser::normalize_identifier;
 use crate::symbols::{Function, SymbolTable, TypeKind, ValueType};
 use crate::utils::{node_text, node_to_range};
 
@@ -1865,7 +1866,7 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
     // Find opening label: first identifier child (right after the keyword)
     // Find end label: identifier child that comes after "end" anonymous node
     // For if: also check identifier after "else" anonymous node
-    let mut opening_label: Option<&str> = None;
+    let mut opening_label: Option<String> = None;
 
     let mut cursor = node.walk();
     let children: Vec<_> = node.children(&mut cursor).collect();
@@ -1883,7 +1884,7 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
                     continue;
                 }
             }
-            opening_label = Some(node_text(child, source));
+            opening_label = Some(normalize_identifier(node_text(child, source)));
             break;
         }
     }
@@ -1899,12 +1900,24 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
         if child.is_named() {
             if ck == "identifier" {
                 if after_end {
-                    let end_label = node_text(child, source);
-                    check_label_match(opening_label, end_label, child, "end", &mut diagnostics);
+                    let end_label = normalize_identifier(node_text(child, source));
+                    check_label_match(
+                        opening_label.as_deref(),
+                        &end_label,
+                        child,
+                        "end",
+                        &mut diagnostics,
+                    );
                     after_end = false;
                 } else if after_else {
-                    let else_label = node_text(child, source);
-                    check_label_match(opening_label, else_label, child, "else", &mut diagnostics);
+                    let else_label = normalize_identifier(node_text(child, source));
+                    check_label_match(
+                        opening_label.as_deref(),
+                        &else_label,
+                        child,
+                        "else",
+                        &mut diagnostics,
+                    );
                     after_else = false;
                 }
             } else {

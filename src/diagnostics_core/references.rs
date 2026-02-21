@@ -5,6 +5,7 @@
 #![allow(clippy::borrow_deref_ref)]
 
 use crate::core::types::{Diagnostic, Position};
+use crate::parser::normalize_identifier;
 use crate::symbols::SymbolTable;
 use crate::utils::{find_containing_function, node_to_range, InstructionContext, STRUCT_OPS};
 
@@ -114,12 +115,16 @@ fn find_undefined_identifiers(
     node_kind!(kind = node);
 
     if kind == "identifier" {
-        let identifier_name = &source[node.byte_range()];
+        let raw_name = &source[node.byte_range()];
 
         // Only check identifiers that start with $
-        if !identifier_name.starts_with('$') {
+        if !raw_name.starts_with('$') {
             return diagnostics;
         }
+
+        // Normalize quoted identifiers: $"fh" → $fh
+        let normalized = normalize_identifier(raw_name);
+        let identifier_name: &str = &normalized;
 
         // Find the containing function for this reference (needed for locals and labels)
         let start_point = node.start_position();

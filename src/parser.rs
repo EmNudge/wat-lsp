@@ -570,7 +570,7 @@ fn extract_imported_tag(desc_node: &Node, source: &str, index: usize) -> Option<
 fn extract_identifier_info(node: &Node, source: &str) -> (Option<String>, Option<Range>) {
     if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
         (
-            Some(node_text(&id_node, source).to_string()),
+            Some(normalize_identifier(node_text(&id_node, source))),
             Some(node_to_range(&id_node)),
         )
     } else {
@@ -850,7 +850,7 @@ fn extract_parameters(
                     let mut one_cursor = param_child.walk();
                     for one_child in param_child.children(&mut one_cursor) {
                         if one_child.kind() == "identifier" {
-                            name_opt = Some(node_text(&one_child, source).to_string());
+                            name_opt = Some(normalize_identifier(node_text(&one_child, source)));
                             range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
                             type_opt = Some(resolve(&one_child));
@@ -1087,7 +1087,7 @@ fn extract_locals(func_node: &Node, source: &str, symbols: Option<&SymbolTable>)
                     let mut one_cursor = locals_child.walk();
                     for one_child in locals_child.children(&mut one_cursor) {
                         if one_child.kind() == "identifier" {
-                            name_opt = Some(node_text(&one_child, source).to_string());
+                            name_opt = Some(normalize_identifier(node_text(&one_child, source)));
                             range_opt = Some(node_to_range(&one_child));
                         } else if one_child.kind() == "value_type" {
                             type_opt = Some(resolve(&one_child));
@@ -1145,7 +1145,7 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
     if BLOCK_KINDS_STATEMENT.contains(&kind_str) || BLOCK_KINDS_EXPR.contains(&kind_str) {
         // Check if it has a label
         if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
-            let label = node_text(&id_node, source).to_string();
+            let label = normalize_identifier(node_text(&id_node, source));
             let block_type = block_type_from_kind(kind_str).to_string();
 
             blocks.push(BlockLabel {
@@ -1394,7 +1394,7 @@ fn extract_rec_types(
                     let id_node = &children_vec[i];
                     i += 1;
                     (
-                        Some(node_text(id_node, source).to_string()),
+                        Some(normalize_identifier(node_text(id_node, source))),
                         Some(node_to_range(id_node)),
                     )
                 } else {
@@ -2179,6 +2179,17 @@ fn extract_table(
                     is_table64 = true;
                 }
             }
+        } else if child.kind() == "table_fields_elem" {
+            // Handle inline elem: (table i64? ref_type (elem ...))
+            let mut elem_cursor = child.walk();
+            for elem_child in child.children(&mut elem_cursor) {
+                if elem_child.kind() == "table64_type" {
+                    is_table64 = true;
+                } else if elem_child.kind() == "ref_type" {
+                    ref_type = extract_ref_type_resolved(&elem_child, source, symbols);
+                    ref_type_non_nullable = is_ref_type_non_nullable(&elem_child, source);
+                }
+            }
         }
     }
 
@@ -2423,6 +2434,96 @@ pub(crate) fn parse_wat_nat(text: &str) -> Option<u64> {
         u64::from_str_radix(&text[2..], 16).ok()
     } else {
         text.parse::<u64>().ok()
+    }
+}
+
+/// Normalize a quoted identifier (`$"..."`) to its unquoted form (`$name`).
+/// Per the WAT spec, `$"fh"` and `$fh` refer to the same identifier.
+/// Also decodes escape sequences: `\xx` hex bytes, `\u{xxxx}` unicode, `\t`, `\n`, `\r`, `\\`, `\"`.
+/// Hex byte escapes produce raw bytes that are accumulated and decoded as UTF-8.
+/// Unquoted identifiers (`$name`) are returned as-is.
+pub(crate) fn normalize_identifier(text: &str) -> String {
+    if text.starts_with("$\"") && text.ends_with('"') && text.len() >= 3 {
+        // Strip $"..." wrapper
+        let inner = &text[2..text.len() - 1];
+        // Build output as raw bytes, then convert to String at the end
+        let mut out: Vec<u8> = Vec::with_capacity(inner.len() + 1);
+        out.push(b'$');
+
+        let bytes = inner.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                i += 1;
+                match bytes[i] {
+                    b't' => {
+                        out.push(b'\t');
+                        i += 1;
+                    }
+                    b'n' => {
+                        out.push(b'\n');
+                        i += 1;
+                    }
+                    b'r' => {
+                        out.push(b'\r');
+                        i += 1;
+                    }
+                    b'\\' => {
+                        out.push(b'\\');
+                        i += 1;
+                    }
+                    b'"' => {
+                        out.push(b'"');
+                        i += 1;
+                    }
+                    b'\'' => {
+                        out.push(b'\'');
+                        i += 1;
+                    }
+                    b'u' if i + 1 < bytes.len() && bytes[i + 1] == b'{' => {
+                        // Unicode escape: \u{xxxx} → encode as UTF-8 bytes
+                        i += 2; // skip 'u{'
+                        let start = i;
+                        while i < bytes.len() && bytes[i] != b'}' {
+                            i += 1;
+                        }
+                        if let Ok(code) = u32::from_str_radix(&inner[start..i], 16) {
+                            if let Some(c) = char::from_u32(code) {
+                                let mut buf = [0u8; 4];
+                                let encoded = c.encode_utf8(&mut buf);
+                                out.extend_from_slice(encoded.as_bytes());
+                            }
+                        }
+                        if i < bytes.len() {
+                            i += 1; // skip '}'
+                        }
+                    }
+                    _ => {
+                        // Hex byte escape: \xx → raw byte
+                        if i + 1 < bytes.len() {
+                            let hex = &inner[i..i + 2];
+                            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                                out.push(byte);
+                                i += 2;
+                            } else {
+                                out.push(bytes[i]);
+                                i += 1;
+                            }
+                        } else {
+                            out.push(bytes[i]);
+                            i += 1;
+                        }
+                    }
+                }
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+
+        String::from_utf8_lossy(&out).into_owned()
+    } else {
+        text.to_string()
     }
 }
 
@@ -2944,7 +3045,7 @@ fn find_identifier_in_data_or_elem(node: &Node, source: &str) -> (Option<String>
         // Direct identifier (shouldn't happen, but handle it)
         if child.kind() == "identifier" {
             return (
-                Some(node_text(&child, source).to_string()),
+                Some(normalize_identifier(node_text(&child, source))),
                 Some(node_to_range(&child)),
             );
         }
@@ -2954,7 +3055,7 @@ fn find_identifier_in_data_or_elem(node: &Node, source: &str) -> (Option<String>
             for index_child in child.children(&mut index_cursor) {
                 if index_child.kind() == "identifier" {
                     return (
-                        Some(node_text(&index_child, source).to_string()),
+                        Some(normalize_identifier(node_text(&index_child, source))),
                         Some(node_to_range(&index_child)),
                     );
                 }
