@@ -259,7 +259,7 @@ fn check_duplicate_exports(module: &Node, source: &str, diagnostics: &mut Vec<Di
         match fk {
             // Standalone export: (export "name" (func $idx))
             "module_field_export" => {
-                if let Some(name) = extract_export_name(field, source) {
+                if let Some(name) = extract_name_child(field, source) {
                     check_export_name(name, field, &mut seen_exports, diagnostics);
                 }
             }
@@ -282,10 +282,6 @@ fn check_duplicate_exports(module: &Node, source: &str, diagnostics: &mut Vec<Di
             _ => {}
         }
     });
-}
-
-fn extract_export_name<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
-    extract_name_child(node, source)
 }
 
 fn extract_name_child<'a>(node: &Node, source: &'a str) -> Option<&'a str> {

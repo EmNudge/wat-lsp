@@ -41,11 +41,10 @@ pub(crate) fn check_uninitialized_locals(
     }
 
     // Initialize tracking: params are always initialized, defaultable locals are initialized
+    // Use Vec<bool> instead of HashSet<usize> for O(1) clone (memcpy) and O(1) lookups
     let num_params = func.parameters.len();
     let total = num_params + func.locals.len();
-    let mut initialized: HashSet<usize> = (0..total)
-        .filter(|i| !non_defaultable.contains(i))
-        .collect();
+    let mut initialized: Vec<bool> = (0..total).map(|i| !non_defaultable.contains(&i)).collect();
 
     let mut diagnostics = Vec::new();
 
@@ -171,7 +170,7 @@ fn walk_body(
     source: &str,
     func: &Function,
     non_defaultable: &HashSet<usize>,
-    initialized: &mut HashSet<usize>,
+    initialized: &mut Vec<bool>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut cursor = node.walk();
@@ -193,7 +192,7 @@ fn walk_node(
     source: &str,
     func: &Function,
     non_defaultable: &HashSet<usize>,
-    initialized: &mut HashSet<usize>,
+    initialized: &mut Vec<bool>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     node_kind!(kind = node);
@@ -265,7 +264,7 @@ fn walk_node(
                     diagnostics,
                 );
             }
-            *initialized = saved;
+            initialized.copy_from_slice(&saved);
         }
         "block_block" | "block_loop" | "block_try_table" | "block_try" => {
             let saved = initialized.clone();
@@ -277,7 +276,7 @@ fn walk_node(
                 initialized,
                 diagnostics,
             );
-            *initialized = saved;
+            initialized.copy_from_slice(&saved);
         }
 
         // Folded block/loop
@@ -291,7 +290,7 @@ fn walk_node(
                 initialized,
                 diagnostics,
             );
-            *initialized = saved;
+            initialized.copy_from_slice(&saved);
         }
 
         // If: save/restore same as block (control flow doesn't contribute to init)
@@ -306,7 +305,7 @@ fn walk_node(
                 diagnostics,
                 &saved,
             );
-            *initialized = saved;
+            initialized.copy_from_slice(&saved);
         }
         "block_if" | "if_block" => {
             let saved = initialized.clone();
@@ -319,7 +318,7 @@ fn walk_node(
                 diagnostics,
                 &saved,
             );
-            *initialized = saved;
+            initialized.copy_from_slice(&saved);
         }
 
         // Default: recurse into children in order
@@ -343,9 +342,9 @@ fn walk_if_body(
     source: &str,
     func: &Function,
     non_defaultable: &HashSet<usize>,
-    initialized: &mut HashSet<usize>,
+    initialized: &mut Vec<bool>,
     diagnostics: &mut Vec<Diagnostic>,
-    saved: &HashSet<usize>,
+    saved: &[bool],
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -354,7 +353,7 @@ fn walk_if_body(
         match ck {
             // Linear format: else branch is in a separate node
             "instr_else" => {
-                *initialized = saved.clone();
+                initialized.copy_from_slice(saved);
                 walk_body(
                     &child,
                     source,
@@ -366,7 +365,7 @@ fn walk_if_body(
             }
             // Folded format: "else" keyword resets state
             "else" => {
-                *initialized = saved.clone();
+                initialized.copy_from_slice(saved);
             }
             // if_block / block_if contain the then/else structure — recurse
             "if_block" | "block_if" => {
@@ -412,7 +411,7 @@ fn check_local_instruction(
     source: &str,
     func: &Function,
     non_defaultable: &HashSet<usize>,
-    initialized: &mut HashSet<usize>,
+    initialized: &mut [bool],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let text = &source[node.byte_range()];
@@ -421,7 +420,8 @@ fn check_local_instruction(
     match first_token {
         "local.get" => {
             if let Some(idx) = resolve_local_index_from_node(node, source, func) {
-                if non_defaultable.contains(&idx) && !initialized.contains(&idx) {
+                if non_defaultable.contains(&idx) && !initialized.get(idx).copied().unwrap_or(true)
+                {
                     diagnostics.push(Diagnostic::error(
                         node_to_range(node),
                         "uninitialized local".to_string(),
@@ -431,7 +431,9 @@ fn check_local_instruction(
         }
         "local.set" | "local.tee" => {
             if let Some(idx) = resolve_local_index_from_node(node, source, func) {
-                initialized.insert(idx);
+                if idx < initialized.len() {
+                    initialized[idx] = true;
+                }
             }
         }
         _ => {}
