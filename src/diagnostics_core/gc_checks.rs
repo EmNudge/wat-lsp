@@ -48,7 +48,7 @@ pub fn check_struct_field_access(
     };
 
     // Resolve type
-    let type_def = match resolve_type_def(&type_ref, symbols) {
+    let type_def = match resolve_type_def(type_ref, symbols) {
         Some(td) => td,
         None => return Vec::new(), // Undefined type caught by reference checker
     };
@@ -60,7 +60,7 @@ pub fn check_struct_field_access(
                 node_to_range(node),
                 format!(
                     "struct.get/set used on non-struct type {}",
-                    type_ref_display(&type_ref, type_def.index)
+                    type_ref_display(type_ref, type_def.index)
                 ),
             )];
         }
@@ -69,7 +69,7 @@ pub fn check_struct_field_access(
     let mut diagnostics = Vec::new();
 
     // Resolve field index
-    let field_idx = match resolve_field_index(&field_ref, fields) {
+    let field_idx = match resolve_field_index(field_ref, fields) {
         Some(idx) => idx,
         None => {
             if field_ref.starts_with('$') {
@@ -105,10 +105,7 @@ pub fn check_struct_field_access(
     if first_token == "struct.set" {
         let (_, _, mutable) = &fields[field_idx];
         if !mutable {
-            diagnostics.push(Diagnostic::error(
-                node_to_range(node),
-                "immutable field".to_string(),
-            ));
+            diagnostics.push(Diagnostic::error(node_to_range(node), "immutable field"));
         }
     }
 
@@ -119,42 +116,37 @@ pub fn check_struct_field_access(
 ///
 /// struct.get/set instructions have the form: `struct.get $type $field`
 /// where both are `index` nodes in the grammar.
-fn extract_two_indices(node: &Node, source: &str) -> Option<(String, String)> {
-    let mut indices = Vec::new();
+fn extract_two_indices<'s>(node: &Node, source: &'s str) -> Option<(&'s str, &'s str)> {
+    let mut first = None;
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
         node_kind!(kind_ref = child);
 
         if kind_ref == "index" {
-            // Index node may contain identifier or nat child
-            let index_text = extract_index_value(&child, source);
-            indices.push(index_text);
-            if indices.len() == 2 {
-                break;
+            let text = extract_index_value(&child, source);
+            match first {
+                None => first = Some(text),
+                Some(f) => return Some((f, text)),
             }
         }
     }
 
-    if indices.len() == 2 {
-        Some((indices.remove(0), indices.remove(0)))
-    } else {
-        None
-    }
+    None
 }
 
 /// Extract the value from an index node — either a `$name` identifier or numeric `nat`.
-fn extract_index_value(node: &Node, source: &str) -> String {
+fn extract_index_value<'s>(node: &Node, source: &'s str) -> &'s str {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind_ref = child);
 
         if kind_ref == "identifier" || kind_ref == "nat" {
-            return source[child.byte_range()].trim().to_string();
+            return source[child.byte_range()].trim();
         }
     }
     // Fallback: use the node text directly
-    source[node.byte_range()].trim().to_string()
+    source[node.byte_range()].trim()
 }
 
 /// Resolve a type reference (either `$name` or numeric index) to a TypeDef.

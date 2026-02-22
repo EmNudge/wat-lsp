@@ -47,16 +47,16 @@ pub fn check_folded_operand_count(
     };
 
     let instr_kind = first_instr_child.kind();
-    let instr_name = match instr_kind.as_ref() {
+    let instr_name: &str = match instr_kind.as_ref() {
         "op_const" => {
             let mut const_cursor = first_instr_child.walk();
             let result = first_instr_child.children(&mut const_cursor).next();
             match result {
-                Some(c) => source[c.byte_range()].trim().to_string(),
+                Some(c) => source[c.byte_range()].trim(),
                 None => return diagnostics,
             }
         }
-        _ => source[first_instr_child.byte_range()].trim().to_string(),
+        _ => source[first_instr_child.byte_range()].trim(),
     };
 
     // Count expr children (these are the operands)
@@ -67,10 +67,10 @@ pub fn check_folded_operand_count(
         .count();
 
     // Resolve arity: try explicit map first, then SIMD pattern fallback
-    let resolved = if let Some(arity) = lookup_instruction_arity(instr_name.as_str()) {
+    let resolved = if let Some(arity) = lookup_instruction_arity(instr_name) {
         Some((arity.operand_mode, true))
     } else {
-        infer_simd_instruction_arity(&instr_name).map(|(c, _)| (OperandMode::Fixed(c), false))
+        infer_simd_instruction_arity(instr_name).map(|(c, _)| (OperandMode::Fixed(c), false))
     };
 
     if let Some((operand_mode, check_dynamic)) = resolved {
@@ -107,7 +107,7 @@ pub fn check_folded_operand_count(
             OperandMode::Dynamic if check_dynamic => {
                 validate_dynamic_operands(
                     node,
-                    &instr_name,
+                    instr_name,
                     operand_count,
                     deficit,
                     symbols,
@@ -141,7 +141,7 @@ fn validate_dynamic_operands(
         "struct.new" => {
             if let Some(type_name) = extract_instruction_index(node, source) {
                 let type_def = if type_name.starts_with('$') {
-                    symbols.get_type_by_name(&type_name)
+                    symbols.get_type_by_name(type_name)
                 } else if let Ok(idx) = type_name.parse::<usize>() {
                     symbols.get_type_by_index(idx)
                 } else {
@@ -150,7 +150,7 @@ fn validate_dynamic_operands(
                 if let Some(type_def) = type_def {
                     if let TypeKind::Struct { fields } = &type_def.kind {
                         let expected = fields.len();
-                        let type_display = type_def.name.as_deref().unwrap_or(&type_name);
+                        let type_display = type_def.name.as_deref().unwrap_or(type_name);
                         emit_operand_diagnostic(
                             node,
                             instr_name,
@@ -168,7 +168,7 @@ fn validate_dynamic_operands(
         "call" | "return_call" => {
             if let Some(func_name) = extract_instruction_index(node, source) {
                 let func = if func_name.starts_with('$') {
-                    symbols.get_function_by_name(&func_name)
+                    symbols.get_function_by_name(func_name)
                 } else if let Ok(idx) = func_name.parse::<usize>() {
                     symbols.get_function_by_index(idx)
                 } else {
@@ -176,7 +176,7 @@ fn validate_dynamic_operands(
                 };
                 if let Some(func) = func {
                     let expected = func.parameters.len();
-                    let func_display = func.name.as_deref().unwrap_or(&func_name);
+                    let func_display = func.name.as_deref().unwrap_or(func_name);
                     emit_operand_diagnostic(
                         node,
                         instr_name,
@@ -193,7 +193,7 @@ fn validate_dynamic_operands(
         "throw" => {
             if let Some(tag_name) = extract_instruction_index(node, source) {
                 let tag = if tag_name.starts_with('$') {
-                    symbols.get_tag_by_name(&tag_name)
+                    symbols.get_tag_by_name(tag_name)
                 } else if let Ok(idx) = tag_name.parse::<usize>() {
                     symbols.get_tag_by_index(idx)
                 } else {
@@ -201,7 +201,7 @@ fn validate_dynamic_operands(
                 };
                 if let Some(tag) = tag {
                     let expected = tag.params.len();
-                    let tag_display = tag.name.as_deref().unwrap_or(&tag_name);
+                    let tag_display = tag.name.as_deref().unwrap_or(tag_name);
                     emit_operand_diagnostic(
                         node,
                         instr_name,
@@ -218,7 +218,7 @@ fn validate_dynamic_operands(
         "call_ref" | "return_call_ref" => {
             if let Some(type_name) = extract_instruction_index(node, source) {
                 let type_def = if type_name.starts_with('$') {
-                    symbols.get_type_by_name(&type_name)
+                    symbols.get_type_by_name(type_name)
                 } else if let Ok(idx) = type_name.parse::<usize>() {
                     symbols.get_type_by_index(idx)
                 } else {
@@ -228,7 +228,7 @@ fn validate_dynamic_operands(
                     if let TypeKind::Func { params, .. } = &type_def.kind {
                         // Expected: params + 1 for the funcref
                         let expected = params.len() + 1;
-                        let type_display = type_def.name.as_deref().unwrap_or(&type_name);
+                        let type_display = type_def.name.as_deref().unwrap_or(type_name);
                         emit_operand_diagnostic(
                             node,
                             instr_name,
@@ -354,31 +354,28 @@ fn compute_child_expr_deficit(node: &Node, source: &str, symbols: &SymbolTable) 
             };
 
             let op_kind = first_op.kind();
-            let inner_name = {
-                let name = match op_kind.as_ref() {
-                    "op_const" => {
-                        let mut cc = first_op.walk();
-                        let child = first_op.children(&mut cc).next();
-                        match child {
-                            Some(c) => source[c.byte_range()].trim().to_string(),
-                            None => continue,
-                        }
+            let inner_name: &str = match op_kind.as_ref() {
+                "op_const" => {
+                    let mut cc = first_op.walk();
+                    let child = first_op.children(&mut cc).next();
+                    match child {
+                        Some(c) => source[c.byte_range()].trim(),
+                        None => continue,
                     }
-                    _ => source[first_op.byte_range()].trim().to_string(),
-                };
-                name
+                }
+                _ => source[first_op.byte_range()].trim(),
             };
 
-            let expected = if let Some(arity) = lookup_instruction_arity(inner_name.as_str()) {
+            let expected = if let Some(arity) = lookup_instruction_arity(inner_name) {
                 match arity.operand_mode {
                     OperandMode::Fixed(n) => n,
                     OperandMode::Dynamic => {
                         // For dynamic, try to resolve actual param count
-                        resolve_dynamic_expected(&expr_child, &inner_name, source, symbols)
+                        resolve_dynamic_expected(&expr_child, inner_name, source, symbols)
                             .unwrap_or(0)
                     }
                 }
-            } else if let Some((c, _)) = infer_simd_instruction_arity(&inner_name) {
+            } else if let Some((c, _)) = infer_simd_instruction_arity(inner_name) {
                 c
             } else {
                 continue;
@@ -404,7 +401,7 @@ fn resolve_dynamic_expected(
     match instr_name {
         "call" | "return_call" => {
             let func = if index_name.starts_with('$') {
-                symbols.get_function_by_name(&index_name)
+                symbols.get_function_by_name(index_name)
             } else if let Ok(idx) = index_name.parse::<usize>() {
                 symbols.get_function_by_index(idx)
             } else {
@@ -414,7 +411,7 @@ fn resolve_dynamic_expected(
         }
         "call_ref" | "return_call_ref" => {
             let type_def = if index_name.starts_with('$') {
-                symbols.get_type_by_name(&index_name)
+                symbols.get_type_by_name(index_name)
             } else if let Ok(idx) = index_name.parse::<usize>() {
                 symbols.get_type_by_index(idx)
             } else {
@@ -430,7 +427,7 @@ fn resolve_dynamic_expected(
         }
         "struct.new" => {
             let type_def = if index_name.starts_with('$') {
-                symbols.get_type_by_name(&index_name)
+                symbols.get_type_by_name(index_name)
             } else if let Ok(idx) = index_name.parse::<usize>() {
                 symbols.get_type_by_index(idx)
             } else {
@@ -446,7 +443,7 @@ fn resolve_dynamic_expected(
         }
         "throw" => {
             let tag = if index_name.starts_with('$') {
-                symbols.get_tag_by_name(&index_name)
+                symbols.get_tag_by_name(index_name)
             } else if let Ok(idx) = index_name.parse::<usize>() {
                 symbols.get_tag_by_index(idx)
             } else {
@@ -461,21 +458,21 @@ fn resolve_dynamic_expected(
 /// Extract the type/function/tag index from a folded expression node.
 ///
 /// Navigates: expr1_plain → instr_plain → (op_... index/identifier)
-fn extract_instruction_index(node: &Node, source: &str) -> Option<String> {
+fn extract_instruction_index<'s>(node: &Node, source: &'s str) -> Option<&'s str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "instr_plain" {
             let mut instr_cursor = child.walk();
             for instr_child in child.children(&mut instr_cursor) {
                 if instr_child.kind() == "index" || instr_child.kind() == "identifier" {
-                    return Some(source[instr_child.byte_range()].trim().to_string());
+                    return Some(source[instr_child.byte_range()].trim());
                 }
                 // Also check inside op_ nodes
                 if instr_child.kind().starts_with("op_") {
                     let mut op_cursor = instr_child.walk();
                     for op_child in instr_child.children(&mut op_cursor) {
                         if op_child.kind() == "index" || op_child.kind() == "identifier" {
-                            return Some(source[op_child.byte_range()].trim().to_string());
+                            return Some(source[op_child.byte_range()].trim());
                         }
                     }
                 }

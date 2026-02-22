@@ -21,7 +21,7 @@ use crate::ts_facade::Node;
 /// - `offset=N` where N exceeds u32::MAX for memory32 targets
 pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let mut instr_name = None;
+    let mut instr_name: Option<&str> = None;
     let mut align_node = None;
     let mut offset_node = None;
 
@@ -33,7 +33,7 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
             "op_index_opt_offset_opt_align_opt"
             | "op_simd_offset_opt_align_opt"
             | "op_simd_lane_memarg" => {
-                instr_name = Some(source[child.byte_range()].to_string());
+                instr_name = Some(&source[child.byte_range()]);
             }
             "align_value" => {
                 align_node = Some(child);
@@ -53,7 +53,7 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
                 if offset > u32::MAX as u64 {
                     diagnostics.push(Diagnostic::error(
                         node_to_range(offset_nd),
-                        "offset out of range".to_string(),
+                        "offset out of range",
                     ));
                 }
             }
@@ -75,17 +75,17 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
     if align == 0 || (align & (align - 1)) != 0 {
         diagnostics.push(Diagnostic::error(
             node_to_range(&align_nd),
-            "alignment must be a power of 2".to_string(),
+            "alignment must be a power of 2",
         ));
         return diagnostics;
     }
 
     // Check against natural alignment
-    if let Some(natural) = natural_alignment(&instr) {
+    if let Some(natural) = natural_alignment(instr) {
         if align > natural as u64 {
             diagnostics.push(Diagnostic::error(
                 node_to_range(&align_nd),
-                "alignment must not be larger than natural".to_string(),
+                "alignment must not be larger than natural",
             ));
         }
     }

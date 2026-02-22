@@ -530,7 +530,7 @@ fn check_tag_no_results(node: &Node, _source: &str, diagnostics: &mut Vec<Diagno
             if ck == "func_type_results" {
                 diagnostics.push(Diagnostic::error(
                     node_to_range(&child),
-                    "non-empty tag result type".to_string(),
+                    "non-empty tag result type",
                 ));
                 return true;
             }
@@ -2310,7 +2310,7 @@ fn infer_const_instr_type(
         "ref.null" => {
             // Resolve the heap type from the argument
             let heap_text = resolve_ref_null_heap_type(node, source);
-            match heap_text.as_deref() {
+            match heap_text {
                 Some("func") | Some("funcref") => Some(ValueType::Funcref),
                 Some("extern") | Some("externref") => Some(ValueType::Externref),
                 Some("any") | Some("anyref") => Some(ValueType::Anyref),
@@ -2443,7 +2443,7 @@ fn resolve_ref_func_target<'a>(
 /// Resolve the type of a global.get instruction's target global.
 /// Resolve the heap type argument of a ref.null instruction.
 /// Looks for the heap type text in child nodes of the instruction.
-fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
+fn resolve_ref_null_heap_type<'s>(node: &Node, source: &'s str) -> Option<&'s str> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
@@ -2452,7 +2452,7 @@ fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
             ck,
             "heap_type" | "_heap_type_or_ref" | "identifier" | "nat" | "index"
         ) {
-            let text = node_text(&child, source).trim().to_string();
+            let text = node_text(&child, source).trim();
             if !text.is_empty() {
                 return Some(text);
             }
@@ -2463,7 +2463,7 @@ fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
             for idx_child in child.children(&mut ic) {
                 node_kind!(ik = idx_child);
                 if matches!(ik, "identifier" | "nat") {
-                    let text = node_text(&idx_child, source).trim().to_string();
+                    let text = node_text(&idx_child, source).trim();
                     if !text.is_empty() {
                         return Some(text);
                     }
@@ -2473,10 +2473,7 @@ fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
     }
     // Fallback: try to extract from text
     let text = node_text(node, source);
-    if let Some(second) = text.split_whitespace().nth(1) {
-        return Some(second.to_string());
-    }
-    None
+    text.split_whitespace().nth(1)
 }
 
 fn resolve_global_get_type(node: &Node, source: &str, symbols: &SymbolTable) -> Option<ValueType> {
@@ -3348,7 +3345,7 @@ fn walk_for_memory_instrs(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
         let first_token = text.split_whitespace().next().unwrap_or("");
         if is_memory_instruction(first_token) {
             diagnostics.push(
-                Diagnostic::error(node_to_range(node), "unknown memory 0".to_string())
+                Diagnostic::error(node_to_range(node), "unknown memory 0")
                     .with_code("unknown-memory"),
             );
         }
@@ -3424,7 +3421,7 @@ fn check_call_indirect_table(
 ) {
     if symbols.tables.is_empty() {
         diagnostics.push(
-            Diagnostic::error(node_to_range(report_node), "unknown table".to_string())
+            Diagnostic::error(node_to_range(report_node), "unknown table")
                 .with_code("unknown-table"),
         );
     } else {
@@ -3432,7 +3429,7 @@ fn check_call_indirect_table(
         if let Some(table) = symbols.tables.get(table_idx) {
             if table.ref_type == ValueType::Externref {
                 diagnostics.push(
-                    Diagnostic::error(node_to_range(report_node), "type mismatch".to_string())
+                    Diagnostic::error(node_to_range(report_node), "type mismatch")
                         .with_code("type-mismatch"),
                 );
             }
@@ -3524,7 +3521,7 @@ fn check_inline_table_elem_refs(
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
         if ck == "nat" || ck == "index" {
-            let text = node_text(&child, source).trim().to_string();
+            let text = node_text(&child, source).trim();
             if let Ok(idx) = text.parse::<usize>() {
                 if idx >= symbols.functions.len() {
                     diagnostics.push(
