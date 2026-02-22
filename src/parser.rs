@@ -1058,8 +1058,9 @@ fn resolve_implicit_type(
     idx: usize,
     symbol_table: &SymbolTable,
 ) -> Option<(Vec<ValueType>, Vec<ValueType>)> {
-    let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let capacity = symbol_table.types.len() + symbol_table.functions.len();
+    let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::with_capacity(capacity);
+    let mut seen = std::collections::HashSet::with_capacity(capacity);
     for type_def in &symbol_table.types {
         if let TypeKind::Func { params, results } = &type_def.kind {
             let sig = (params.clone(), results.clone());

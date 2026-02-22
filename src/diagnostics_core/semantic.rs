@@ -1012,12 +1012,14 @@ fn derive_consumed_types_from_name(
         // Call — consume parameter types
         "call" | "return_call" => {
             if let Some(func_ref) = get_index_from_node(node, source) {
-                if let Some(func) = symbols.get_function_by_name(func_ref) {
-                    return Some(func.parameters.iter().map(|p| p.param_type).collect());
-                } else if let Ok(idx) = func_ref.parse::<usize>() {
-                    if let Some(func) = symbols.get_function_by_index(idx) {
-                        return Some(func.parameters.iter().map(|p| p.param_type).collect());
-                    }
+                let func = symbols.get_function_by_name(func_ref).or_else(|| {
+                    func_ref
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|idx| symbols.get_function_by_index(idx))
+                });
+                if let Some(f) = func {
+                    return Some(f.parameters.iter().map(|p| p.param_type).collect());
                 }
             }
             None // fall back to untyped
@@ -1026,19 +1028,12 @@ fn derive_consumed_types_from_name(
         // Call_ref — consume param types + typed funcref (ref null $type)
         "call_ref" | "return_call_ref" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
-                    if let TypeKind::Func { params, .. } = &type_def.kind {
-                        let mut types: Vec<ValueType> = params.clone();
-                        types.push(ValueType::RefNull(type_def.index as u32));
+                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                    if let TypeKind::Func { params, .. } = &td.kind {
+                        let mut types = Vec::with_capacity(params.len() + 1);
+                        types.extend_from_slice(params);
+                        types.push(ValueType::RefNull(td.index as u32));
                         return Some(types);
-                    }
-                } else if let Some(idx) = parse_wat_nat(type_ref) {
-                    if let Some(type_def) = symbols.get_type_by_index(idx as usize) {
-                        if let TypeKind::Func { params, .. } = &type_def.kind {
-                            let mut types: Vec<ValueType> = params.clone();
-                            types.push(ValueType::RefNull(type_def.index as u32));
-                            return Some(types);
-                        }
                     }
                 }
             }
@@ -1314,7 +1309,8 @@ fn get_call_indirect_consumed_types(
     // First, try to resolve from type_use (handles multi-table where first index is table ref)
     if let Some(td) = resolve_call_indirect_type(node, source, symbols) {
         if let TypeKind::Func { params, .. } = &td.kind {
-            let mut types = params.clone();
+            let mut types = Vec::with_capacity(params.len() + 1);
+            types.extend_from_slice(params);
             types.push(table_idx_type);
             return types;
         }
@@ -1459,27 +1455,23 @@ fn get_dynamic_operand_count(
     match instr_name {
         "call" | "return_call" => {
             if let Some(func_ref) = get_index_from_node(node, source) {
-                if let Some(func) = symbols.get_function_by_name(func_ref) {
-                    return func.parameters.len();
-                } else if let Ok(idx) = func_ref.parse::<usize>() {
-                    if let Some(func) = symbols.get_function_by_index(idx) {
-                        return func.parameters.len();
-                    }
+                let func = symbols.get_function_by_name(func_ref).or_else(|| {
+                    func_ref
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|idx| symbols.get_function_by_index(idx))
+                });
+                if let Some(f) = func {
+                    return f.parameters.len();
                 }
             }
             0
         }
         "call_ref" | "return_call_ref" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
-                    if let TypeKind::Func { params, .. } = &type_def.kind {
+                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                    if let TypeKind::Func { params, .. } = &td.kind {
                         return params.len() + 1;
-                    }
-                } else if let Ok(idx) = type_ref.parse::<usize>() {
-                    if let Some(type_def) = symbols.get_type_by_index(idx) {
-                        if let TypeKind::Func { params, .. } = &type_def.kind {
-                            return params.len() + 1;
-                        }
                     }
                 }
             }
@@ -1487,15 +1479,9 @@ fn get_dynamic_operand_count(
         }
         "call_indirect" | "return_call_indirect" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
-                    if let TypeKind::Func { params, .. } = &type_def.kind {
+                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                    if let TypeKind::Func { params, .. } = &td.kind {
                         return params.len() + 1;
-                    }
-                } else if let Ok(idx) = type_ref.parse::<usize>() {
-                    if let Some(type_def) = symbols.get_type_by_index(idx) {
-                        if let TypeKind::Func { params, .. } = &type_def.kind {
-                            return params.len() + 1;
-                        }
                     }
                 }
             }
@@ -1503,15 +1489,9 @@ fn get_dynamic_operand_count(
         }
         "struct.new" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(type_def) = symbols.get_type_by_name(type_ref) {
-                    if let TypeKind::Struct { fields } = &type_def.kind {
+                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                    if let TypeKind::Struct { fields } = &td.kind {
                         return fields.len();
-                    }
-                } else if let Ok(idx) = type_ref.parse::<usize>() {
-                    if let Some(type_def) = symbols.get_type_by_index(idx) {
-                        if let TypeKind::Struct { fields } = &type_def.kind {
-                            return fields.len();
-                        }
                     }
                 }
             }
@@ -1520,12 +1500,14 @@ fn get_dynamic_operand_count(
         "array.new_fixed" => get_array_new_fixed_count(node, source),
         "throw" => {
             if let Some(tag_ref) = get_index_from_node(node, source) {
-                if let Some(tag) = symbols.get_tag_by_name(tag_ref) {
-                    return tag.params.len();
-                } else if let Ok(idx) = tag_ref.parse::<usize>() {
-                    if let Some(tag) = symbols.get_tag_by_index(idx) {
-                        return tag.params.len();
-                    }
+                let tag = symbols.get_tag_by_name(tag_ref).or_else(|| {
+                    tag_ref
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|idx| symbols.get_tag_by_index(idx))
+                });
+                if let Some(t) = tag {
+                    return t.params.len();
                 }
             }
             0
@@ -1899,12 +1881,14 @@ fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) ->
 /// Get result types for a call instruction
 fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(func_ref) = get_index_from_node(node, source) {
-        if let Some(func) = symbols.get_function_by_name(func_ref) {
-            return func.results.clone();
-        } else if let Ok(idx) = func_ref.parse::<usize>() {
-            if let Some(func) = symbols.get_function_by_index(idx) {
-                return func.results.clone();
-            }
+        let func = symbols.get_function_by_name(func_ref).or_else(|| {
+            func_ref
+                .parse::<usize>()
+                .ok()
+                .and_then(|idx| symbols.get_function_by_index(idx))
+        });
+        if let Some(f) = func {
+            return f.results.clone();
         }
     }
     vec![]
@@ -1913,15 +1897,9 @@ fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Ve
 /// Get result types for a call_ref instruction
 fn get_call_ref_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(type_ref) = get_index_from_node(node, source) {
-        if let Some(type_def) = symbols.get_type_by_name(type_ref) {
-            if let TypeKind::Func { results, .. } = &type_def.kind {
+        if let Some(td) = resolve_type_ref(type_ref, symbols) {
+            if let TypeKind::Func { results, .. } = &td.kind {
                 return results.clone();
-            }
-        } else if let Ok(idx) = type_ref.parse::<usize>() {
-            if let Some(type_def) = symbols.get_type_by_index(idx) {
-                if let TypeKind::Func { results, .. } = &type_def.kind {
-                    return results.clone();
-                }
             }
         }
     }
@@ -1951,12 +1929,7 @@ fn resolve_call_indirect_type<'a>(
     }
     // No type_use found — try first index as a type reference (single-table mode)
     if let Some(ref idx_text) = first_index {
-        if let Some(td) = symbols.get_type_by_name(idx_text) {
-            return Some(td);
-        }
-        if let Ok(idx) = idx_text.parse::<usize>() {
-            return symbols.get_type_by_index(idx);
-        }
+        return resolve_type_ref(idx_text, symbols);
     }
     None
 }
@@ -2087,39 +2060,32 @@ fn get_expr1_wrapper_info<'a>(expr1: &Node, source: &'a str) -> Option<(&'a str,
 
 /// Get instruction info from an expr1_* node
 fn get_expr1_info<'a>(expr1: &Node, source: &'a str) -> Option<(&'a str, usize)> {
-    let mut expr_cursor = expr1.walk();
-    let explicit_operands = expr1
-        .children(&mut expr_cursor)
-        .filter(|c| {
-            node_kind!(kind = c);
-            kind == "expr"
-        })
-        .count();
-
     let mut cursor = expr1.walk();
+    let mut explicit_operands = 0usize;
+    let mut instr_name: Option<&'a str> = None;
+
     for child in expr1.children(&mut cursor) {
         node_kind!(kind = child);
 
-        if kind == "instr_plain" {
-            if let Some(name) = get_instruction_name(&child, source) {
-                return Some((name, explicit_operands));
-            }
-        }
-        if kind == "call_indirect" {
-            return Some(("call_indirect", explicit_operands));
-        }
-        if kind == "return_call_indirect" {
-            return Some(("return_call_indirect", explicit_operands));
-        }
-        if kind == "instr_call" {
-            let text = &source[child.byte_range()];
-            let first_token = text.split_whitespace().next().unwrap_or("");
-            if !first_token.is_empty() {
-                return Some((first_token, explicit_operands));
+        if kind == "expr" {
+            explicit_operands += 1;
+        } else if instr_name.is_none() {
+            if kind == "instr_plain" {
+                instr_name = get_instruction_name(&child, source);
+            } else if kind == "call_indirect" {
+                instr_name = Some("call_indirect");
+            } else if kind == "return_call_indirect" {
+                instr_name = Some("return_call_indirect");
+            } else if kind == "instr_call" {
+                let text = &source[child.byte_range()];
+                let first_token = text.split_whitespace().next().unwrap_or("");
+                if !first_token.is_empty() {
+                    instr_name = Some(first_token);
+                }
             }
         }
     }
-    None
+    instr_name.map(|name| (name, explicit_operands))
 }
 
 /// Get the expected operand count for an instruction (fixed or dynamic)
@@ -2610,12 +2576,14 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
                 }
             }
             if let Some(func_ref) = get_index_from_expr1_call(expr1, source) {
-                if let Some(func) = symbols.get_function_by_name(func_ref) {
-                    return func.results.clone();
-                } else if let Ok(idx) = func_ref.parse::<usize>() {
-                    if let Some(func) = symbols.get_function_by_index(idx) {
-                        return func.results.clone();
-                    }
+                let func = symbols.get_function_by_name(func_ref).or_else(|| {
+                    func_ref
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|idx| symbols.get_function_by_index(idx))
+                });
+                if let Some(f) = func {
+                    return f.results.clone();
                 }
             }
             vec![]
@@ -2671,6 +2639,16 @@ fn resolve_block_type_use<'a>(
     None
 }
 
+/// Resolve a type reference (name or numeric index) to a TypeDef.
+fn resolve_type_ref<'a>(type_ref: &str, symbols: &'a SymbolTable) -> Option<&'a TypeDef> {
+    symbols.get_type_by_name(type_ref).or_else(|| {
+        type_ref
+            .parse::<usize>()
+            .ok()
+            .and_then(|idx| symbols.get_type_by_index(idx))
+    })
+}
+
 /// Resolve a type_use node to a TypeDef via the symbol table.
 fn resolve_type_use_node<'a>(
     type_use_node: &Node,
@@ -2714,12 +2692,14 @@ fn resolve_type_index_to_func_sig(
     }
 
     // Build implicit type table: explicit type sigs + unique function sigs
-    let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let capacity = symbols.types.len() + symbols.functions.len();
+    let mut sigs: Vec<(Vec<ValueType>, Vec<ValueType>)> = Vec::with_capacity(capacity);
+    let mut seen = std::collections::HashSet::with_capacity(capacity);
     for type_def in &symbols.types {
         if let TypeKind::Func { params, results } = &type_def.kind {
-            seen.insert((params.clone(), results.clone()));
-            sigs.push((params.clone(), results.clone()));
+            let sig = (params.clone(), results.clone());
+            seen.insert(sig.clone());
+            sigs.push(sig);
         }
     }
     for func in &symbols.functions {
