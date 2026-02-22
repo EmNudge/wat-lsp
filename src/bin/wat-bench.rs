@@ -44,14 +44,10 @@ struct Args {
 
 /// Timing results for a single benchmark run
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct TimingResult {
     name: String,
     file: String,
     lines: usize,
-    bytes: usize,
-    iterations: usize,
-    total_time: Duration,
     min_time: Duration,
     max_time: Duration,
     avg_time: Duration,
@@ -179,13 +175,13 @@ fn main() {
 
         // Run each benchmark
         if benchmarks_to_run.contains(&"parse".to_string()) {
-            let result = benchmark_parse(&content, &file_name, lines, bytes, args.iterations);
+            let result = benchmark_parse(&content, &file_name, lines, args.iterations);
             print_result(&result, args.verbose, &args.format);
             add_to_summary(&mut all_summaries, "parse", result);
         }
 
         if benchmarks_to_run.contains(&"symbols".to_string()) {
-            let result = benchmark_symbols(&content, &file_name, lines, bytes, args.iterations);
+            let result = benchmark_symbols(&content, &file_name, lines, args.iterations);
             print_result(&result, args.verbose, &args.format);
             add_to_summary(&mut all_summaries, "symbols", result);
         }
@@ -197,7 +193,6 @@ fn main() {
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, args.verbose, &args.format);
@@ -211,7 +206,6 @@ fn main() {
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, args.verbose, &args.format);
@@ -219,14 +213,8 @@ fn main() {
         }
 
         if benchmarks_to_run.contains(&"completion".to_string()) {
-            let result = benchmark_completion(
-                &content,
-                &symbols,
-                &file_name,
-                lines,
-                bytes,
-                args.iterations,
-            );
+            let result =
+                benchmark_completion(&content, &symbols, &file_name, lines, args.iterations);
             print_result(&result, args.verbose, &args.format);
             add_to_summary(&mut all_summaries, "completion", result);
         }
@@ -238,7 +226,6 @@ fn main() {
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, args.verbose, &args.format);
@@ -252,7 +239,6 @@ fn main() {
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, args.verbose, &args.format);
@@ -296,7 +282,6 @@ fn benchmark_parse(
     content: &str,
     file_name: &str,
     lines: usize,
-    bytes: usize,
     iterations: usize,
 ) -> TimingResult {
     let mut times = Vec::with_capacity(iterations);
@@ -308,14 +293,13 @@ fn benchmark_parse(
         times.push(start.elapsed());
     }
 
-    create_timing_result("parse", file_name, lines, bytes, times)
+    create_timing_result("parse", file_name, lines, times)
 }
 
 fn benchmark_symbols(
     content: &str,
     file_name: &str,
     lines: usize,
-    bytes: usize,
     iterations: usize,
 ) -> TimingResult {
     let mut times = Vec::with_capacity(iterations);
@@ -326,7 +310,7 @@ fn benchmark_symbols(
         times.push(start.elapsed());
     }
 
-    create_timing_result("symbols", file_name, lines, bytes, times)
+    create_timing_result("symbols", file_name, lines, times)
 }
 
 fn benchmark_diagnostics(
@@ -335,7 +319,6 @@ fn benchmark_diagnostics(
     symbols: &wat_lsp_rust::symbols::SymbolTable,
     file_name: &str,
     lines: usize,
-    bytes: usize,
     iterations: usize,
 ) -> TimingResult {
     let mut times = Vec::with_capacity(iterations);
@@ -347,7 +330,7 @@ fn benchmark_diagnostics(
         times.push(start.elapsed());
     }
 
-    create_timing_result("diagnostics", file_name, lines, bytes, times)
+    create_timing_result("diagnostics", file_name, lines, times)
 }
 
 fn benchmark_hover(
@@ -356,7 +339,6 @@ fn benchmark_hover(
     symbols: &wat_lsp_rust::symbols::SymbolTable,
     file_name: &str,
     lines: usize,
-    bytes: usize,
     iterations: usize,
 ) -> TimingResult {
     let mut times = Vec::with_capacity(iterations);
@@ -372,7 +354,7 @@ fn benchmark_hover(
         times.push(start.elapsed());
     }
 
-    create_timing_result("hover", file_name, lines, bytes, times)
+    create_timing_result("hover", file_name, lines, times)
 }
 
 fn benchmark_completion(
@@ -380,7 +362,6 @@ fn benchmark_completion(
     symbols: &wat_lsp_rust::symbols::SymbolTable,
     file_name: &str,
     lines: usize,
-    bytes: usize,
     iterations: usize,
 ) -> TimingResult {
     let mut times = Vec::with_capacity(iterations);
@@ -399,7 +380,7 @@ fn benchmark_completion(
         times.push(start.elapsed());
     }
 
-    create_timing_result("completion", file_name, lines, bytes, times)
+    create_timing_result("completion", file_name, lines, times)
 }
 
 fn benchmark_definition(
@@ -408,7 +389,6 @@ fn benchmark_definition(
     symbols: &wat_lsp_rust::symbols::SymbolTable,
     file_name: &str,
     lines: usize,
-    bytes: usize,
     iterations: usize,
 ) -> TimingResult {
     let mut times = Vec::with_capacity(iterations);
@@ -424,7 +404,7 @@ fn benchmark_definition(
         times.push(start.elapsed());
     }
 
-    create_timing_result("definition", file_name, lines, bytes, times)
+    create_timing_result("definition", file_name, lines, times)
 }
 
 fn benchmark_references(
@@ -433,7 +413,6 @@ fn benchmark_references(
     symbols: &wat_lsp_rust::symbols::SymbolTable,
     file_name: &str,
     lines: usize,
-    bytes: usize,
     iterations: usize,
 ) -> TimingResult {
     let mut times = Vec::with_capacity(iterations);
@@ -449,7 +428,7 @@ fn benchmark_references(
         times.push(start.elapsed());
     }
 
-    create_timing_result("references", file_name, lines, bytes, times)
+    create_timing_result("references", file_name, lines, times)
 }
 
 fn generate_test_positions(lines: usize, count: usize) -> Vec<Position> {
@@ -468,7 +447,6 @@ fn create_timing_result(
     name: &str,
     file: &str,
     lines: usize,
-    bytes: usize,
     times: Vec<Duration>,
 ) -> TimingResult {
     let total: Duration = times.iter().sum();
@@ -480,9 +458,6 @@ fn create_timing_result(
         name: name.to_string(),
         file: file.to_string(),
         lines,
-        bytes,
-        iterations: times.len(),
-        total_time: total,
         min_time: min,
         max_time: max,
         avg_time: avg,
@@ -630,7 +605,6 @@ fn run_large_file_benchmarks(
         let content = generate_large_wat(size);
         let file_name = format!("synthetic_{}lines", size);
         let lines = content.lines().count();
-        let bytes = content.len();
 
         let mut parser = create_parser();
         let tree = match parser.parse(&content, None) {
@@ -649,13 +623,13 @@ fn run_large_file_benchmarks(
         };
 
         if benchmarks.contains(&"parse".to_string()) {
-            let result = benchmark_parse(&content, &file_name, lines, bytes, args.iterations);
+            let result = benchmark_parse(&content, &file_name, lines, args.iterations);
             print_result(&result, true, &args.format);
             add_to_summary(summaries, "parse (large)", result);
         }
 
         if benchmarks.contains(&"symbols".to_string()) {
-            let result = benchmark_symbols(&content, &file_name, lines, bytes, args.iterations);
+            let result = benchmark_symbols(&content, &file_name, lines, args.iterations);
             print_result(&result, true, &args.format);
             add_to_summary(summaries, "symbols (large)", result);
         }
@@ -667,7 +641,6 @@ fn run_large_file_benchmarks(
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, true, &args.format);
@@ -681,7 +654,6 @@ fn run_large_file_benchmarks(
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, true, &args.format);
@@ -689,14 +661,8 @@ fn run_large_file_benchmarks(
         }
 
         if benchmarks.contains(&"completion".to_string()) {
-            let result = benchmark_completion(
-                &content,
-                &symbols,
-                &file_name,
-                lines,
-                bytes,
-                args.iterations,
-            );
+            let result =
+                benchmark_completion(&content, &symbols, &file_name, lines, args.iterations);
             print_result(&result, true, &args.format);
             add_to_summary(summaries, "completion (large)", result);
         }
@@ -708,7 +674,6 @@ fn run_large_file_benchmarks(
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, true, &args.format);
@@ -722,7 +687,6 @@ fn run_large_file_benchmarks(
                 &symbols,
                 &file_name,
                 lines,
-                bytes,
                 args.iterations,
             );
             print_result(&result, true, &args.format);

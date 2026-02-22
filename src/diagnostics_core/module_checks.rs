@@ -625,8 +625,8 @@ fn check_inline_type_mismatches(
         // Check if this function has both type_use and inline params/results
         let mut type_use_node = None;
         let mut has_inline_sig = false;
-        let mut inline_params: Vec<String> = Vec::new();
-        let mut inline_results: Vec<String> = Vec::new();
+        let mut inline_params: Vec<ValueType> = Vec::new();
+        let mut inline_results: Vec<ValueType> = Vec::new();
 
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
@@ -653,13 +653,10 @@ fn check_inline_type_mismatches(
             _ => return,
         };
 
-        // Resolve the type from the type_use
+        // Resolve the type from the type_use and compare ValueType directly
         if let Some(type_def) = resolve_type_use(&type_use, source, symbols) {
             if let TypeKind::Func { params, results } = &type_def.kind {
-                let type_params: Vec<String> = params.iter().map(|p| p.to_string()).collect();
-                let type_results: Vec<String> = results.iter().map(|r| r.to_string()).collect();
-
-                if inline_params != type_params || inline_results != type_results {
+                if inline_params != *params || inline_results != *results {
                     diagnostics.push(Diagnostic::error(
                         node_to_range(&type_use),
                         "Inline function type does not match the type reference",
@@ -670,12 +667,13 @@ fn check_inline_type_mismatches(
     });
 }
 
-fn collect_value_types_recursive(node: &Node, source: &str, out: &mut Vec<String>) {
+fn collect_value_types_recursive(node: &Node, source: &str, out: &mut Vec<ValueType>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
         if ck == "value_type" || ck == "ref_type" {
-            out.push(node_text(&child, source).to_string());
+            let text = node_text(&child, source);
+            out.push(ValueType::try_parse(text).unwrap_or(ValueType::Unknown));
         } else {
             collect_value_types_recursive(&child, source, out);
         }
@@ -1023,26 +1021,35 @@ fn check_global_get_in_const(
 }
 
 // ============================================================================
-// Data segment memory index validation
+// Data/element segment index validation (shared logic)
 // ============================================================================
 
-fn check_data_segment_memory_indices(
+/// Check that active segment use-nodes reference valid indices.
+/// `field_kind`: "module_field_data" or "module_field_elem"
+/// `use_kind`: "memory_use" or "table_use"
+/// `resolve_name`: resolve a $name to an index (returns None if unknown)
+/// `count`: total number of entities (memories or tables)
+/// `entity_name`: "memory" or "table" (for error messages)
+#[allow(clippy::too_many_arguments)]
+fn check_segment_indices(
     module: &Node,
     source: &str,
-    symbols: &SymbolTable,
+    count: usize,
     diagnostics: &mut Vec<Diagnostic>,
+    field_kind: &str,
+    use_kind: &str,
+    resolve_name: &dyn Fn(&str) -> Option<usize>,
+    entity_name: &str,
 ) {
     for_each_module_field(module, |field| {
         node_kind!(fk = field);
-        if fk != "module_field_data" {
+        if fk != field_kind {
             return;
         }
 
-        // Look for memory_use child (e.g., (memory 1)) or an index before offset
-        // Active data segments have an offset expression
         let mut has_offset = false;
-        let mut memory_idx: Option<usize> = None;
-        let mut memory_node_range = None;
+        let mut resolved_idx: Option<usize> = None;
+        let mut use_node_range = None;
 
         let mut cursor = field.walk();
         for child in field.children(&mut cursor) {
@@ -1050,84 +1057,20 @@ fn check_data_segment_memory_indices(
             if ck == "offset" {
                 has_offset = true;
             }
-            if ck == "memory_use" {
-                // (memory $idx) or (memory N)
+            if ck == use_kind {
                 let mut mc = child.walk();
                 for mc_child in child.children(&mut mc) {
                     node_kind!(mk = mc_child);
                     if mk == "index" || mk == "identifier" || mk == "nat" {
                         let text = node_text(&mc_child, source);
-                        memory_node_range = Some(node_to_range(&child));
+                        use_node_range = Some(node_to_range(&child));
                         if text.starts_with('$') {
-                            if let Some(mem) = symbols.get_memory_by_name(text) {
-                                memory_idx = Some(mem.index);
-                            } else {
-                                // Unknown memory — reference check will handle this
-                                return;
+                            match resolve_name(text) {
+                                Some(idx) => resolved_idx = Some(idx),
+                                None => return, // unknown — reference check handles
                             }
                         } else if let Ok(idx) = text.parse::<usize>() {
-                            memory_idx = Some(idx);
-                        }
-                    }
-                }
-            }
-        }
-
-        if !has_offset {
-            return; // passive segment — no memory index needed
-        }
-
-        // Default memory index is 0
-        let idx = memory_idx.unwrap_or(0);
-        if idx >= symbols.memories.len() {
-            let range = memory_node_range.unwrap_or_else(|| node_to_range(field));
-            diagnostics.push(Diagnostic::error(range, format!("unknown memory {}", idx)));
-        }
-    });
-}
-
-// ============================================================================
-// Element segment table index validation
-// ============================================================================
-
-fn check_elem_segment_table_indices(
-    module: &Node,
-    source: &str,
-    symbols: &SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for_each_module_field(module, |field| {
-        node_kind!(fk = field);
-        if fk != "module_field_elem" {
-            return;
-        }
-
-        // Look for table_use child or active segment with offset
-        let mut has_offset = false;
-        let mut table_idx: Option<usize> = None;
-        let mut table_node_range = None;
-
-        let mut cursor = field.walk();
-        for child in field.children(&mut cursor) {
-            node_kind!(ck = child);
-            if ck == "offset" {
-                has_offset = true;
-            }
-            if ck == "table_use" {
-                let mut tc = child.walk();
-                for tc_child in child.children(&mut tc) {
-                    node_kind!(tk = tc_child);
-                    if tk == "index" || tk == "identifier" || tk == "nat" {
-                        let text = node_text(&tc_child, source);
-                        table_node_range = Some(node_to_range(&child));
-                        if text.starts_with('$') {
-                            if let Some(tbl) = symbols.get_table_by_name(text) {
-                                table_idx = Some(tbl.index);
-                            } else {
-                                return; // unknown table — reference check handles
-                            }
-                        } else if let Ok(idx) = text.parse::<usize>() {
-                            table_idx = Some(idx);
+                            resolved_idx = Some(idx);
                         }
                     }
                 }
@@ -1138,12 +1081,51 @@ fn check_elem_segment_table_indices(
             return; // passive or declarative segment
         }
 
-        let idx = table_idx.unwrap_or(0);
-        if idx >= symbols.tables.len() {
-            let range = table_node_range.unwrap_or_else(|| node_to_range(field));
-            diagnostics.push(Diagnostic::error(range, format!("unknown table {}", idx)));
+        let idx = resolved_idx.unwrap_or(0);
+        if idx >= count {
+            let range = use_node_range.unwrap_or_else(|| node_to_range(field));
+            diagnostics.push(Diagnostic::error(
+                range,
+                format!("unknown {} {}", entity_name, idx),
+            ));
         }
     });
+}
+
+fn check_data_segment_memory_indices(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    check_segment_indices(
+        module,
+        source,
+        symbols.memories.len(),
+        diagnostics,
+        "module_field_data",
+        "memory_use",
+        &|name| symbols.get_memory_by_name(name).map(|m| m.index),
+        "memory",
+    );
+}
+
+fn check_elem_segment_table_indices(
+    module: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    check_segment_indices(
+        module,
+        source,
+        symbols.tables.len(),
+        diagnostics,
+        "module_field_elem",
+        "table_use",
+        &|name| symbols.get_table_by_name(name).map(|t| t.index),
+        "table",
+    );
 }
 
 // ============================================================================
@@ -1559,26 +1541,25 @@ fn check_ref_func_declarations(
             }
             "module_field_func" => {
                 // Inline export: (func $f (export "name") ...)
+                // Single-pass: collect identifier and check for export simultaneously
                 let mut cursor = field.walk();
                 let mut has_export = false;
+                let mut func_idx: Option<usize> = None;
                 for child in field.children(&mut cursor) {
                     node_kind!(ck = child);
                     if ck == "export" {
                         has_export = true;
+                    } else if ck == "identifier" && func_idx.is_none() {
+                        let name = node_text(&child, source).trim();
+                        func_idx = resolve_func_index(name, symbols);
+                    }
+                    if has_export && func_idx.is_some() {
                         break;
                     }
                 }
                 if has_export {
-                    let mut cursor2 = field.walk();
-                    for child in field.children(&mut cursor2) {
-                        node_kind!(ck = child);
-                        if ck == "identifier" {
-                            let name = node_text(&child, source).trim();
-                            if let Some(idx) = resolve_func_index(name, symbols) {
-                                declared_funcs.insert(idx);
-                            }
-                            break;
-                        }
+                    if let Some(idx) = func_idx {
+                        declared_funcs.insert(idx);
                     }
                 }
             }
@@ -2492,9 +2473,8 @@ fn resolve_ref_null_heap_type(node: &Node, source: &str) -> Option<String> {
     }
     // Fallback: try to extract from text
     let text = node_text(node, source);
-    let parts: Vec<&str> = text.split_whitespace().collect();
-    if parts.len() >= 2 {
-        return Some(parts[1].to_string());
+    if let Some(second) = text.split_whitespace().nth(1) {
+        return Some(second.to_string());
     }
     None
 }
@@ -3136,8 +3116,8 @@ fn check_block_node_type_use(
 ) {
     let mut type_use_node = None;
     let mut has_inline_sig = false;
-    let mut inline_params: Vec<String> = Vec::new();
-    let mut inline_results: Vec<String> = Vec::new();
+    let mut inline_params: Vec<ValueType> = Vec::new();
+    let mut inline_results: Vec<ValueType> = Vec::new();
 
     // Check immediate children and one level of inner block
     check_block_children_for_type_use(
@@ -3156,10 +3136,7 @@ fn check_block_node_type_use(
 
     if let Some(type_def) = resolve_type_use(&type_use, source, symbols) {
         if let TypeKind::Func { params, results } = &type_def.kind {
-            let type_params: Vec<String> = params.iter().map(|p| p.to_string()).collect();
-            let type_results: Vec<String> = results.iter().map(|r| r.to_string()).collect();
-
-            if inline_params != type_params || inline_results != type_results {
+            if inline_params != *params || inline_results != *results {
                 diagnostics.push(Diagnostic::error(
                     node_to_range(&type_use),
                     "Inline function type does not match the type reference",
@@ -3206,8 +3183,8 @@ fn check_block_children_for_type_use<'a>(
     source: &str,
     type_use_node: &mut Option<Node<'a>>,
     has_inline_sig: &mut bool,
-    inline_params: &mut Vec<String>,
-    inline_results: &mut Vec<String>,
+    inline_params: &mut Vec<ValueType>,
+    inline_results: &mut Vec<ValueType>,
 ) {
     check_block_children_for_type_use_body!(
         node,
@@ -3224,8 +3201,8 @@ fn check_block_children_for_type_use(
     source: &str,
     type_use_node: &mut Option<Node>,
     has_inline_sig: &mut bool,
-    inline_params: &mut Vec<String>,
-    inline_results: &mut Vec<String>,
+    inline_params: &mut Vec<ValueType>,
+    inline_results: &mut Vec<ValueType>,
 ) {
     check_block_children_for_type_use_body!(
         node,

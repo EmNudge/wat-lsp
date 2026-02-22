@@ -2983,8 +2983,16 @@ fn format_types(types: &[ValueType]) -> String {
     if types.is_empty() {
         return "(none)".to_string();
     }
-    let inner: Vec<_> = types.iter().map(|t| t.to_string()).collect();
-    format!("({})", inner.join(", "))
+    use std::fmt::Write;
+    let mut out = String::from("(");
+    for (i, t) in types.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        let _ = write!(out, "{}", t);
+    }
+    out.push(')');
+    out
 }
 
 /// Validate that a tail call instruction's callee return types match the enclosing function's.
