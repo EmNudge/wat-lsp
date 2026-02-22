@@ -95,6 +95,7 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
         return context;
     }
 
+    let original_start = node.start_byte();
     let mut current = node;
 
     loop {
@@ -131,13 +132,45 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
             return InstructionContext::Tag;
         }
 
+        // Check for memory_use (memory reference in data segments)
+        if kind == "memory_use" {
+            return InstructionContext::Memory;
+        }
+
         // Check for data segment definition
         if kind == "module_field_data" {
             return InstructionContext::Data;
         }
 
+        // Check for elem_list (function references in elem segments with `func` keyword)
+        if kind == "elem_list" && find_child_by_kind(&current, "elem_kind").is_some() {
+            return InstructionContext::Call;
+        }
+
+        // Check for table_use (table reference in elem segments)
+        if kind == "table_use" {
+            return InstructionContext::Table;
+        }
+
         // Check for elem segment definition
         if kind == "module_field_elem" {
+            // Check if the original node is a bare function reference (after offset)
+            // vs. the elem segment name (before offset)
+            let mut child_cursor = current.walk();
+            let mut past_offset = false;
+            for child in current.children(&mut child_cursor) {
+                node_kind!(ck = child);
+                if ck == "offset" {
+                    past_offset = true;
+                    continue;
+                }
+                if ck == "index" && past_offset {
+                    let cr = child.byte_range();
+                    if cr.start <= original_start && original_start < cr.end {
+                        return InstructionContext::Call;
+                    }
+                }
+            }
             return InstructionContext::Elem;
         }
 

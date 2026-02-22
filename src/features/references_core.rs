@@ -17,9 +17,9 @@ use crate::ts_facade::{Node, Tree};
 use crate::core::types::{Position, Range};
 use crate::symbols::*;
 use crate::utils::{
-    determine_context_from_line, determine_instruction_context_at_node, find_containing_function,
-    get_line_at_position, get_word_at_position, is_labeled_block_kind, node_at_position,
-    node_to_range, position_to_byte, InstructionContext,
+    determine_context_from_line, determine_instruction_context_at_node, find_child_by_kind,
+    find_containing_function, get_line_at_position, get_word_at_position, is_labeled_block_kind,
+    node_at_position, node_to_range, position_to_byte, InstructionContext,
 };
 
 /// Represents the type of symbol being referenced
@@ -541,6 +541,90 @@ fn walk_tree_for_references(
             results,
         };
         check_node_for_reference(&node, target, &mut ctx, &export_context, block_stack);
+    }
+
+    // Check for elem_list with elem_kind: all index children are function references
+    if &*kind == "elem_list" && find_child_by_kind(&node, "elem_kind").is_some() {
+        let call_context = InstructionContext::Call;
+        let mut inner_cursor = node.walk();
+        for child in node.children(&mut inner_cursor) {
+            let child_kind = child.kind();
+            if &*child_kind == "index" {
+                let mut ctx = ReferenceSearchContext {
+                    document,
+                    symbols,
+                    results,
+                };
+                check_node_for_reference(&child, target, &mut ctx, &call_context, block_stack);
+            }
+        }
+        if is_block {
+            block_stack.pop();
+        }
+        return;
+    }
+
+    // Check for table_use: index child is a table reference
+    if &*kind == "table_use" {
+        let table_context = InstructionContext::Table;
+        let mut inner_cursor = node.walk();
+        for child in node.children(&mut inner_cursor) {
+            let child_kind = child.kind();
+            if &*child_kind == "index" {
+                let mut ctx = ReferenceSearchContext {
+                    document,
+                    symbols,
+                    results,
+                };
+                check_node_for_reference(&child, target, &mut ctx, &table_context, block_stack);
+            }
+        }
+        if is_block {
+            block_stack.pop();
+        }
+        return;
+    }
+
+    // Check for memory_use: index child is a memory reference
+    if &*kind == "memory_use" {
+        let memory_context = InstructionContext::Memory;
+        let mut inner_cursor = node.walk();
+        for child in node.children(&mut inner_cursor) {
+            let child_kind = child.kind();
+            if &*child_kind == "index" {
+                let mut ctx = ReferenceSearchContext {
+                    document,
+                    symbols,
+                    results,
+                };
+                check_node_for_reference(&child, target, &mut ctx, &memory_context, block_stack);
+            }
+        }
+        if is_block {
+            block_stack.pop();
+        }
+        return;
+    }
+
+    // Check for module_field_elem: bare index children after offset are function references
+    if &*kind == "module_field_elem" {
+        let mut inner_cursor = node.walk();
+        let mut past_offset = false;
+        for child in node.children(&mut inner_cursor) {
+            let child_kind = child.kind();
+            if &*child_kind == "offset" {
+                past_offset = true;
+            } else if &*child_kind == "index" && past_offset {
+                let call_context = InstructionContext::Call;
+                let mut ctx = ReferenceSearchContext {
+                    document,
+                    symbols,
+                    results,
+                };
+                check_node_for_reference(&child, target, &mut ctx, &call_context, block_stack);
+            }
+        }
+        // Fall through to normal recursion for table_use, elem_list, offset children
     }
 
     // Check if this node is a reference instruction

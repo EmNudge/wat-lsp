@@ -732,3 +732,137 @@ fn test_goto_definition_export_with_array_in_name() {
         "$lookup_table definition should be on line 7"
     );
 }
+
+#[test]
+fn test_goto_type_definition_from_call_indirect() {
+    let document = r#"(module
+  (type $unary (func (param i32) (result i32)))
+  (type $binary (func (param i32 i32) (result i32)))
+
+  (table 5 funcref)
+  (elem (i32.const 0) func $double $square)
+
+  (func $double (param $x i32) (result i32)
+    (i32.mul (local.get $x) (i32.const 2)))
+
+  (func $square (param $x i32) (result i32)
+    (i32.mul (local.get $x) (local.get $x)))
+
+  (func (export "double_then_square") (param $x i32) (result i32)
+    local.get $x
+    i32.const 0
+    call_indirect (type $unary)
+    i32.const 1
+    call_indirect (type $unary))
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position on "$unary" in first call_indirect (type $unary) - line 16
+    // Line 16: "    call_indirect (type $unary)"
+    let line16 = document.lines().nth(16).unwrap();
+    let col = line16
+        .find("$unary")
+        .expect("Should find $unary on line 16");
+    let position = Position::new(16, col as u32);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for $unary from call_indirect. Line: '{}', col: {}",
+        line16.trim(),
+        col
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 1,
+        "$unary definition should be on line 1"
+    );
+}
+
+#[test]
+fn test_goto_function_definition_in_elem_segment() {
+    let document = r#"(module
+  (func $double (param i32) (result i32)
+    local.get 0
+    i32.const 2
+    i32.mul)
+  (func $square (param i32) (result i32)
+    local.get 0
+    local.get 0
+    i32.mul)
+  (table 2 funcref)
+  (elem (i32.const 0) func $double $square)
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position at "$double" in the elem segment (line 10, col 27)
+    let position = Position::new(10, 28);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for $double in elem segment"
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 1,
+        "$double definition should be on line 1"
+    );
+
+    // Also test $square
+    let position = Position::new(10, 37);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for $square in elem segment"
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 5,
+        "$square definition should be on line 5"
+    );
+}
+
+#[test]
+fn test_goto_function_definition_in_elem_segment_bare_index() {
+    // Abbreviated elem form without `func` keyword: (elem (offset ...) $f1 $f2)
+    let document = r#"(module
+  (func $double (param i32) (result i32)
+    local.get 0
+    i32.const 2
+    i32.mul)
+  (table 1 funcref)
+  (elem (i32.const 0) $double)
+)"#;
+
+    let symbols = parse_document(document).expect("Failed to parse document");
+    let tree = create_test_tree(document);
+    let uri = create_uri();
+
+    // Position at "$double" in the bare elem segment (line 6)
+    // "  (elem (i32.const 0) $double)"
+    //                        ^ col 22
+    let position = Position::new(6, 23);
+
+    let location = provide_definition(document, &symbols, &tree, position, &uri);
+
+    assert!(
+        location.is_some(),
+        "Should find definition for $double in bare elem segment"
+    );
+    let location = location.unwrap();
+    assert_eq!(
+        location.range.start.line, 1,
+        "$double definition should be on line 1"
+    );
+}
