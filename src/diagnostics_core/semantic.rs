@@ -4104,8 +4104,8 @@ fn is_heap_subtype(sub: &str, sup: &str) -> bool {
         return true;
     }
 
-    let sub_is_concrete = is_concrete_type_ref(&sub);
-    let sup_is_concrete = is_concrete_type_ref(&sup);
+    let sub_is_concrete = is_concrete_type_ref(sub);
+    let sup_is_concrete = is_concrete_type_ref(sup);
 
     // If either is a concrete type index, we can't fully validate without
     // symbol table — be conservative and only flag clearly invalid casts
@@ -4115,12 +4115,9 @@ fn is_heap_subtype(sub: &str, sup: &str) -> bool {
         return true;
     }
 
-    match sup.as_str() {
-        "any" => matches!(
-            sub.as_str(),
-            "eq" | "i31" | "struct" | "array" | "none" | "null"
-        ),
-        "eq" => matches!(sub.as_str(), "i31" | "struct" | "array" | "none" | "null"),
+    match sup {
+        "any" => matches!(sub, "eq" | "i31" | "struct" | "array" | "none" | "null"),
+        "eq" => matches!(sub, "i31" | "struct" | "array" | "none" | "null"),
         "func" => sub == "nofunc",
         "extern" => sub == "noextern",
         "exn" => sub == "noexn",
@@ -4137,20 +4134,21 @@ fn is_concrete_type_ref(ty: &str) -> bool {
 }
 
 /// Normalize abbreviated heap type names to their canonical form.
-fn normalize_heap_type(ty: &str) -> String {
+/// Returns a `&str` (either static or a slice of the input) to avoid allocation.
+fn normalize_heap_type(ty: &str) -> &str {
     match ty {
-        "anyref" => "any".to_string(),
-        "funcref" => "func".to_string(),
-        "externref" => "extern".to_string(),
-        "eqref" => "eq".to_string(),
-        "i31ref" => "i31".to_string(),
-        "structref" => "struct".to_string(),
-        "arrayref" => "array".to_string(),
-        "nullref" => "null".to_string(),
-        "nullfuncref" => "nofunc".to_string(),
-        "nullexternref" => "noextern".to_string(),
-        "exnref" => "exn".to_string(),
-        "nullexnref" => "noexn".to_string(),
-        other => other.to_string(),
+        "anyref" => "any",
+        "funcref" => "func",
+        "externref" => "extern",
+        "eqref" => "eq",
+        "i31ref" => "i31",
+        "structref" => "struct",
+        "arrayref" => "array",
+        "nullref" => "null",
+        "nullfuncref" => "nofunc",
+        "nullexternref" => "noextern",
+        "exnref" => "exn",
+        "nullexnref" => "noexn",
+        other => other,
     }
 }

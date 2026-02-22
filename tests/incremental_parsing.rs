@@ -4,12 +4,10 @@
 
 #![cfg(feature = "native")]
 
-mod test_helpers;
-
 use std::time::Instant;
-use test_helpers::generate_large_wat;
 use tower_lsp::lsp_types::Position;
 use wat_lsp_rust::diagnostics::provide_tree_sitter_diagnostics;
+use wat_lsp_rust::test_utils::generate_large_wat;
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
 use wat_lsp_rust::utils::apply_text_edit;
 

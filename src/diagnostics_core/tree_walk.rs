@@ -92,7 +92,9 @@ pub fn walk_tree_for_diagnostics(
             }
         }
 
-        if !found_instr_list && !expected_results.is_empty() && !has_inline_import(&node) {
+        let is_import = has_inline_import(&node);
+
+        if !found_instr_list && !expected_results.is_empty() && !is_import {
             diagnostics.push(Diagnostic::error(
                 node_to_range(&node),
                 format!(
@@ -103,7 +105,7 @@ pub fn walk_tree_for_diagnostics(
         }
 
         // Check for uninitialized non-nullable ref locals
-        if !has_inline_import(&node) {
+        if !is_import {
             diagnostics.extend(
                 crate::diagnostics_core::local_init::check_uninitialized_locals(
                     &node, source, symbols,
@@ -112,7 +114,7 @@ pub fn walk_tree_for_diagnostics(
         }
 
         // Check for unused locals and parameters
-        if !has_inline_import(&node) {
+        if !is_import {
             check_unused_locals(&node, source, symbols, diagnostics);
         }
     }
@@ -209,31 +211,13 @@ pub fn walk_tree_for_diagnostics(
 
     // Check SIMD lane indices, alignment constraints, and GC struct field access
     if kind_str == "instr_plain" {
-        diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
-            &node, source,
-        ));
-        diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
-            &node, source, symbols,
-        ));
-        diagnostics.extend(
-            crate::diagnostics_core::gc_checks::check_struct_field_access(&node, source, symbols),
-        );
+        check_instruction_diagnostics(&node, source, symbols, diagnostics);
     } else if kind_str == "expr1_plain" {
         // In folded form, instr_plain is a child that won't be visited separately
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "instr_plain" {
-                diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
-                    &child, source,
-                ));
-                diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
-                    &child, source, symbols,
-                ));
-                diagnostics.extend(
-                    crate::diagnostics_core::gc_checks::check_struct_field_access(
-                        &child, source, symbols,
-                    ),
-                );
+                check_instruction_diagnostics(&child, source, symbols, diagnostics);
                 break;
             }
         }
@@ -300,6 +284,24 @@ pub fn walk_tree_for_diagnostics(
     }
 }
 
+/// Run SIMD lane, alignment, and GC struct field checks on an instr_plain node.
+fn check_instruction_diagnostics(
+    instr_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
+        instr_node, source,
+    ));
+    diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
+        instr_node, source, symbols,
+    ));
+    diagnostics.extend(
+        crate::diagnostics_core::gc_checks::check_struct_field_access(instr_node, source, symbols),
+    );
+}
+
 /// Check if an ERROR node is in a value type context (params, results, locals, globals)
 fn is_value_type_context(node: &Node) -> bool {
     if let Some(parent) = node.parent() {
@@ -343,7 +345,7 @@ fn check_unused_locals(
     }
 
     // Collect all used indices by scanning the function body
-    let mut used_indices: HashSet<usize> = HashSet::new();
+    let mut used_indices: HashSet<usize> = HashSet::with_capacity(total);
     collect_local_uses(func_node, source, func, &mut used_indices);
 
     // Check parameters

@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::types::{Diagnostic, Range};
-use crate::parser::normalize_identifier;
+use crate::parser::{normalize_identifier, parse_wat_nat};
 use crate::symbols::{Function, SymbolTable, TypeKind, ValueType};
 use crate::utils::{node_text, node_to_range};
 
@@ -2109,8 +2109,8 @@ fn check_ref_for_forward_type(
                         }
                     }
                 } else if ik == "nat" || ik == "dec_nat" || ik == "hex_nat" {
-                    if let Ok(idx) = parse_nat(node_text(&idx_child, source)) {
-                        if idx > current_type_index {
+                    if let Some(idx) = parse_wat_nat(node_text(&idx_child, source)) {
+                        if (idx as usize) > current_type_index {
                             diagnostics.push(
                                 Diagnostic::error(
                                     node_to_range(&idx_child),
@@ -2162,14 +2162,9 @@ fn walk_for_unknown_type_refs(
 ) {
     node_kind!(kind = node);
 
-    // Check ref_type nodes for numeric heap type indices
-    if kind == "ref_type" || kind == "_heap_type_or_ref" {
-        check_heap_type_index(node, source, max_type_count, diagnostics);
-    }
-
-    // Also check value_type_ref_type which can contain heap types
-    if kind == "value_type_ref_type" {
-        check_heap_type_index(node, source, max_type_count, diagnostics);
+    // Check ref_type/heap_type/value_type_ref_type nodes for numeric heap type indices
+    if kind == "ref_type" || kind == "_heap_type_or_ref" || kind == "value_type_ref_type" {
+        find_type_index_in_ref(node, node, source, max_type_count, diagnostics);
     }
 
     // Check type_use nodes (e.g., call_indirect (type N))
@@ -2183,23 +2178,6 @@ fn walk_for_unknown_type_refs(
     for child in node.children(&mut cursor) {
         walk_for_unknown_type_refs(&child, source, max_type_count, diagnostics);
     }
-}
-
-/// Check if a ref_type node contains an out-of-bounds numeric type index.
-/// Recursively searches for nat nodes within the ref_type's children.
-fn check_heap_type_index(
-    ref_type_node: &Node,
-    source: &str,
-    type_count: usize,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    find_type_index_in_ref(
-        ref_type_node,
-        ref_type_node,
-        source,
-        type_count,
-        diagnostics,
-    );
 }
 
 /// Recursively search for numeric type indices within a ref_type subtree.
@@ -2217,8 +2195,8 @@ fn find_type_index_in_ref(
         // A nat/dec_nat/hex_nat inside a ref type is a numeric type index
         if ck == "nat" || ck == "dec_nat" || ck == "hex_nat" {
             let text = node_text(&child, source);
-            if let Ok(idx) = parse_nat(text) {
-                if idx >= type_count {
+            if let Some(idx) = parse_wat_nat(text) {
+                if (idx as usize) >= type_count {
                     diagnostics.push(
                         Diagnostic::error(node_to_range(root), format!("unknown type {}", idx))
                             .with_code("unknown-type"),
@@ -2257,8 +2235,8 @@ fn check_type_use_index(
 
                 if ick == "nat" || ick == "dec_nat" || ick == "hex_nat" {
                     let text = node_text(&idx_child, source);
-                    if let Ok(idx) = parse_nat(text) {
-                        if idx >= type_count {
+                    if let Some(idx) = parse_wat_nat(text) {
+                        if (idx as usize) >= type_count {
                             diagnostics.push(
                                 Diagnostic::error(
                                     node_to_range(type_use_node),
@@ -2277,8 +2255,8 @@ fn check_type_use_index(
             }
             // The index node might directly contain the numeric text
             let text = node_text(&child, source);
-            if let Ok(idx) = parse_nat(text) {
-                if idx >= type_count {
+            if let Some(idx) = parse_wat_nat(text) {
+                if (idx as usize) >= type_count {
                     diagnostics.push(
                         Diagnostic::error(
                             node_to_range(type_use_node),
@@ -2290,13 +2268,6 @@ fn check_type_use_index(
             }
         }
     }
-}
-
-/// Parse a nat (natural number) from text, handling hex prefix.
-fn parse_nat(text: &str) -> Result<usize, ()> {
-    crate::parser::parse_wat_nat(text)
-        .map(|v| v as usize)
-        .ok_or(())
 }
 
 // ============================================================================
@@ -2765,7 +2736,7 @@ fn resolve_data_offset_type(node: &Node, source: &str, symbols: &SymbolTable) ->
                             ValueType::I32
                         };
                     }
-                    if let Some(n) = crate::parser::parse_wat_nat(idx_text) {
+                    if let Some(n) = parse_wat_nat(idx_text) {
                         if let Some(mem) = symbols.memories.get(n as usize) {
                             return if mem.is_memory64 {
                                 ValueType::I64
@@ -2841,7 +2812,7 @@ fn resolve_elem_offset_type(node: &Node, source: &str, symbols: &SymbolTable) ->
                             ValueType::I32
                         };
                     }
-                    if let Some(n) = crate::parser::parse_wat_nat(idx_text) {
+                    if let Some(n) = parse_wat_nat(idx_text) {
                         if let Some(table) = symbols.tables.get(n as usize) {
                             return if table.is_table64 {
                                 ValueType::I64
@@ -3458,9 +3429,10 @@ fn resolve_call_indirect_table_idx(node: &Node, source: &str, symbols: &SymbolTa
                     return i;
                 }
                 // Not a table name — could be a type name, skip
-            } else if let Ok(idx) = parse_nat(text) {
+            } else if let Some(idx) = parse_wat_nat(text) {
                 // Numeric index — if it's within table count, it's a table index
                 // (For single-table modules, the first numeric index is the type index)
+                let idx = idx as usize;
                 if idx < symbols.tables.len() && symbols.tables.len() > 1 {
                     return idx;
                 }

@@ -2452,8 +2452,19 @@ fn extract_tag(tag_node: &Node, source: &str, index: usize, symbols: &SymbolTabl
 }
 
 /// Parse a WAT natural number, handling hex (0x...) and underscore separators.
+/// Avoids allocation when text contains no underscores (the common case).
 pub(crate) fn parse_wat_nat(text: &str) -> Option<u64> {
-    let text = text.trim().replace('_', "");
+    let text = text.trim();
+    // Fast path: no underscores (common case avoids String allocation)
+    if !text.contains('_') {
+        return if text.starts_with("0x") || text.starts_with("0X") {
+            u64::from_str_radix(&text[2..], 16).ok()
+        } else {
+            text.parse::<u64>().ok()
+        };
+    }
+    // Slow path: strip underscores
+    let text = text.replace('_', "");
     if text.starts_with("0x") || text.starts_with("0X") {
         u64::from_str_radix(&text[2..], 16).ok()
     } else {
