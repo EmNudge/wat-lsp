@@ -163,18 +163,12 @@ fn check_structural_compatibility(
                     ));
                 }
                 if child_mut != parent_mut {
-                    diagnostics.push(Diagnostic::error(
-                        range,
-                        "Array mutability mismatch".to_string(),
-                    ));
+                    diagnostics.push(Diagnostic::error(range, "Array mutability mismatch"));
                 }
             } else {
                 // Immutable array: covariant
                 if *child_mut {
-                    diagnostics.push(Diagnostic::error(
-                        range,
-                        "Array mutability mismatch".to_string(),
-                    ));
+                    diagnostics.push(Diagnostic::error(range, "Array mutability mismatch"));
                 }
                 if !types_compatible_with_symbols(child_elem, parent_elem, symbols) {
                     diagnostics.push(Diagnostic::error(
@@ -214,7 +208,7 @@ fn check_structural_compatibility(
             if !params_ok || !results_ok {
                 diagnostics.push(Diagnostic::error(
                     range,
-                    "Function subtype signature must match parent exactly".to_string(),
+                    "Function subtype signature must match parent exactly",
                 ));
             }
         }

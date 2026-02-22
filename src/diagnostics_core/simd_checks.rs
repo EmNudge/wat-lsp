@@ -95,14 +95,14 @@ fn validate_lane_value(int_node: &Node, source: &str, max_lane: u32) -> Option<D
     if text.starts_with('-') {
         return Some(Diagnostic::error(
             node_to_range(int_node),
-            "invalid lane index".to_string(),
+            "invalid lane index",
         ));
     }
     if let Ok(value) = text.trim_start_matches('+').parse::<u32>() {
         if value > max_lane {
             return Some(Diagnostic::error(
                 node_to_range(int_node),
-                "invalid lane index".to_string(),
+                "invalid lane index",
             ));
         }
     }

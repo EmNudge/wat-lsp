@@ -852,7 +852,7 @@ fn process_instruction(
             };
             if is_immutable {
                 checker.diagnostics.push(
-                    Diagnostic::error(node_to_range(node), "global is immutable".to_string())
+                    Diagnostic::error(node_to_range(node), "global is immutable")
                         .with_code("immutable-global"),
                 );
             }
@@ -1365,13 +1365,13 @@ fn get_branch_depth(node: &Node, source: &str, checker: &mut TypeChecker) -> Opt
 /// Get all branch depths from a br_table instruction (last one is the default).
 /// Emits "unknown label" diagnostics for out-of-range depths.
 fn get_all_branch_depths(node: &Node, source: &str, checker: &mut TypeChecker) -> Vec<usize> {
-    let mut indices = Vec::new();
+    let mut indices: Vec<&str> = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
 
         if kind == "index" || kind == "identifier" || kind == "nat" {
-            indices.push(source[child.byte_range()].trim().to_string());
+            indices.push(source[child.byte_range()].trim());
         }
         if kind.starts_with("op_") {
             let mut inner_cursor = child.walk();
@@ -1379,7 +1379,7 @@ fn get_all_branch_depths(node: &Node, source: &str, checker: &mut TypeChecker) -
                 node_kind!(inner_kind = inner_child);
 
                 if inner_kind == "index" || inner_kind == "identifier" || inner_kind == "nat" {
-                    indices.push(source[inner_child.byte_range()].trim().to_string());
+                    indices.push(source[inner_child.byte_range()].trim());
                 }
             }
         }
@@ -1914,7 +1914,7 @@ fn resolve_call_indirect_type<'a>(
     symbols: &'a SymbolTable,
 ) -> Option<&'a TypeDef> {
     let mut cursor = node.walk();
-    let mut first_index: Option<String> = None;
+    let mut first_index: Option<&str> = None;
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
 
@@ -1924,11 +1924,11 @@ fn resolve_call_indirect_type<'a>(
         }
         // Track first index (could be table ref in multi-table or type ref in single-table)
         if kind == "index" && first_index.is_none() {
-            first_index = Some(source[child.byte_range()].trim().to_string());
+            first_index = Some(source[child.byte_range()].trim());
         }
     }
     // No type_use found — try first index as a type reference (single-table mode)
-    if let Some(ref idx_text) = first_index {
+    if let Some(idx_text) = first_index {
         return resolve_type_ref(idx_text, symbols);
     }
     None
@@ -3285,8 +3285,7 @@ fn check_table_init_types(
     if let (Some(table), Some(elem)) = (table, elem) {
         if !ref_types_compatible(elem.ref_type, table.ref_type, symbols) {
             checker.diagnostics.push(
-                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
-                    .with_code("type-mismatch"),
+                Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
             );
         }
     }
@@ -3317,8 +3316,7 @@ fn check_table_copy_types(
     if let (Some(dst), Some(src)) = (dst, src) {
         if !ref_types_compatible(src.ref_type, dst.ref_type, symbols) {
             checker.diagnostics.push(
-                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
-                    .with_code("type-mismatch"),
+                Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
             );
         }
     }
@@ -3389,7 +3387,7 @@ fn check_array_operations(
         if let TypeKind::Array { mutable, .. } = &type_def.kind {
             if !mutable {
                 checker.diagnostics.push(
-                    Diagnostic::error(node_to_range(node), "immutable array".to_string())
+                    Diagnostic::error(node_to_range(node), "immutable array")
                         .with_code("immutable-array"),
                 );
                 return; // Don't report additional errors after mutability failure
@@ -3449,7 +3447,7 @@ fn check_array_operations(
                             && *element_type != elem_seg.ref_type
                         {
                             checker.diagnostics.push(
-                                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                                Diagnostic::error(node_to_range(node), "type mismatch")
                                     .with_code("type-mismatch"),
                             );
                         }
@@ -3658,8 +3656,7 @@ fn check_br_on_cast_types(
     // Validate rt2 <: rt1: nullable rt2 can't be subtype of non-null rt1
     if *rt2_nullable && !*rt1_nullable {
         checker.diagnostics.push(
-            Diagnostic::error(node_to_range(node), "type mismatch".to_string())
-                .with_code("type-mismatch"),
+            Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
         );
         has_error = true;
     }
@@ -3669,8 +3666,7 @@ fn check_br_on_cast_types(
         let heap_types = extract_heap_types_from_cast(node, source);
         if heap_types.len() >= 2 && !is_heap_subtype(heap_types[1], heap_types[0]) {
             checker.diagnostics.push(
-                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
-                    .with_code("type-mismatch"),
+                Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
             );
             has_error = true;
         }
@@ -3703,7 +3699,7 @@ fn check_br_on_cast_types(
                     };
                     if !types_compatible_with_symbols(&branch_vt, label_type, symbols) {
                         checker.diagnostics.push(
-                            Diagnostic::error(node_to_range(node), "type mismatch".to_string())
+                            Diagnostic::error(node_to_range(node), "type mismatch")
                                 .with_code("type-mismatch"),
                         );
                     }
@@ -4014,8 +4010,7 @@ fn check_catch_clause_types(
     // Compare: sent types must match label types in count and type
     if sent_types.len() != label_types.len() {
         checker.diagnostics.push(
-            Diagnostic::error(node_to_range(node), "type mismatch".to_string())
-                .with_code("type-mismatch"),
+            Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
         );
         return;
     }
@@ -4023,8 +4018,7 @@ fn check_catch_clause_types(
     for (sent, expected) in sent_types.iter().zip(label_types.iter()) {
         if !types_compatible_with_symbols(sent, expected, symbols) {
             checker.diagnostics.push(
-                Diagnostic::error(node_to_range(node), "type mismatch".to_string())
-                    .with_code("type-mismatch"),
+                Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
             );
             return;
         }
