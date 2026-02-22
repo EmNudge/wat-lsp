@@ -387,39 +387,29 @@ pub fn get_line_at_position(document: &str, line_num: usize) -> Option<&str> {
 pub fn get_word_at_position(document: &str, position: Position) -> Option<String> {
     let line = get_line_at_position(document, position.line as usize)?;
 
-    let chars: Vec<char> = line.chars().collect();
-
-    // Convert UTF-16 offset to char index
-    let mut utf16_count = 0u32;
-    let mut col = 0usize;
-    for ch in &chars {
-        if utf16_count >= position.character {
-            break;
-        }
-        utf16_count += ch.len_utf16() as u32;
-        col += 1;
-    }
-
-    if col > chars.len() {
+    // Convert UTF-16 offset to byte offset directly (no Vec<char> allocation)
+    let byte_col = utf16_offset_to_byte_offset(line, position.character);
+    if byte_col > line.len() {
         return None;
     }
 
-    // Find word boundaries
-    let mut start = col;
-    let mut end = col;
+    // Find word start by scanning backwards from byte_col
+    let start = line[..byte_col]
+        .char_indices()
+        .rev()
+        .take_while(|&(_, c)| is_word_char(c))
+        .last()
+        .map_or(byte_col, |(i, _)| i);
 
-    // Move back to start of word
-    while start > 0 && is_word_char(chars.get(start - 1).copied()?) {
-        start -= 1;
-    }
-
-    // Move forward to end of word
-    while end < chars.len() && is_word_char(chars.get(end).copied()?) {
-        end += 1;
-    }
+    // Find word end by scanning forwards from byte_col
+    let end = line[byte_col..]
+        .char_indices()
+        .take_while(|&(_, c)| is_word_char(c))
+        .last()
+        .map_or(byte_col, |(i, c)| byte_col + i + c.len_utf8());
 
     if start < end {
-        Some(chars[start..end].iter().collect())
+        Some(line[start..end].to_string())
     } else {
         None
     }
@@ -446,18 +436,36 @@ pub fn utf16_offset_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
     byte_offset
 }
 
-/// Convert an LSP Position to a byte offset in the source text
+/// Convert an LSP Position to a byte offset in the source text.
+/// Uses direct byte scanning for newlines instead of allocating line iterators.
 pub fn position_to_byte(source: &str, position: Position) -> usize {
-    let mut byte_offset = 0;
+    let target_line = position.line as usize;
+    let bytes = source.as_bytes();
 
-    for (current_line, line) in source.lines().enumerate() {
-        if current_line == position.line as usize {
-            return byte_offset + utf16_offset_to_byte_offset(line, position.character);
-        }
-        byte_offset += line.len() + 1; // +1 for newline
+    if target_line == 0 {
+        return utf16_offset_to_byte_offset(source, position.character);
     }
 
-    byte_offset
+    let mut current_line = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'\n' {
+            current_line += 1;
+            if current_line == target_line {
+                let line_start = i + 1;
+                let line_end = bytes[line_start..]
+                    .iter()
+                    .position(|&b| b == b'\n')
+                    .map_or(source.len(), |p| line_start + p);
+                return line_start
+                    + utf16_offset_to_byte_offset(
+                        &source[line_start..line_end],
+                        position.character,
+                    );
+            }
+        }
+    }
+
+    source.len()
 }
 
 /// Find the AST node at the given position.
@@ -616,6 +624,13 @@ pub fn determine_context_with_fallback(
 ) -> InstructionContext {
     if let Some(node) = node_at_position(tree, document, position) {
         let ast_context = determine_instruction_context(node, document);
+
+        // Fast path: AST gave a definitive non-General, non-Block context
+        if ast_context != InstructionContext::General && ast_context != InstructionContext::Block {
+            return ast_context;
+        }
+
+        // Slow path: fall back to line-based detection
         let line_context = get_line_at_position(document, position.line as usize)
             .map(determine_context_from_line)
             .unwrap_or(InstructionContext::General);
