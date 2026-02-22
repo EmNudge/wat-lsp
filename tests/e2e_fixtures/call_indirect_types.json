@@ -1,0 +1,21 @@
+{
+  "description": "call_indirect with type annotations — tests definition and references for type symbols",
+  "document": "(module\n  (type $unary (func (param i32) (result i32)))\n  (table 2 funcref)\n  (elem (i32.const 0) func $double $square)\n  (func $double (param $x i32) (result i32)\n    (i32.mul (local.get $x) (i32.const 2)))\n  (func $square (param $x i32) (result i32)\n    (i32.mul (local.get $x) (local.get $x)))\n  (func (export \"test\") (param $x i32) (result i32)\n    local.get $x\n    i32.const 0\n    call_indirect (type $unary)\n    i32.const 1\n    call_indirect (type $unary)))",
+  "tests": [
+    {
+      "feature": "diagnostics",
+      "expect": { "error_count": 0 }
+    },
+    {
+      "feature": "definition",
+      "position": [11, 27],
+      "expect": { "start_line": 1 }
+    },
+    {
+      "feature": "references",
+      "position": [1, 9],
+      "include_declaration": false,
+      "expect": { "min_count": 2 }
+    }
+  ]
+}

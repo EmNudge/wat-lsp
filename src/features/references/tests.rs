@@ -592,6 +592,165 @@ fn test_type_references() {
 }
 
 #[test]
+fn test_type_references_call_indirect() {
+    let source = r#"(module
+  (type $unary (func (param i32) (result i32)))
+  (type $binary (func (param i32 i32) (result i32)))
+
+  (table 5 funcref)
+  (elem (i32.const 0) func $double $square $negate $inc $add)
+
+  (func $double (param $x i32) (result i32)
+    (i32.mul (local.get $x) (i32.const 2)))
+
+  (func $square (param $x i32) (result i32)
+    (i32.mul (local.get $x) (local.get $x)))
+
+  (func $negate (param $x i32) (result i32)
+    (i32.sub (i32.const 0) (local.get $x)))
+
+  (func $inc (param $x i32) (result i32)
+    (i32.add (local.get $x) (i32.const 1)))
+
+  (func $add (param $a i32) (param $b i32) (result i32)
+    (i32.add (local.get $a) (local.get $b)))
+
+  ;; Linear call_indirect
+  (func (export "double_then_square") (param $x i32) (result i32)
+    local.get $x
+    i32.const 0
+    call_indirect (type $unary)
+    i32.const 1
+    call_indirect (type $unary))
+
+  ;; Chained linear
+  (func (export "pipeline3") (param $x i32) (result i32)
+    local.get $x
+    i32.const 0
+    call_indirect (type $unary)
+    i32.const 2
+    call_indirect (type $unary)
+    i32.const 3
+    call_indirect (type $unary))
+
+  ;; Mixed types
+  (func (export "double_both_and_add") (param $a i32) (param $b i32) (result i32)
+    local.get $a
+    i32.const 0
+    call_indirect (type $unary)
+    local.get $b
+    i32.const 0
+    call_indirect (type $unary)
+    i32.const 4
+    call_indirect (type $binary))
+
+  ;; Folded call_indirect
+  (func (export "mixed_chain") (param $x i32) (result i32)
+    (call_indirect (type $unary)
+      (call_indirect (type $unary)
+        (local.get $x)
+        (i32.const 0))
+      (i32.const 1)))
+
+  ;; Dynamic pipeline
+  (func (export "apply_twice") (param $x i32) (param $op i32) (result i32)
+    local.get $x
+    local.get $op
+    call_indirect (type $unary)
+    local.get $op
+    call_indirect (type $unary))
+)"#;
+
+    let symbols = parse_document(source).unwrap();
+    let tree = create_test_tree(source);
+
+    // --- Test $unary references from the type definition (line 1) ---
+    let position = Position {
+        line: 1,
+        character: 9,
+    };
+
+    let target = identify_symbol_at_position(source, &symbols, &tree, position);
+    assert!(
+        target.is_some(),
+        "Should identify $unary at type definition"
+    );
+
+    let refs = provide_references(source, &symbols, &tree, position, "file:///test.wat", false);
+
+    // $unary is used in 11 call_indirect instructions (linear + folded)
+    assert_eq!(
+        refs.len(),
+        11,
+        "Expected 11 references for $unary in call_indirect, got {}: {:?}",
+        refs.len(),
+        refs.iter().map(|r| r.range.start.line).collect::<Vec<_>>()
+    );
+
+    // --- Test $binary references from the type definition (line 2) ---
+    let position_binary = Position {
+        line: 2,
+        character: 9,
+    };
+
+    let refs_binary = provide_references(
+        source,
+        &symbols,
+        &tree,
+        position_binary,
+        "file:///test.wat",
+        false,
+    );
+
+    assert_eq!(
+        refs_binary.len(),
+        1,
+        "Expected 1 reference for $binary in call_indirect, got {}: {:?}",
+        refs_binary.len(),
+        refs_binary
+            .iter()
+            .map(|r| r.range.start.line)
+            .collect::<Vec<_>>()
+    );
+
+    // --- Test go-to-reference from a call_indirect usage ---
+    // Find the first line with "call_indirect (type $unary)"
+    let (usage_line, usage_col) = source
+        .lines()
+        .enumerate()
+        .find_map(|(i, line)| {
+            line.find("$unary")
+                .filter(|_| line.contains("call_indirect"))
+                .map(|col| (i, col))
+        })
+        .expect("Should find a call_indirect (type $unary) line");
+    let position_usage = Position {
+        line: usage_line as u32,
+        character: usage_col as u32,
+    };
+
+    let refs_from_usage = provide_references(
+        source,
+        &symbols,
+        &tree,
+        position_usage,
+        "file:///test.wat",
+        false,
+    );
+
+    assert_eq!(
+        refs_from_usage.len(),
+        11,
+        "Should find same 11 references from usage site, got {}: {:?}",
+        refs_from_usage.len(),
+        refs_from_usage
+            .iter()
+            .map(|r| r.range.start.line)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_nested_blocks_depth() {
     let source = r#"(module
   (func $test
@@ -1091,5 +1250,101 @@ fn test_tag_references_from_throw() {
         2,
         "Expected 2 references for $div_error (catch and throw), got {:?}",
         refs.iter().map(|r| r.range.start.line).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_function_references_include_elem_segment() {
+    let source = r#"(module
+  (func $add (param i32 i32) (result i32)
+    local.get 0
+    local.get 1
+    i32.add)
+  (table 1 funcref)
+  (elem (i32.const 0) func $add)
+  (func $main
+    i32.const 5
+    i32.const 3
+    call $add
+    drop)
+)"#;
+
+    let symbols = parse_document(source).unwrap();
+    let tree = create_test_tree(source);
+
+    // Position on "call $add" at line 10
+    let position = Position {
+        line: 10,
+        character: 10,
+    };
+
+    let refs = provide_references(source, &symbols, &tree, position, "file:///test.wat", false);
+
+    let ref_lines: Vec<_> = refs.iter().map(|r| r.range.start.line).collect();
+
+    // Should find 2 references: elem segment (line 6) and call instruction (line 10)
+    assert_eq!(
+        refs.len(),
+        2,
+        "Expected 2 references for $add (elem and call), got {:?}",
+        ref_lines
+    );
+    assert!(
+        ref_lines.contains(&6),
+        "Should find reference in elem segment at line 6, got {:?}",
+        ref_lines
+    );
+    assert!(
+        ref_lines.contains(&10),
+        "Should find reference in call at line 10, got {:?}",
+        ref_lines
+    );
+}
+
+#[test]
+fn test_function_references_include_bare_elem_segment() {
+    let source = r#"(module
+  (func $add (param i32 i32) (result i32)
+    local.get 0
+    local.get 1
+    i32.add)
+  (table 1 funcref)
+  (elem (i32.const 0) $add)
+  (func $main
+    i32.const 5
+    i32.const 3
+    call $add
+    drop)
+)"#;
+
+    let symbols = parse_document(source).unwrap();
+    let tree = create_test_tree(source);
+
+    // Position on "call $add" at line 10
+    let position = Position {
+        line: 10,
+        character: 10,
+    };
+
+    let refs = provide_references(source, &symbols, &tree, position, "file:///test.wat", false);
+
+    let ref_lines: Vec<_> = refs.iter().map(|r| r.range.start.line).collect();
+
+    // Should find 2 references: bare elem segment (line 6) and call instruction (line 10)
+    assert_eq!(
+        refs.len(),
+        2,
+        "Expected 2 references for $add (bare elem and call), got {:?}",
+        ref_lines
+    );
+    assert!(
+        ref_lines.contains(&6),
+        "Should find reference in bare elem segment at line 6, got {:?}",
+        ref_lines
+    );
+    assert!(
+        ref_lines.contains(&10),
+        "Should find reference in call at line 10, got {:?}",
+        ref_lines
     );
 }
