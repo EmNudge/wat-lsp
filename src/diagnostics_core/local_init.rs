@@ -14,7 +14,7 @@ use std::collections::HashSet;
 
 use crate::core::types::Diagnostic;
 use crate::symbols::{Function, SymbolTable};
-use crate::utils::node_to_range;
+use crate::utils::{is_non_nullable_ref_type, node_to_range};
 
 #[cfg(feature = "native")]
 use tree_sitter::Node;
@@ -100,7 +100,7 @@ fn scan_locals_node(
 
     match kind {
         "value_type" | "value_type_ref_type" | "value_type_num_type" => {
-            if is_non_nullable_ref_in_ast(node, source) {
+            if is_non_nullable_ref_type(node, source) {
                 result.insert(num_params + *local_counter);
             }
             *local_counter += 1;
@@ -110,56 +110,6 @@ fn scan_locals_node(
             for child in node.children(&mut cursor) {
                 scan_locals_node(&child, source, num_params, local_counter, result);
             }
-        }
-    }
-}
-
-/// Check if a `value_type` AST node represents a non-nullable reference type.
-/// Walks down through `value_type → value_type_ref_type → ref_type → ref_type_ref/ref_type_concrete`
-/// and checks for the absence of `null`.
-fn is_non_nullable_ref_in_ast(node: &Node, source: &str) -> bool {
-    node_kind!(kind = node);
-
-    match kind {
-        "ref_type_ref" | "ref_type_concrete" => {
-            // (ref null? ...) — non-nullable if no "null" child
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if &source[child.byte_range()] == "null" {
-                    return false;
-                }
-            }
-            true
-        }
-        // Shorthand types are always nullable
-        "ref_type_funcref" | "ref_type_externref" => false,
-        _ => {
-            let text = source[node.byte_range()].trim();
-            if matches!(
-                text,
-                "funcref"
-                    | "externref"
-                    | "anyref"
-                    | "eqref"
-                    | "i31ref"
-                    | "structref"
-                    | "arrayref"
-                    | "nullref"
-                    | "nullfuncref"
-                    | "nullexternref"
-                    | "exnref"
-                    | "nullexnref"
-            ) {
-                return false;
-            }
-            // Recurse into children
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if is_non_nullable_ref_in_ast(&child, source) {
-                    return true;
-                }
-            }
-            false
         }
     }
 }

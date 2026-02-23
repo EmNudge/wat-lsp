@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::types::{Diagnostic, Range};
 use crate::parser::{normalize_identifier, parse_wat_nat};
 use crate::symbols::{Function, SymbolTable, TypeKind, ValueType};
-use crate::utils::{node_text, node_to_range};
+use crate::utils::{is_non_nullable_ref_type, node_text, node_to_range};
 
 #[cfg(feature = "native")]
 use tree_sitter::Node;
@@ -586,15 +586,15 @@ fn collect_struct_field_names(
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
                 if inner_child.kind() == "identifier" {
-                    let name = node_text(&inner_child, source).to_string();
+                    let name = node_text(&inner_child, source);
                     let range = node_to_range(&inner_child);
-                    if let std::collections::hash_map::Entry::Vacant(e) = seen.entry(name.clone()) {
-                        e.insert(range);
-                    } else {
+                    if let Some(_first) = seen.get(name) {
                         diagnostics.push(Diagnostic::error(
                             range,
                             format!("duplicate field {}", name),
                         ));
+                    } else {
+                        seen.insert(name.to_string(), range);
                     }
                 }
             }
@@ -1183,7 +1183,7 @@ fn check_elem_segment_types(
                         let text = node_text(&ec_child, source);
                         elem_type = ValueType::try_parse(text.trim());
                         // Check if the ref_type AST node is non-nullable
-                        if is_non_nullable_ref_type_node(&ec_child, source) {
+                        if is_non_nullable_ref_type(&ec_child, source) {
                             elem_type_nullable = false;
                         }
                     }
@@ -1193,7 +1193,7 @@ fn check_elem_segment_types(
             if ck == "ref_type" && elem_type.is_none() {
                 let text = node_text(&child, source);
                 elem_type = ValueType::try_parse(text.trim());
-                if is_non_nullable_ref_type_node(&child, source) {
+                if is_non_nullable_ref_type(&child, source) {
                     elem_type_nullable = false;
                 }
             }
@@ -1261,48 +1261,6 @@ fn has_explicit_nullable_type(elem_node: &Node, source: &str) -> bool {
         }
     }
     false
-}
-
-/// Check if a ref_type AST node is a non-nullable reference type.
-fn is_non_nullable_ref_type_node(node: &Node, source: &str) -> bool {
-    node_kind!(kind = node);
-    match kind {
-        "ref_type_ref" | "ref_type_concrete" => {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if &source[child.byte_range()] == "null" {
-                    return false;
-                }
-            }
-            true
-        }
-        "ref_type_funcref" | "ref_type_externref" => false,
-        _ => {
-            let text = source[node.byte_range()].trim();
-            if matches!(
-                text,
-                "funcref"
-                    | "externref"
-                    | "anyref"
-                    | "eqref"
-                    | "i31ref"
-                    | "structref"
-                    | "arrayref"
-                    | "nullref"
-                    | "nullfuncref"
-                    | "nullexternref"
-            ) {
-                return false;
-            }
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if is_non_nullable_ref_type_node(&child, source) {
-                    return true;
-                }
-            }
-            false
-        }
-    }
 }
 
 /// Check if elem ref type is compatible with table element type.
@@ -1809,78 +1767,62 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
         return diagnostics;
     }
 
-    // Find opening label: first identifier child (right after the keyword)
-    // Find end label: identifier child that comes after "end" anonymous node
-    // For if: also check identifier after "else" anonymous node
+    // Single-pass: find opening label and check end/else labels
+    // Opening label is the first identifier not preceded by "end" or "else"
     let mut opening_label: Option<String> = None;
-
-    let mut cursor = node.walk();
-    let children: Vec<_> = node.children(&mut cursor).collect();
-
-    // First pass: find the opening label
-    // Opening label is the first identifier that appears right after the block keyword
-    for (i, child) in children.iter().enumerate() {
-        node_kind!(ck = child);
-        if ck == "identifier" {
-            // Make sure this is not after "end" or "else"
-            if i > 0 {
-                let prev = &children[i - 1];
-                let prev_text = node_text(prev, source);
-                if prev_text == "end" || prev_text == "else" {
-                    continue;
-                }
-            }
-            opening_label = Some(normalize_identifier(node_text(child, source)));
-            break;
-        }
-    }
-
-    // Second pass: find labels after "else" and "end"
     let mut after_end = false;
     let mut after_else = false;
+    let mut prev_text_is_end_or_else = false;
 
-    for child in &children {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
         node_kind!(ck = child);
 
-        // Check for anonymous "end" and "else" tokens
         if child.is_named() {
             if ck == "identifier" {
-                if after_end {
-                    let end_label = normalize_identifier(node_text(child, source));
+                if opening_label.is_none() && !prev_text_is_end_or_else {
+                    // First identifier not after end/else → opening label
+                    opening_label = Some(normalize_identifier(node_text(&child, source)));
+                } else if after_end {
+                    let end_label = normalize_identifier(node_text(&child, source));
                     check_label_match(
                         opening_label.as_deref(),
                         &end_label,
-                        child,
+                        &child,
                         "end",
                         &mut diagnostics,
                     );
-                    after_end = false;
                 } else if after_else {
-                    let else_label = normalize_identifier(node_text(child, source));
+                    let else_label = normalize_identifier(node_text(&child, source));
                     check_label_match(
                         opening_label.as_deref(),
                         &else_label,
-                        child,
+                        &child,
                         "else",
                         &mut diagnostics,
                     );
-                    after_else = false;
                 }
+                after_end = false;
+                after_else = false;
             } else {
                 after_end = false;
                 after_else = false;
             }
+            prev_text_is_end_or_else = false;
         } else {
-            let text = node_text(child, source);
+            let text = node_text(&child, source);
             if text == "end" {
                 after_end = true;
                 after_else = false;
+                prev_text_is_end_or_else = true;
             } else if text == "else" {
                 after_else = true;
                 after_end = false;
+                prev_text_is_end_or_else = true;
             } else {
                 after_end = false;
                 after_else = false;
+                prev_text_is_end_or_else = false;
             }
         }
     }

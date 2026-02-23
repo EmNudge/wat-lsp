@@ -126,14 +126,22 @@ fn find_undefined_identifiers(
         let normalized = normalize_identifier(raw_name);
         let identifier_name: &str = &normalized;
 
-        // Find the containing function for this reference (needed for locals and labels)
-        let start_point = node.start_position();
-        let position = Position::new(start_point.row as u32, start_point.column as u32);
+        // Find the containing function once (needed for locals and labels)
+        let containing_func = if matches!(
+            context,
+            InstructionContext::Branch | InstructionContext::Block | InstructionContext::Local
+        ) {
+            let start_point = node.start_position();
+            let position = Position::new(start_point.row as u32, start_point.column as u32);
+            find_containing_function(symbols, position)
+        } else {
+            None
+        };
 
         let is_defined = match context {
             InstructionContext::Branch | InstructionContext::Block => {
                 // Check if label exists in containing function
-                if let Some(func) = find_containing_function(symbols, position) {
+                if let Some(func) = containing_func {
                     func.blocks.iter().any(|block| {
                         block.label == identifier_name
                             || identifier_name
@@ -150,7 +158,7 @@ fn find_undefined_identifiers(
             }
             InstructionContext::Local => {
                 // Check if local or parameter exists in containing function
-                if let Some(func) = find_containing_function(symbols, position) {
+                if let Some(func) = containing_func {
                     func.parameters
                         .iter()
                         .any(|p| p.name.as_deref() == Some(identifier_name))

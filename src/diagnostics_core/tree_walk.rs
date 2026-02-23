@@ -25,10 +25,15 @@ pub struct DiagnosticConfig {
 impl DiagnosticConfig {
     /// Build config from symbol table state.
     pub fn from_symbols(symbols: &SymbolTable) -> Self {
+        let (has_shared, has_memory64) = symbols
+            .memories
+            .iter()
+            .fold((false, false), |(shared, m64), m| {
+                (shared || m.shared, m64 || m.is_memory64)
+            });
         Self {
-            check_atomics: !symbols.memories.is_empty()
-                && !symbols.memories.iter().any(|m| m.shared),
-            check_memory64: symbols.memories.iter().any(|m| m.is_memory64),
+            check_atomics: !symbols.memories.is_empty() && !has_shared,
+            check_memory64: has_memory64,
         }
     }
 }
