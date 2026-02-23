@@ -2721,7 +2721,8 @@ fn resolve_type_index_to_func_sig(
         }
         let params: Vec<ValueType> = func.parameters.iter().map(|p| p.param_type).collect();
         let sig = (params, func.results.clone());
-        if seen.insert(sig.clone()) {
+        if !seen.contains(&sig) {
+            seen.insert(sig.clone());
             sigs.push(sig);
         }
     }

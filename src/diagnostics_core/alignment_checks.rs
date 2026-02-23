@@ -123,6 +123,14 @@ fn parse_offset_value(node: &Node, source: &str) -> Option<u64> {
 
 /// Parse a number as u64, handling decimal and hex formats with underscore separators.
 fn parse_number_u64(text: &str) -> Option<u64> {
+    // Fast path: skip allocation when no underscores present
+    if !text.contains('_') {
+        return if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+            u64::from_str_radix(hex, 16).ok()
+        } else {
+            text.parse::<u64>().ok()
+        };
+    }
     let cleaned: String = text.chars().filter(|c| *c != '_').collect();
     if let Some(hex) = cleaned
         .strip_prefix("0x")
@@ -176,12 +184,7 @@ fn extract_sub_width(instr_name: &str) -> Option<u32> {
         .map(|i| &instr_name[i + 4..])
         .or_else(|| instr_name.find("store").map(|i| &instr_name[i + 5..]))?;
 
-    // Extract leading digits
-    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if digits.is_empty() {
-        return None;
-    }
-    digits.parse::<u32>().ok()
+    parse_leading_digits(after)
 }
 
 /// Natural alignment for base load/store (no sub-width suffix).
@@ -206,8 +209,7 @@ fn natural_alignment_lane(instr_name: &str) -> Option<u32> {
         .find("load")
         .map(|i| &instr_name[i + 4..])
         .or_else(|| instr_name.find("store").map(|i| &instr_name[i + 5..]))?;
-    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-    let bits: u32 = digits.parse().ok()?;
+    let bits: u32 = parse_leading_digits(after)?;
     Some(bits / 8)
 }
 
@@ -215,9 +217,17 @@ fn natural_alignment_lane(instr_name: &str) -> Option<u32> {
 fn natural_alignment_splat_zero(instr_name: &str) -> Option<u32> {
     // v128.load8_splat -> 1, v128.load16_splat -> 2, v128.load32_splat -> 4, etc.
     let after = instr_name.find("load").map(|i| &instr_name[i + 4..])?;
-    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-    let bits: u32 = digits.parse().ok()?;
+    let bits: u32 = parse_leading_digits(after)?;
     Some(bits / 8)
+}
+
+/// Parse leading ASCII digits from a string slice without allocating.
+fn parse_leading_digits(s: &str) -> Option<u32> {
+    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    if end == 0 {
+        return None;
+    }
+    s[..end].parse().ok()
 }
 
 #[cfg(test)]
