@@ -77,7 +77,7 @@ Define a block that catches exceptions using a jump table.
 ```wat
 # (module
 # (tag $tag (param i32))
-# (func
+# (func (result i32)
 # (block $handler_label (result i32)
 (try_table (catch $tag $handler_label)
   (throw $tag (i32.const 1))
