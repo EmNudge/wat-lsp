@@ -7458,7 +7458,7 @@ Signature: `(param args... i32) (result T)`
 
 Example:
 
-```wat-snippet
+```wat
 (module
   (type $sig (func (param i32) (result i32)))
   (table 1 funcref)
@@ -7482,8 +7482,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7496,8 +7498,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i8x16.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -7510,8 +7514,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.min_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7524,8 +7530,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.min_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7538,8 +7546,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.max_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7552,8 +7562,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.max_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7566,8 +7578,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.avgr_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7580,8 +7594,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i8x16.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -7594,8 +7610,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i8x16.popcnt (local.get $a))
+# ))
 ```
 
 ---
@@ -7608,8 +7626,10 @@ Signature: `(param v128) (result i32)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i8x16.bitmask (local.get $a))
+# ))
 ```
 
 ---
@@ -7622,8 +7642,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.narrow_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7636,8 +7658,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.narrow_i16x8_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7650,8 +7674,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.add_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7664,8 +7690,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.add_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7678,8 +7706,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.sub_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7692,8 +7722,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.sub_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7706,8 +7738,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7720,8 +7754,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -7734,8 +7770,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7748,8 +7786,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.min_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7762,8 +7802,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.min_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7776,8 +7818,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.max_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7790,8 +7834,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.max_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7804,8 +7850,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.avgr_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7818,8 +7866,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -7832,8 +7882,10 @@ Signature: `(param v128) (result i32)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.all_true (local.get $a))
+# ))
 ```
 
 ---
@@ -7846,8 +7898,10 @@ Signature: `(param v128) (result i32)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.bitmask (local.get $a))
+# ))
 ```
 
 ---
@@ -7860,8 +7914,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.narrow_i32x4_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7874,8 +7930,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.narrow_i32x4_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7888,8 +7946,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.add_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7902,8 +7962,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.add_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7916,8 +7978,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.sub_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7930,8 +7994,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.sub_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -7944,8 +8010,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_low_i8x16_s (local.get $a))
+# ))
 ```
 
 ---
@@ -7958,8 +8026,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_low_i8x16_u (local.get $a))
+# ))
 ```
 
 ---
@@ -7972,8 +8042,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_high_i8x16_s (local.get $a))
+# ))
 ```
 
 ---
@@ -7986,8 +8058,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_high_i8x16_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8000,8 +8074,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_low_i8x16_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8014,8 +8090,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_low_i8x16_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8028,8 +8106,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_high_i8x16_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8042,8 +8122,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_high_i8x16_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8056,8 +8138,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extadd_pairwise_i8x16_s (local.get $a))
+# ))
 ```
 
 ---
@@ -8070,8 +8154,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extadd_pairwise_i8x16_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8084,8 +8170,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.q15mulr_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8098,8 +8186,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8112,8 +8202,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -8126,8 +8218,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8140,8 +8234,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.min_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8154,8 +8250,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.min_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8168,8 +8266,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.max_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8182,8 +8282,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.max_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8196,8 +8298,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_low_i16x8_s (local.get $a))
+# ))
 ```
 
 ---
@@ -8210,8 +8314,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_low_i16x8_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8224,8 +8330,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_high_i16x8_s (local.get $a))
+# ))
 ```
 
 ---
@@ -8238,8 +8346,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_high_i16x8_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8252,8 +8362,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_low_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8266,8 +8378,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_low_i16x8_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8280,8 +8394,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_high_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8294,8 +8410,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_high_i16x8_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8308,8 +8426,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extadd_pairwise_i16x8_s (local.get $a))
+# ))
 ```
 
 ---
@@ -8322,8 +8442,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extadd_pairwise_i16x8_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8336,8 +8458,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.dot_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8350,8 +8474,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.trunc_sat_f64x2_s_zero (local.get $a))
+# ))
 ```
 
 ---
@@ -8364,8 +8490,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.trunc_sat_f64x2_u_zero (local.get $a))
+# ))
 ```
 
 ---
@@ -8378,8 +8506,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8392,8 +8522,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -8406,8 +8538,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8420,8 +8554,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -8434,8 +8570,10 @@ Signature: `(param v128) (result i32)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result i32) (local $a v128)
 (i64x2.all_true (local.get $a))
+# ))
 ```
 
 ---
@@ -8448,8 +8586,10 @@ Signature: `(param v128) (result i32)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result i32) (local $a v128)
 (i64x2.bitmask (local.get $a))
+# ))
 ```
 
 ---
@@ -8462,8 +8602,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_low_i32x4_s (local.get $a))
+# ))
 ```
 
 ---
@@ -8476,8 +8618,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_low_i32x4_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8490,8 +8634,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_high_i32x4_s (local.get $a))
+# ))
 ```
 
 ---
@@ -8504,8 +8650,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_high_i32x4_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8518,8 +8666,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_low_i32x4_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8532,8 +8682,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_low_i32x4_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8546,8 +8698,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_high_i32x4_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8560,8 +8714,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_high_i32x4_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8574,8 +8730,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.demote_f64x2_zero (local.get $a))
+# ))
 ```
 
 ---
@@ -8588,8 +8746,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.convert_low_i32x4_s (local.get $a))
+# ))
 ```
 
 ---
@@ -8602,8 +8762,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.convert_low_i32x4_u (local.get $a))
+# ))
 ```
 
 ---
@@ -8616,8 +8778,10 @@ Signature: `(param v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.promote_low_f32x4 (local.get $a))
+# ))
 ```
 
 ---
@@ -8630,8 +8794,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (v128.andnot (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8644,8 +8810,10 @@ Signature: `(param v128 v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $mask v128)
 (v128.bitselect (local.get $a) (local.get $b) (local.get $mask))
+# ))
 ```
 
 ---
@@ -8658,8 +8826,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.eq (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8672,8 +8842,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8686,8 +8858,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.lt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8700,8 +8874,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.lt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8714,8 +8890,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.gt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8728,8 +8906,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.gt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8742,8 +8922,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.le_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8756,8 +8938,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.le_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8770,8 +8954,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.ge_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8784,8 +8970,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.ge_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8798,8 +8986,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.eq (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8812,8 +9002,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8826,8 +9018,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.lt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8840,8 +9034,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.lt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8854,8 +9050,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.gt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8868,8 +9066,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.gt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8882,8 +9082,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.le_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8896,8 +9098,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.le_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8910,8 +9114,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.ge_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8924,8 +9130,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.ge_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8938,8 +9146,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -8952,8 +9162,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i8x16.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+# ))
 ```
 
 ---
@@ -8966,8 +9178,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i8x16.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
+# ))
 ```
 
 ---
@@ -8980,8 +9194,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i8x16.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+# ))
 ```
 
 ---
@@ -8994,8 +9210,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128)
 (i8x16.splat (i32.const 42))
+# ))
 ```
 
 ---
@@ -9008,9 +9226,11 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128) (local $indices v128)
 ;; Rearrange lanes of first vector using indices from second vector
 (i8x16.swizzle (local.get $vec) (local.get $indices))
+# ))
 ```
 
 ---
@@ -9023,8 +9243,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (memory 1) (func (result v128)
 (i16x8.load8x8_s (i32.const 0))
+# ))
 ```
 
 ---
@@ -9037,8 +9259,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (memory 1) (func (result v128)
 (i16x8.load8x8_u (i32.const 0))
+# ))
 ```
 
 ---
@@ -9051,8 +9275,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i16x8.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+# ))
 ```
 
 ---
@@ -9065,8 +9291,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i16x8.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
+# ))
 ```
 
 ---
@@ -9079,8 +9307,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i16x8.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+# ))
 ```
 
 ---
@@ -9093,8 +9323,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128)
 (i16x8.splat (i32.const 42))
+# ))
 ```
 
 ---
@@ -9107,8 +9339,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.ge_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9121,8 +9355,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.ge_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9135,8 +9371,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.le_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9149,8 +9387,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.lt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9163,8 +9403,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9177,8 +9419,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i32x4.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+# ))
 ```
 
 ---
@@ -9191,8 +9435,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (memory 1) (func (result v128)
 (i32x4.load16x4_s (i32.const 0))
+# ))
 ```
 
 ---
@@ -9205,8 +9451,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (memory 1) (func (result v128)
 (i32x4.load16x4_u (i32.const 0))
+# ))
 ```
 
 ---
@@ -9219,8 +9467,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.eq (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9233,8 +9483,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9247,8 +9499,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.lt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9261,8 +9515,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.gt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9275,8 +9531,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.le_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9289,8 +9547,10 @@ Signature: `(param v128 v128) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.ge_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -9303,8 +9563,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i64x2.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+# ))
 ```
 
 ---
@@ -9317,8 +9579,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i64x2.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
+# ))
 ```
 
 ---
@@ -9331,8 +9595,10 @@ Signature: `(param v128 i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $vec v128)
 (i64x2.shr_u (local.get $vec) (i32.const 2))  ;; Logical shift right by 2
+# ))
 ```
 
 ---
@@ -9345,8 +9611,10 @@ Signature: `(param i64) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (func (result v128)
 (i64x2.splat (i64.const 42))
+# ))
 ```
 
 ---
@@ -9359,8 +9627,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (memory 1) (func (result v128)
 (i64x2.load32x2_s (i32.const 0))
+# ))
 ```
 
 ---
@@ -9373,8 +9643,10 @@ Signature: `(param i32) (result v128)`
 
 Example:
 
-```wat-snippet
+```wat
+# (module (memory 1) (func (result v128)
 (i64x2.load32x2_u (i32.const 0))
+# ))
 ```
 
 ---

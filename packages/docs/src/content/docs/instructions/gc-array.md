@@ -87,8 +87,13 @@ Create a new array from an element segment.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $my_array (array (mut funcref)))
+# (elem $elem_index funcref)
+# (func (result (ref $my_array))
 (array.new_elem $my_array $elem_index (i32.const 0) (i32.const 10))
+# ))
 ```
 
 ---
@@ -252,12 +257,13 @@ Initialize a portion of an array from a passive element segment. Takes the array
 
 **Example:**
 
-```wat-snippet
-(array.init_elem $funcref_array $elem_segment
-  (local.get $arr)     ;; array reference
-  (i32.const 0)        ;; destination offset in array
-  (i32.const 0)        ;; source offset in elem segment
-  (i32.const 10))      ;; number of elements to copy
+```wat
+# (module
+# (type $funcref_array (array (mut funcref)))
+# (elem $elem_index funcref)
+# (func (param $arr (ref $funcref_array))
+(array.init_elem $funcref_array $elem_index (local.get $arr) (i32.const 0) (i32.const 0) (i32.const 3))
+# ))
 ```
 
 ---

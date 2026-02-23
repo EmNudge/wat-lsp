@@ -151,7 +151,8 @@ Declares linear memory for the module.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 ;; 1 page minimum
 (memory $mem 1)
 
@@ -160,6 +161,7 @@ Declares linear memory for the module.
 
 ;; Named export
 (memory (export "memory") 1)
+# )
 ```
 
 ---

@@ -388,13 +388,14 @@ Branch to a label if the reference is not null. The non-null reference is passed
 
 **Example:**
 
-```wat-snippet
-(block $not_null (param (ref $type))
-  (br_on_non_null $not_null (local.get $maybe_null_ref))
-  ;; Reference was null, handle null case
-  (return)
-)
-;; Target block receives non-null ref
+```wat
+# (module
+# (type $type (func))
+# (func (param $maybe_null_ref (ref null $type)) (result (ref $type))
+# (block $label (result (ref $type))
+(br_on_non_null $label (local.get $maybe_null_ref))
+# (unreachable))
+# ))
 ```
 
 ---

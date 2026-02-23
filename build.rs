@@ -126,6 +126,10 @@ fn parse_docs(content: &str) -> HashMap<String, String> {
         // Inside code blocks, preserve original indentation
         if in_code_block {
             if instruction_name.is_some() {
+                // Strip hidden context lines (# prefix) from hover display
+                if line.starts_with("# ") || line == "#" {
+                    continue;
+                }
                 doc_lines.push(line);
             }
             continue;

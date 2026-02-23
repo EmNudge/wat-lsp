@@ -63,8 +63,14 @@ Branch if a reference can be cast to a type.
 
 **Example:**
 
-```wat-snippet
-(br_on_cast $label (ref null $target_type) (local.get $ref))
+```wat
+# (module
+# (type $target_type (struct (field i32)))
+# (func (param $ref (ref null $target_type)) (result (ref $target_type))
+# (block $label (result (ref $target_type))
+(br_on_cast $label (ref null $target_type) (ref $target_type) (local.get $ref))
+# (unreachable))
+# ))
 ```
 
 ---
@@ -77,8 +83,14 @@ Branch if a reference cannot be cast to a type.
 
 **Example:**
 
-```wat-snippet
-(br_on_cast_fail $label (ref null $target_type) (local.get $ref))
+```wat
+# (module
+# (type $target_type (struct (field i32)))
+# (func (param $ref (ref null $target_type)) (result (ref null $target_type))
+# (block $label (result (ref null $target_type))
+(br_on_cast_fail $label (ref null $target_type) (ref $target_type) (local.get $ref))
+# (unreachable))
+# ))
 ```
 
 ---

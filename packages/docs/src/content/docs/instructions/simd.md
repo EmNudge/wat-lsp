@@ -2307,8 +2307,10 @@ Lane-wise population count (number of set bits) of an i8x16 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i8x16.popcnt (local.get $a))
+# ))
 ```
 
 ---
@@ -2705,8 +2707,10 @@ Widen the low 8 lanes of an i8x16 vector to i16x8 with sign extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_low_i8x16_s (local.get $a))
+# ))
 ```
 
 ---
@@ -2719,8 +2723,10 @@ Widen the low 8 lanes of an i8x16 vector to i16x8 with zero extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_low_i8x16_u (local.get $a))
+# ))
 ```
 
 ---
@@ -2733,8 +2739,10 @@ Widen the high 8 lanes of an i8x16 vector to i16x8 with sign extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_high_i8x16_s (local.get $a))
+# ))
 ```
 
 ---
@@ -2747,8 +2755,10 @@ Widen the high 8 lanes of an i8x16 vector to i16x8 with zero extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extend_high_i8x16_u (local.get $a))
+# ))
 ```
 
 ---
@@ -2761,8 +2771,10 @@ Extended multiply: multiply low 8 lanes of two i8x16 vectors and widen to i16x8 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_low_i8x16_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2775,8 +2787,10 @@ Extended multiply: multiply low 8 lanes of two i8x16 vectors and widen to i16x8 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_low_i8x16_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2789,8 +2803,10 @@ Extended multiply: multiply high 8 lanes of two i8x16 vectors and widen to i16x8
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_high_i8x16_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2803,8 +2819,10 @@ Extended multiply: multiply high 8 lanes of two i8x16 vectors and widen to i16x8
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.extmul_high_i8x16_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2817,8 +2835,10 @@ Pairwise add adjacent i8x16 lanes and widen to i16x8 (signed).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extadd_pairwise_i8x16_s (local.get $a))
+# ))
 ```
 
 ---
@@ -2831,8 +2851,10 @@ Pairwise add adjacent i8x16 lanes and widen to i16x8 (unsigned).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.extadd_pairwise_i8x16_u (local.get $a))
+# ))
 ```
 
 ---
@@ -2845,8 +2867,10 @@ Q15 fixed-point saturating rounding multiply of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.q15mulr_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2971,8 +2995,10 @@ Widen the low 4 lanes of an i16x8 vector to i32x4 with sign extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_low_i16x8_s (local.get $a))
+# ))
 ```
 
 ---
@@ -2985,8 +3011,10 @@ Widen the low 4 lanes of an i16x8 vector to i32x4 with zero extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_low_i16x8_u (local.get $a))
+# ))
 ```
 
 ---
@@ -2999,8 +3027,10 @@ Widen the high 4 lanes of an i16x8 vector to i32x4 with sign extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_high_i16x8_s (local.get $a))
+# ))
 ```
 
 ---
@@ -3013,8 +3043,10 @@ Widen the high 4 lanes of an i16x8 vector to i32x4 with zero extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extend_high_i16x8_u (local.get $a))
+# ))
 ```
 
 ---
@@ -3027,8 +3059,10 @@ Extended multiply: multiply low 4 lanes of two i16x8 vectors and widen to i32x4 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_low_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3041,8 +3075,10 @@ Extended multiply: multiply low 4 lanes of two i16x8 vectors and widen to i32x4 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_low_i16x8_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3055,8 +3091,10 @@ Extended multiply: multiply high 4 lanes of two i16x8 vectors and widen to i32x4
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_high_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3069,8 +3107,10 @@ Extended multiply: multiply high 4 lanes of two i16x8 vectors and widen to i32x4
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.extmul_high_i16x8_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3083,8 +3123,10 @@ Pairwise add adjacent i16x8 lanes and widen to i32x4 (signed).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extadd_pairwise_i16x8_s (local.get $a))
+# ))
 ```
 
 ---
@@ -3097,8 +3139,10 @@ Pairwise add adjacent i16x8 lanes and widen to i32x4 (unsigned).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.extadd_pairwise_i16x8_u (local.get $a))
+# ))
 ```
 
 ---
@@ -3111,8 +3155,10 @@ Dot product: multiply pairs of i16x8 lanes and sum adjacent products to i32x4.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.dot_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3125,8 +3171,10 @@ Convert f64x2 to i32x4 with signed saturating truncation, zero-extending the upp
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.trunc_sat_f64x2_s_zero (local.get $a))
+# ))
 ```
 
 ---
@@ -3139,8 +3187,10 @@ Convert f64x2 to i32x4 with unsigned saturating truncation, zero-extending the u
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.trunc_sat_f64x2_u_zero (local.get $a))
+# ))
 ```
 
 ---
@@ -3201,8 +3251,10 @@ Lane-wise absolute value of an i64x2 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -3215,8 +3267,10 @@ Returns 1 if all lanes are non-zero, 0 otherwise.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result i32) (local $a v128)
 (i64x2.all_true (local.get $a))
+# ))
 ```
 
 ---
@@ -3229,8 +3283,10 @@ Extract the high bit of each lane as an i32 bitmask.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result i32) (local $a v128)
 (i64x2.bitmask (local.get $a))
+# ))
 ```
 
 ---
@@ -3243,8 +3299,10 @@ Widen the low 2 lanes of an i32x4 vector to i64x2 with sign extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_low_i32x4_s (local.get $a))
+# ))
 ```
 
 ---
@@ -3257,8 +3315,10 @@ Widen the low 2 lanes of an i32x4 vector to i64x2 with zero extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_low_i32x4_u (local.get $a))
+# ))
 ```
 
 ---
@@ -3271,8 +3331,10 @@ Widen the high 2 lanes of an i32x4 vector to i64x2 with sign extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_high_i32x4_s (local.get $a))
+# ))
 ```
 
 ---
@@ -3285,8 +3347,10 @@ Widen the high 2 lanes of an i32x4 vector to i64x2 with zero extension.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.extend_high_i32x4_u (local.get $a))
+# ))
 ```
 
 ---
@@ -3299,8 +3363,10 @@ Extended multiply: multiply low 2 lanes of two i32x4 vectors and widen to i64x2 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_low_i32x4_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3313,8 +3379,10 @@ Extended multiply: multiply low 2 lanes of two i32x4 vectors and widen to i64x2 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_low_i32x4_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3327,8 +3395,10 @@ Extended multiply: multiply high 2 lanes of two i32x4 vectors and widen to i64x2
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_high_i32x4_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3341,8 +3411,10 @@ Extended multiply: multiply high 2 lanes of two i32x4 vectors and widen to i64x2
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.extmul_high_i32x4_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3355,8 +3427,10 @@ Demote f64x2 to f32x4, zero-extending the upper lanes.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.demote_f64x2_zero (local.get $a))
+# ))
 ```
 
 ---
@@ -3369,8 +3443,10 @@ Convert the low 2 lanes of i32x4 to f64x2 (signed).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.convert_low_i32x4_s (local.get $a))
+# ))
 ```
 
 ---
@@ -3383,8 +3459,10 @@ Convert the low 2 lanes of i32x4 to f64x2 (unsigned).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.convert_low_i32x4_u (local.get $a))
+# ))
 ```
 
 ---
@@ -3397,8 +3475,10 @@ Promote the low 2 lanes of f32x4 to f64x2.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.promote_low_f32x4 (local.get $a))
+# ))
 ```
 
 ---

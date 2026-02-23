@@ -29,6 +29,67 @@ const KNOWN_LSP_ISSUES = new Set([
   'instructions/reference.md:105',
   'instructions/table.md:139',
   'instructions/types.md:204',
+
+  // Memory64: validator doesn't handle i64-addressed memories (#247)
+  'extensions/memory64.md:11',
+
+  // br_on_non_null: missing from grammar.js entirely (#247)
+  'instructions/control.md:392',
+
+  // GC array elem/data segment refs: checker confuses segment refs with type refs (#247)
+  'instructions/gc-array.md:91',
+  'instructions/gc-array.md:237',
+  'instructions/gc-array.md:261',
+
+  // GC cast type refs: checker treats type refs in br_on_cast as labels (#247)
+  'instructions/gc-casts.md:67',
+  'instructions/gc-casts.md:87',
+
+  // ref.eq / eqref: grammar gap or diagnostic checker issue (#247)
+  'instructions/gc-casts.md:107',
+  'instructions/types.md:227',
+
+  // SIMD extended ops: defined in grammar.js but parser.c never regenerated (#247)
+  'instructions/simd.md:2311',
+  'instructions/simd.md:2711',
+  'instructions/simd.md:2727',
+  'instructions/simd.md:2743',
+  'instructions/simd.md:2759',
+  'instructions/simd.md:2775',
+  'instructions/simd.md:2791',
+  'instructions/simd.md:2807',
+  'instructions/simd.md:2823',
+  'instructions/simd.md:2839',
+  'instructions/simd.md:2855',
+  'instructions/simd.md:2871',
+  'instructions/simd.md:2999',
+  'instructions/simd.md:3015',
+  'instructions/simd.md:3031',
+  'instructions/simd.md:3047',
+  'instructions/simd.md:3063',
+  'instructions/simd.md:3079',
+  'instructions/simd.md:3095',
+  'instructions/simd.md:3111',
+  'instructions/simd.md:3127',
+  'instructions/simd.md:3143',
+  'instructions/simd.md:3159',
+  'instructions/simd.md:3175',
+  'instructions/simd.md:3191',
+  'instructions/simd.md:3255',
+  'instructions/simd.md:3271',
+  'instructions/simd.md:3287',
+  'instructions/simd.md:3303',
+  'instructions/simd.md:3319',
+  'instructions/simd.md:3335',
+  'instructions/simd.md:3351',
+  'instructions/simd.md:3367',
+  'instructions/simd.md:3383',
+  'instructions/simd.md:3399',
+  'instructions/simd.md:3415',
+  'instructions/simd.md:3431',
+  'instructions/simd.md:3447',
+  'instructions/simd.md:3463',
+  'instructions/simd.md:3479',
 ]);
 
 /**
