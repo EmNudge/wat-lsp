@@ -14,7 +14,11 @@ Test if a reference is null or of a specific type.
 **Example:**
 
 ```wat
+# (module
+# (type $type (struct (field i32)))
+# (func (param $ref (ref null $type)) (result i32)
 (ref.test (ref null $type) (local.get $ref))
+# ))
 ```
 
 ---
@@ -28,7 +32,11 @@ Cast a reference to a specific type (traps on failure).
 **Example:**
 
 ```wat
+# (module
+# (type $type (struct (field i32)))
+# (func (param $ref (ref null $type)) (result (ref null $type))
 (ref.cast (ref null $type) (local.get $ref))
+# ))
 ```
 
 ---
@@ -41,7 +49,7 @@ Cast a reference to a specific type (returns null on failure).
 
 **Example:**
 
-```wat
+```wat-snippet
 (ref.cast_null (ref null $type) (local.get $ref))
 ```
 
@@ -55,7 +63,7 @@ Branch if a reference can be cast to a type.
 
 **Example:**
 
-```wat
+```wat-snippet
 (br_on_cast $label (ref null $target_type) (local.get $ref))
 ```
 
@@ -69,7 +77,7 @@ Branch if a reference cannot be cast to a type.
 
 **Example:**
 
-```wat
+```wat-snippet
 (br_on_cast_fail $label (ref null $target_type) (local.get $ref))
 ```
 
@@ -84,7 +92,9 @@ Compare two references for equality. Both references must be of type eqref or a 
 **Example:**
 
 ```wat
+# (module (func (param $ref1 eqref) (param $ref2 eqref) (result i32)
 (ref.eq (local.get $ref1) (local.get $ref2))  ;; Returns 1 if equal, 0 otherwise
+# ))
 ```
 
 ---

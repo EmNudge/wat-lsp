@@ -20,11 +20,22 @@ const DOCS_DIR = join(ROOT, 'src', 'content', 'docs');
  * Known LSP false positives — valid WAT code that the LSP incorrectly flags
  * due to missing support for proposals or type-checking bugs.
  */
-const KNOWN_LSP_ISSUES = new Set([]);
+const KNOWN_LSP_ISSUES = new Set([
+  // WASM LSP false positives on GC/ref operations
+  'instructions/gc-array.md:71',
+  'instructions/gc-array.md:232',
+  'instructions/gc-casts.md:95',
+  'instructions/reference.md:89',
+  'instructions/reference.md:105',
+  'instructions/table.md:139',
+  'instructions/types.md:204',
+]);
 
 /**
  * Extract all ```wat code blocks from a markdown string.
  * Returns an array of { code, lineNumber } where lineNumber is 1-indexed.
+ * Processes `# ` hidden lines: includes them with prefix stripped (Rust doc-test convention).
+ * Skips ```wat-snippet blocks.
  */
 function extractWatBlocks(markdown) {
   const blocks = [];
@@ -45,7 +56,13 @@ function extractWatBlocks(markdown) {
       inBlock = false;
       blocks.push({ code: blockLines.join('\n'), lineNumber: blockStart + 1 });
     } else if (inBlock) {
-      blockLines.push(line);
+      if (line.startsWith('# ')) {
+        blockLines.push(line.slice(2));
+      } else if (line === '#') {
+        blockLines.push('');
+      } else {
+        blockLines.push(line);
+      }
     }
   }
 

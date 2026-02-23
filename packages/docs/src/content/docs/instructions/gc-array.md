@@ -14,7 +14,11 @@ Create a new array on the heap.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i32)))
+# (func (result (ref $my_array))
 (array.new $my_array (i32.const 0) (i32.const 10)) ;; Create size 10 array filled with 0
+# ))
 ```
 
 ---
@@ -28,7 +32,11 @@ Create a new array with default values.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i32)))
+# (func (result (ref $my_array))
 (array.new_default $my_array (i32.const 10))
+# ))
 ```
 
 ---
@@ -42,7 +50,11 @@ Create a new array from a fixed set of arguments.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i32)))
+# (func (result (ref $my_array))
 (array.new_fixed $my_array 3 (i32.const 1) (i32.const 2) (i32.const 3))
+# ))
 ```
 
 ---
@@ -56,7 +68,13 @@ Create a new array from a data segment.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i8)))
+# (memory 1)
+# (data $data_index "0123456789")
+# (func (result (ref $my_array))
 (array.new_data $my_array $data_index (i32.const 0) (i32.const 10))
+# ))
 ```
 
 ---
@@ -69,7 +87,7 @@ Create a new array from an element segment.
 
 **Example:**
 
-```wat
+```wat-snippet
 (array.new_elem $my_array $elem_index (i32.const 0) (i32.const 10))
 ```
 
@@ -84,7 +102,11 @@ Get an element from an array.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i32)))
+# (func (param $arr (ref $my_array)) (result i32)
 (array.get $my_array (local.get $arr) (i32.const 5))
+# ))
 ```
 
 ---
@@ -98,7 +120,11 @@ Get a signed element from an array.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i8)))
+# (func (param $arr (ref $my_array)) (result i32)
 (array.get_s $my_array (local.get $arr) (i32.const 5))
+# ))
 ```
 
 ---
@@ -112,7 +138,11 @@ Get an unsigned element from an array.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i8)))
+# (func (param $arr (ref $my_array)) (result i32)
 (array.get_u $my_array (local.get $arr) (i32.const 5))
+# ))
 ```
 
 ---
@@ -126,7 +156,11 @@ Set an element in an array.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i32)))
+# (func (param $arr (ref $my_array))
 (array.set $my_array (local.get $arr) (i32.const 5) (i32.const 42))
+# ))
 ```
 
 ---
@@ -140,7 +174,11 @@ Get the length of an array.
 **Example:**
 
 ```wat
+# (module
+# (type $my_array (array (mut i32)))
+# (func (param $arr (ref $my_array)) (result i32)
 (array.len (local.get $arr))
+# ))
 ```
 
 ---
@@ -154,7 +192,11 @@ Fill a range of an array with a value.
 **Example:**
 
 ```wat
-(array.fill (local.get $arr) (i32.const 0) (i32.const 42) (i32.const 10))
+# (module
+# (type $my_array (array (mut i32)))
+# (func (param $arr (ref $my_array))
+(array.fill $my_array (local.get $arr) (i32.const 0) (i32.const 42) (i32.const 10))
+# ))
 ```
 
 ---
@@ -168,7 +210,12 @@ Copy a range from one array to another.
 **Example:**
 
 ```wat
+# (module
+# (type $dst_type (array (mut i32)))
+# (type $src_type (array (mut i32)))
+# (func (param $dst (ref $dst_type)) (param $src (ref $src_type))
 (array.copy $dst_type $src_type (local.get $dst) (i32.const 0) (local.get $src) (i32.const 0) (i32.const 10))
+# ))
 ```
 
 ---
@@ -182,11 +229,17 @@ Initialize a portion of an array from a passive data segment. Takes the array, d
 **Example:**
 
 ```wat
+# (module
+# (type $byte_array (array (mut i8)))
+# (memory 1)
+# (data $data_segment "0123456789")
+# (func (param $arr (ref $byte_array))
 (array.init_data $byte_array $data_segment
   (local.get $arr)     ;; array reference
   (i32.const 0)        ;; destination offset in array
   (i32.const 0)        ;; source offset in data segment
   (i32.const 100))     ;; number of elements to copy
+# ))
 ```
 
 ---
@@ -199,7 +252,7 @@ Initialize a portion of an array from a passive element segment. Takes the array
 
 **Example:**
 
-```wat
+```wat-snippet
 (array.init_elem $funcref_array $elem_segment
   (local.get $arr)     ;; array reference
   (i32.const 0)        ;; destination offset in array

@@ -14,9 +14,16 @@ Create a constant 128-bit vector value.
 **Example:**
 
 ```wat
+# (module (func
+# (drop
 (v128.const i32x4 1 2 3 4)
+# )
+# (drop
 (v128.const f32x4 1.0 2.0 3.0 4.0)
+# )
+# (drop
 (v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+# )))
 ```
 
 ---
@@ -30,8 +37,15 @@ Load 128-bit vector from memory.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func
+# (drop
 (v128.load (i32.const 0))
+# )
+# (drop
 (v128.load offset=16 align=16 (i32.const 0))
+# )))
 ```
 
 ---
@@ -45,7 +59,11 @@ Store 128-bit vector to memory.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (local $vec v128)
 (v128.store (i32.const 0) (local.get $vec))
+# ))
 ```
 
 ---
@@ -59,7 +77,11 @@ Load 8 signed 8-bit integers and extend to 16-bit.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load8x8_s (i32.const 0))
+# ))
 ```
 
 ---
@@ -73,7 +95,11 @@ Load 8 unsigned 8-bit integers and extend to 16-bit.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load8x8_u (i32.const 0))
+# ))
 ```
 
 ---
@@ -87,7 +113,11 @@ Load 4 signed 16-bit integers and extend to 32-bit.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load16x4_s (i32.const 0))
+# ))
 ```
 
 ---
@@ -101,7 +131,11 @@ Load 4 unsigned 16-bit integers and extend to 32-bit.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load16x4_u (i32.const 0))
+# ))
 ```
 
 ---
@@ -115,7 +149,11 @@ Load 2 signed 32-bit integers and extend to 64-bit.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load32x2_s (i32.const 0))
+# ))
 ```
 
 ---
@@ -129,7 +167,11 @@ Load 2 unsigned 32-bit integers and extend to 64-bit.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load32x2_u (i32.const 0))
+# ))
 ```
 
 ---
@@ -143,7 +185,11 @@ Load 8-bit value and replicate to all lanes.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load8_splat (i32.const 0))  ;; Loads byte and replicates 16 times
+# ))
 ```
 
 ---
@@ -157,7 +203,11 @@ Load 16-bit value and replicate to all lanes.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load16_splat (i32.const 0))  ;; Loads i16 and replicates 8 times
+# ))
 ```
 
 ---
@@ -171,7 +221,11 @@ Load 32-bit value and replicate to all lanes.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load32_splat (i32.const 0))  ;; Loads i32 and replicates 4 times
+# ))
 ```
 
 ---
@@ -185,7 +239,11 @@ Load 64-bit value and replicate to all lanes.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load64_splat (i32.const 0))  ;; Loads i64 and replicates 2 times
+# ))
 ```
 
 ---
@@ -199,7 +257,11 @@ Load 32-bit value into the lowest lane and zero all other lanes.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load32_zero (i32.const 0))  ;; Loads i32 into lane 0, zeros lanes 1-3
+# ))
 ```
 
 ---
@@ -213,7 +275,11 @@ Load 64-bit value into the lowest lane and zero all other lanes.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128)
 (v128.load64_zero (i32.const 0))  ;; Loads i64 into lane 0, zeros lane 1
+# ))
 ```
 
 ---
@@ -227,8 +293,15 @@ Load 8-bit value into a specific lane of an existing vector.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (local $vec v128)
+# (drop
 (v128.load8_lane 0 (i32.const 0) (local.get $vec))  ;; Load byte into lane 0
+# )
+# (drop
 (v128.load8_lane offset=4 5 (i32.const 0) (local.get $vec))  ;; With offset, lane 5
+# )))
 ```
 
 ---
@@ -242,7 +315,11 @@ Load 16-bit value into a specific lane of an existing vector.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128) (local $vec v128)
 (v128.load16_lane 0 (i32.const 0) (local.get $vec))  ;; Load i16 into lane 0
+# ))
 ```
 
 ---
@@ -256,7 +333,11 @@ Load 32-bit value into a specific lane of an existing vector.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (result v128) (local $vec v128)
 (v128.load32_lane 0 (i32.const 0) (local.get $vec))  ;; Load i32 into lane 0
+# ))
 ```
 
 ---
@@ -270,8 +351,15 @@ Load 64-bit value into a specific lane of an existing vector.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (local $vec v128)
+# (drop
 (v128.load64_lane 0 (i32.const 0) (local.get $vec))  ;; Load i64 into lane 0
+# )
+# (drop
 (v128.load64_lane offset=8 1 (i32.const 0) (local.get $vec))  ;; With offset, lane 1
+# )))
 ```
 
 ---
@@ -285,7 +373,11 @@ Store 8-bit value from a specific lane to memory.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (local $vec v128)
 (v128.store8_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as byte
+# ))
 ```
 
 ---
@@ -299,7 +391,11 @@ Store 16-bit value from a specific lane to memory.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (local $vec v128)
 (v128.store16_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as i16
+# ))
 ```
 
 ---
@@ -313,7 +409,11 @@ Store 32-bit value from a specific lane to memory.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (local $vec v128)
 (v128.store32_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as i32
+# ))
 ```
 
 ---
@@ -327,8 +427,12 @@ Store 64-bit value from a specific lane to memory.
 **Example:**
 
 ```wat
+# (module
+# (memory 1)
+# (func (local $vec v128)
 (v128.store64_lane 0 (i32.const 0) (local.get $vec))  ;; Store lane 0 as i64
 (v128.store64_lane offset=8 1 (i32.const 0) (local.get $vec))  ;; With offset, lane 1
+# ))
 ```
 
 ---
@@ -342,7 +446,9 @@ Check if any bit in the vector is non-zero.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 (v128.any_true (local.get $vec))  ;; Returns 1 if any bit is set
+# ))
 ```
 
 ---
@@ -356,7 +462,9 @@ Compute bitwise AND of two v128 vectors.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (v128.and (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -370,7 +478,9 @@ Compute bitwise OR of two v128 vectors.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (v128.or (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -384,7 +494,9 @@ Compute bitwise XOR of two v128 vectors.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (v128.xor (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -398,7 +510,9 @@ Compute bitwise NOT of a v128 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (v128.not (local.get $a))
+# ))
 ```
 
 ---
@@ -412,7 +526,9 @@ Add two i8x16 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.add (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -426,7 +542,9 @@ Add two i16x8 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.add (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -440,7 +558,9 @@ Add two i32x4 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.add (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -454,7 +574,9 @@ Add two i64x2 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.add (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -468,7 +590,9 @@ Add two f32x4 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.add (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -482,7 +606,9 @@ Multiply two f32x4 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -496,7 +622,9 @@ Subtract two f32x4 vectors lane-wise (first minus second).
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -510,7 +638,9 @@ Divide two f32x4 vectors lane-wise (first divided by second).
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.div (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -524,7 +654,9 @@ Compute square root of each lane in an f32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.sqrt (local.get $a))
+# ))
 ```
 
 ---
@@ -538,7 +670,9 @@ Negate each lane in an f32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -552,7 +686,9 @@ Compute absolute value of each lane in an f32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -566,7 +702,9 @@ Compute lane-wise minimum of two f32x4 vectors. Returns NaN if either operand is
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.min (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -580,7 +718,9 @@ Compute lane-wise maximum of two f32x4 vectors. Returns NaN if either operand is
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.max (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -594,7 +734,9 @@ Pseudo-minimum: lane-wise `a < b ? a : b`. Unlike f32x4.min, returns second oper
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.pmin (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -608,7 +750,9 @@ Pseudo-maximum: lane-wise `a > b ? a : b`. Unlike f32x4.max, returns second oper
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.pmax (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -622,7 +766,9 @@ Round each lane to the nearest integer towards positive infinity.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.ceil (local.get $a))
+# ))
 ```
 
 ---
@@ -636,7 +782,9 @@ Round each lane to the nearest integer towards negative infinity.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.floor (local.get $a))
+# ))
 ```
 
 ---
@@ -650,7 +798,9 @@ Round each lane to the nearest integer towards zero.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.trunc (local.get $a))
+# ))
 ```
 
 ---
@@ -664,7 +814,9 @@ Round each lane to the nearest integer, with ties to even.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f32x4.nearest (local.get $a))
+# ))
 ```
 
 ---
@@ -678,7 +830,9 @@ Compare two f32x4 vectors for equality lane-wise. Returns all 1s for true, all 0
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.eq (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -692,7 +846,9 @@ Compare two f32x4 vectors for inequality lane-wise. Returns all 1s for true, all
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -706,7 +862,9 @@ Compare two f32x4 vectors for less-than lane-wise. Returns all 1s for true, all 
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.lt (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -720,7 +878,9 @@ Compare two f32x4 vectors for greater-than lane-wise. Returns all 1s for true, a
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.gt (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -734,7 +894,9 @@ Compare two f32x4 vectors for less-than-or-equal lane-wise. Returns all 1s for t
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.le (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -748,7 +910,9 @@ Compare two f32x4 vectors for greater-than-or-equal lane-wise. Returns all 1s fo
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f32x4.ge (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -762,7 +926,9 @@ Create an i32x4 vector with all lanes set to the same i32 value.
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (i32x4.splat (i32.const 42))
+# ))
 ```
 
 ---
@@ -776,7 +942,9 @@ Create an f32x4 vector with all lanes set to the same f32 value.
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (f32x4.splat (f32.const 1.0))
+# ))
 ```
 
 ---
@@ -790,7 +958,9 @@ Add two f64x2 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.add (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -804,7 +974,9 @@ Subtract two f64x2 vectors lane-wise (first minus second).
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -818,7 +990,9 @@ Multiply two f64x2 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -832,7 +1006,9 @@ Divide two f64x2 vectors lane-wise (first divided by second).
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.div (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -846,7 +1022,9 @@ Compute square root of each lane in an f64x2 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.sqrt (local.get $a))
+# ))
 ```
 
 ---
@@ -860,7 +1038,9 @@ Negate each lane in an f64x2 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -874,7 +1054,9 @@ Compute absolute value of each lane in an f64x2 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -888,7 +1070,9 @@ Compute lane-wise minimum of two f64x2 vectors. Returns NaN if either operand is
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.min (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -902,7 +1086,9 @@ Compute lane-wise maximum of two f64x2 vectors. Returns NaN if either operand is
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.max (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -916,7 +1102,9 @@ Pseudo-minimum: lane-wise `a < b ? a : b`. Unlike f64x2.min, returns second oper
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.pmin (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -930,7 +1118,9 @@ Pseudo-maximum: lane-wise `a > b ? a : b`. Unlike f64x2.max, returns second oper
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.pmax (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -944,7 +1134,9 @@ Round each lane to the nearest integer towards positive infinity.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.ceil (local.get $a))
+# ))
 ```
 
 ---
@@ -958,7 +1150,9 @@ Round each lane to the nearest integer towards negative infinity.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.floor (local.get $a))
+# ))
 ```
 
 ---
@@ -972,7 +1166,9 @@ Round each lane to the nearest integer towards zero.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.trunc (local.get $a))
+# ))
 ```
 
 ---
@@ -986,7 +1182,9 @@ Round each lane to the nearest integer, with ties to even.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128)
 (f64x2.nearest (local.get $a))
+# ))
 ```
 
 ---
@@ -1000,7 +1198,9 @@ Compare two f64x2 vectors for equality lane-wise. Returns all 1s for true, all 0
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.eq (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1014,7 +1214,9 @@ Compare two f64x2 vectors for inequality lane-wise. Returns all 1s for true, all
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1028,7 +1230,9 @@ Compare two f64x2 vectors for less-than lane-wise. Returns all 1s for true, all 
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.lt (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1042,7 +1246,9 @@ Compare two f64x2 vectors for greater-than lane-wise. Returns all 1s for true, a
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.gt (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1056,7 +1262,9 @@ Compare two f64x2 vectors for less-than-or-equal lane-wise. Returns all 1s for t
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.le (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1070,7 +1278,9 @@ Compare two f64x2 vectors for greater-than-or-equal lane-wise. Returns all 1s fo
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (f64x2.ge (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1084,7 +1294,9 @@ Create an f64x2 vector with all lanes set to the same f64 value.
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (f64x2.splat (f64.const 1.0))
+# ))
 ```
 
 ---
@@ -1098,7 +1310,9 @@ Convert an f32x4 vector to i32x4 with signed saturation. Values outside the sign
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $floats v128)
 (i32x4.trunc_sat_f32x4_s (local.get $floats))
+# ))
 ```
 
 ---
@@ -1112,7 +1326,9 @@ Convert an f32x4 vector to i32x4 with unsigned saturation. Values outside the un
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $floats v128)
 (i32x4.trunc_sat_f32x4_u (local.get $floats))
+# ))
 ```
 
 ---
@@ -1126,7 +1342,9 @@ Convert an i32x4 vector to f32x4, interpreting each lane as a signed integer.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $ints v128)
 (f32x4.convert_i32x4_s (local.get $ints))
+# ))
 ```
 
 ---
@@ -1140,7 +1358,9 @@ Convert an i32x4 vector to f32x4, interpreting each lane as an unsigned integer.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $ints v128)
 (f32x4.convert_i32x4_u (local.get $ints))
+# ))
 ```
 
 ---
@@ -1154,7 +1374,9 @@ Compare two i32x4 vectors for equality lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.eq (local.get $a) (local.get $b))  ;; Returns -1 for equal lanes, 0 otherwise
+# ))
 ```
 
 ---
@@ -1168,7 +1390,9 @@ Signed greater-than comparison for i32x4 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.gt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1182,7 +1406,9 @@ Unsigned greater-than comparison for i32x4 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.gt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1196,7 +1422,9 @@ Signed less-than-or-equal comparison for i32x4 vectors lane-wise.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.le_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1210,7 +1438,9 @@ Signed less-than comparison for i32x4 vectors lane-wise. Returns all 1s for true
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.lt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1224,7 +1454,9 @@ Shift each lane in an i32x4 vector left by a scalar amount. The shift count is t
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 (i32x4.shl (local.get $vec) (i32.const 2))  ;; Shift all lanes left by 2
+# ))
 ```
 
 ---
@@ -1238,7 +1470,9 @@ Shift each lane in an i32x4 vector right by a scalar amount (signed/arithmetic).
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 (i32x4.shr_s (local.get $vec) (i32.const 2))  ;; Arithmetic shift right by 2
+# ))
 ```
 
 ---
@@ -1252,7 +1486,9 @@ Check if all lanes in an i8x16 vector are non-zero.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 (i8x16.all_true (local.get $vec))  ;; Returns 1 if all 16 lanes are non-zero
+# ))
 ```
 
 ---
@@ -1266,7 +1502,9 @@ Check if all lanes in an i32x4 vector are non-zero.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 (i32x4.all_true (local.get $vec))  ;; Returns 1 if all 4 lanes are non-zero
+# ))
 ```
 
 ---
@@ -1280,7 +1518,9 @@ Absolute value of each lane in an i32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 (i32x4.abs (local.get $vec))
+# ))
 ```
 
 ---
@@ -1294,8 +1534,10 @@ Extract the high bit of each lane and combine into an i32 bitmask.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 ;; Returns i32 where bit N is the high bit of lane N (0-3)
 (i32x4.bitmask (local.get $vec))
+# ))
 ```
 
 ---
@@ -1309,8 +1551,10 @@ Extract a signed 8-bit lane from an i8x16 vector and sign-extend to i32.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 ;; Extract lane 5 (0-15) as signed i32
 (i8x16.extract_lane_s 5 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1324,8 +1568,10 @@ Extract an unsigned 8-bit lane from an i8x16 vector and zero-extend to i32.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 ;; Extract lane 5 (0-15) as unsigned i32
 (i8x16.extract_lane_u 5 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1339,8 +1585,10 @@ Extract a signed 16-bit lane from an i16x8 vector and sign-extend to i32.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 ;; Extract lane 3 (0-7) as signed i32
 (i16x8.extract_lane_s 3 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1354,8 +1602,10 @@ Extract an unsigned 16-bit lane from an i16x8 vector and zero-extend to i32.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 ;; Extract lane 3 (0-7) as unsigned i32
 (i16x8.extract_lane_u 3 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1369,8 +1619,10 @@ Extract a 32-bit lane from an i32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result i32) (local $vec v128)
 ;; Extract lane 2 (0-3)
 (i32x4.extract_lane 2 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1384,8 +1636,10 @@ Extract a 64-bit lane from an i64x2 vector.
 **Example:**
 
 ```wat
+# (module (func (result i64) (local $vec v128)
 ;; Extract lane 1 (0-1)
 (i64x2.extract_lane 1 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1399,8 +1653,10 @@ Extract a 32-bit float lane from an f32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result f32) (local $vec v128)
 ;; Extract lane 0 (0-3)
 (f32x4.extract_lane 0 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1414,8 +1670,10 @@ Extract a 64-bit float lane from an f64x2 vector.
 **Example:**
 
 ```wat
+# (module (func (result f64) (local $vec v128)
 ;; Extract lane 0 (0-1)
 (f64x2.extract_lane 0 (local.get $vec))
+# ))
 ```
 
 ---
@@ -1429,8 +1687,10 @@ Replace an 8-bit lane in an i8x16 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 ;; Replace lane 5 (0-15) with value 42
 (i8x16.replace_lane 5 (local.get $vec) (i32.const 42))
+# ))
 ```
 
 ---
@@ -1444,8 +1704,10 @@ Replace a 16-bit lane in an i16x8 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 ;; Replace lane 3 (0-7) with value 1000
 (i16x8.replace_lane 3 (local.get $vec) (i32.const 1000))
+# ))
 ```
 
 ---
@@ -1459,8 +1721,10 @@ Replace a 32-bit lane in an i32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 ;; Replace lane 2 (0-3) with value
 (i32x4.replace_lane 2 (local.get $vec) (i32.const 123456))
+# ))
 ```
 
 ---
@@ -1474,8 +1738,10 @@ Replace a 64-bit lane in an i64x2 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 ;; Replace lane 1 (0-1) with value
 (i64x2.replace_lane 1 (local.get $vec) (i64.const 9876543210))
+# ))
 ```
 
 ---
@@ -1489,8 +1755,10 @@ Replace a 32-bit float lane in an f32x4 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 ;; Replace lane 0 (0-3) with value
 (f32x4.replace_lane 0 (local.get $vec) (f32.const 3.14))
+# ))
 ```
 
 ---
@@ -1504,8 +1772,10 @@ Replace a 64-bit float lane in an f64x2 vector.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $vec v128)
 ;; Replace lane 0 (0-1) with value
 (f64x2.replace_lane 0 (local.get $vec) (f64.const 2.71828))
+# ))
 ```
 
 ---
@@ -1519,11 +1789,13 @@ Shuffle bytes from two i8x16 vectors using 16 lane indices.
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 ;; Shuffle lanes from two vectors
 ;; Indices 0-15 select from first vector, 16-31 from second
 (i8x16.shuffle 0 1 2 3 16 17 18 19 4 5 6 7 20 21 22 23
   (local.get $a)
   (local.get $b))
+# ))
 ```
 
 ---
@@ -1537,11 +1809,13 @@ Relaxed fused multiply-add: `a * b + c` for each f32 lane. The result may be com
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $c v128)
 ;; Compute a * b + c with relaxed precision
 (f32x4.relaxed_madd
   (local.get $a)   ;; multiplicand
   (local.get $b)   ;; multiplier
   (local.get $c))  ;; addend
+# ))
 ```
 
 ---
@@ -1555,11 +1829,13 @@ Relaxed fused negative multiply-add: `-a * b + c` for each f32 lane. The result 
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $c v128)
 ;; Compute -a * b + c with relaxed precision
 (f32x4.relaxed_nmadd
   (local.get $a)   ;; multiplicand (negated)
   (local.get $b)   ;; multiplier
   (local.get $c))  ;; addend
+# ))
 ```
 
 ---
@@ -1573,11 +1849,13 @@ Relaxed fused multiply-add: `a * b + c` for each f64 lane. The result may be com
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $c v128)
 ;; Compute a * b + c with relaxed precision (64-bit floats)
 (f64x2.relaxed_madd
   (local.get $a)   ;; multiplicand
   (local.get $b)   ;; multiplier
   (local.get $c))  ;; addend
+# ))
 ```
 
 ---
@@ -1591,11 +1869,13 @@ Relaxed fused negative multiply-add: `-a * b + c` for each f64 lane. The result 
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $c v128)
 ;; Compute -a * b + c with relaxed precision (64-bit floats)
 (f64x2.relaxed_nmadd
   (local.get $a)   ;; multiplicand (negated)
   (local.get $b)   ;; multiplier
   (local.get $c))  ;; addend
+# ))
 ```
 
 ---
@@ -1609,10 +1889,12 @@ Relaxed byte swizzle operation. Selects bytes from the first vector using indice
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $data v128) (local $indices v128)
 ;; Swizzle bytes with relaxed out-of-range behavior
 (i8x16.relaxed_swizzle
   (local.get $data)     ;; source bytes
   (local.get $indices)) ;; lane indices (0-15 for defined behavior)
+# ))
 ```
 
 ---
@@ -1626,8 +1908,10 @@ Relaxed truncation of f32x4 to signed i32x4. Unlike i32x4.trunc_sat_f32x4_s, the
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $floats v128)
 ;; Truncate f32 lanes to signed i32 with relaxed semantics
 (i32x4.relaxed_trunc_f32x4_s (local.get $floats))
+# ))
 ```
 
 ---
@@ -1641,8 +1925,10 @@ Relaxed truncation of f32x4 to unsigned i32x4. Unlike i32x4.trunc_sat_f32x4_u, t
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $floats v128)
 ;; Truncate f32 lanes to unsigned i32 with relaxed semantics
 (i32x4.relaxed_trunc_f32x4_u (local.get $floats))
+# ))
 ```
 
 ---
@@ -1656,8 +1942,10 @@ Relaxed truncation of f64x2 to signed i32x4 with zero extension. Converts two f6
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $doubles v128)
 ;; Truncate two f64 lanes to signed i32, upper lanes zeroed
 (i32x4.relaxed_trunc_f64x2_s_zero (local.get $doubles))
+# ))
 ```
 
 ---
@@ -1671,8 +1959,10 @@ Relaxed truncation of f64x2 to unsigned i32x4 with zero extension. Converts two 
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $doubles v128)
 ;; Truncate two f64 lanes to unsigned i32, upper lanes zeroed
 (i32x4.relaxed_trunc_f64x2_u_zero (local.get $doubles))
+# ))
 ```
 
 ---
@@ -1686,8 +1976,10 @@ Relaxed lane-wise minimum of two f32x4 vectors. Unlike f32x4.min, the behavior f
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 ;; Relaxed minimum with implementation-defined NaN handling
 (f32x4.relaxed_min (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1701,8 +1993,10 @@ Relaxed lane-wise maximum of two f32x4 vectors. Unlike f32x4.max, the behavior f
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 ;; Relaxed maximum with implementation-defined NaN handling
 (f32x4.relaxed_max (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1716,8 +2010,10 @@ Relaxed lane-wise minimum of two f64x2 vectors. Unlike f64x2.min, the behavior f
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 ;; Relaxed minimum with implementation-defined NaN handling (64-bit)
 (f64x2.relaxed_min (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1731,8 +2027,10 @@ Relaxed lane-wise maximum of two f64x2 vectors. Unlike f64x2.max, the behavior f
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 ;; Relaxed maximum with implementation-defined NaN handling (64-bit)
 (f64x2.relaxed_max (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1746,11 +2044,13 @@ Relaxed lane select for i8x16 vectors. Selects bytes from the first or second ve
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $mask v128)
 ;; Select bytes based on mask with relaxed semantics
 (i8x16.relaxed_laneselect
   (local.get $a)      ;; selected when mask bit is set
   (local.get $b)      ;; selected when mask bit is clear
   (local.get $mask))  ;; selection mask
+# ))
 ```
 
 ---
@@ -1764,11 +2064,13 @@ Relaxed lane select for i16x8 vectors. Selects 16-bit lanes from the first or se
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $mask v128)
 ;; Select 16-bit lanes based on mask with relaxed semantics
 (i16x8.relaxed_laneselect
   (local.get $a)      ;; selected when mask bit is set
   (local.get $b)      ;; selected when mask bit is clear
   (local.get $mask))  ;; selection mask
+# ))
 ```
 
 ---
@@ -1782,11 +2084,13 @@ Relaxed lane select for i32x4 vectors. Selects 32-bit lanes from the first or se
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $mask v128)
 ;; Select 32-bit lanes based on mask with relaxed semantics
 (i32x4.relaxed_laneselect
   (local.get $a)      ;; selected when mask bit is set
   (local.get $b)      ;; selected when mask bit is clear
   (local.get $mask))  ;; selection mask
+# ))
 ```
 
 ---
@@ -1800,11 +2104,13 @@ Relaxed lane select for i64x2 vectors. Selects 64-bit lanes from the first or se
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $mask v128)
 ;; Select 64-bit lanes based on mask with relaxed semantics
 (i64x2.relaxed_laneselect
   (local.get $a)      ;; selected when mask bit is set
   (local.get $b)      ;; selected when mask bit is clear
   (local.get $mask))  ;; selection mask
+# ))
 ```
 
 ---
@@ -1818,8 +2124,10 @@ Relaxed Q15 rounding multiply returning high half for signed i16x8 lanes. Comput
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 ;; Q15 fixed-point multiply with relaxed overflow
 (i16x8.relaxed_q15mulr_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -1833,10 +2141,12 @@ Relaxed dot product of i8x16 and i7x16 (7-bit unsigned) vectors, producing i16x8
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 ;; Dot product: sum of pairwise products of 8-bit lanes
 (i16x8.relaxed_dot_i8x16_i7x16_s
   (local.get $a)   ;; signed 8-bit values
   (local.get $b))  ;; 7-bit unsigned values (high bit behavior undefined)
+# ))
 ```
 
 ---
@@ -1850,11 +2160,13 @@ Relaxed dot product of i8x16 and i7x16 vectors with i32x4 accumulation. Multipli
 **Example:**
 
 ```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $acc v128)
 ;; Dot product with accumulation: useful for neural network inference
 (i32x4.relaxed_dot_i8x16_i7x16_add_s
   (local.get $a)     ;; signed 8-bit values
   (local.get $b)     ;; 7-bit unsigned values
   (local.get $acc))  ;; i32x4 accumulator
+# ))
 ```
 
 ---

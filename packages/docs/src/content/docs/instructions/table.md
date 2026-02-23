@@ -14,8 +14,11 @@ Get element from table at index.
 **Example:**
 
 ```wat
+# (module
 (table $funcs 10 funcref)
+# (func (result funcref)
 (table.get $funcs (i32.const 0))
+# ))
 ```
 
 ---
@@ -29,10 +32,15 @@ Set element in table at index.
 **Example:**
 
 ```wat
+# (module
 (table $funcs 10 funcref)
+(func $my_function)
+# (elem declare func $my_function)
+# (func
 (table.set $funcs
   (i32.const 0)
   (ref.func $my_function))
+# ))
 ```
 
 ---
@@ -46,7 +54,11 @@ Get current table size.
 **Example:**
 
 ```wat
+# (module
+# (table $funcs 10 funcref)
+# (func (result i32)
 (table.size $funcs)
+# ))
 ```
 
 ---
@@ -60,9 +72,13 @@ Grow table by delta, returns previous size or -1 on failure.
 **Example:**
 
 ```wat
+# (module
+# (table $funcs 10 funcref)
+# (func (result i32)
 (table.grow $funcs
   (ref.null func)
   (i32.const 5))  ;; Grow by 5 elements
+# ))
 ```
 
 ---
@@ -76,12 +92,15 @@ Fill a region of a table with a value.
 **Example:**
 
 ```wat
+# (module
 (table $funcs 10 funcref)
+# (func
 ;; Fill 5 slots starting at index 0 with null
 (table.fill $funcs
   (i32.const 0)       ;; start index
   (ref.null func)     ;; value
   (i32.const 5))      ;; count
+# ))
 ```
 
 ---
@@ -95,12 +114,15 @@ Copy elements from one table region to another.
 **Example:**
 
 ```wat
+# (module
 (table $funcs 10 funcref)
+# (func
 ;; Copy 3 elements from index 0 to index 5
 (table.copy $funcs $funcs
   (i32.const 5)   ;; destination index
   (i32.const 0)   ;; source index
   (i32.const 3))  ;; count
+# ))
 ```
 
 ---
@@ -114,12 +136,17 @@ Initialize table region from a passive element segment.
 **Example:**
 
 ```wat
+# (module
+# (table $my_table 10 funcref)
+# (func $f1) (func $f2) (func $f3)
 (elem $my_elem func $f1 $f2 $f3)
+# (func
 ;; Copy 3 elements from elem segment to table
 (table.init $my_table $my_elem
   (i32.const 0)   ;; table destination
   (i32.const 0)   ;; elem segment offset
   (i32.const 3))  ;; count
+# ))
 ```
 
 ---
@@ -131,8 +158,12 @@ Drop a passive element segment, freeing its memory.
 **Example:**
 
 ```wat
+# (module
+# (func $f1) (func $f2)
 (elem $my_elem func $f1 $f2)
+# (func
 (elem.drop $my_elem)  ;; Element segment can no longer be used
+# ))
 ```
 
 ---

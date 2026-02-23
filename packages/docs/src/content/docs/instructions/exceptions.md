@@ -14,7 +14,11 @@ Throw an exception with a tag.
 **Example:**
 
 ```wat
+# (module
+# (tag $error_tag (param i32))
+# (func
 (throw $error_tag (i32.const 500))
+# ))
 ```
 
 ---
@@ -28,7 +32,9 @@ Throw an existing exception reference.
 **Example:**
 
 ```wat
+# (module (func (param $exn exnref)
 (throw_ref (local.get $exn))
+# ))
 ```
 
 ---
@@ -41,7 +47,7 @@ Rethrow an exception from a catch block.
 
 **Example:**
 
-```wat
+```wat-snippet
 (rethrow $label)
 ```
 
@@ -54,8 +60,10 @@ Declare an exception tag with a type signature for exception handling.
 **Example:**
 
 ```wat
+# (module
 (tag $error (param i32))
 (tag $complex_error (param i32 i32 f64))
+# )
 ```
 
 ---
@@ -67,9 +75,14 @@ Define a block that catches exceptions using a jump table.
 **Example:**
 
 ```wat
+# (module
+# (tag $tag (param i32))
+# (func
+# (block $handler_label (result i32)
 (try_table (catch $tag $handler_label)
   (throw $tag (i32.const 1))
 )
+# (unreachable))))
 ```
 
 ---
@@ -80,7 +93,7 @@ Catches exceptions with a specific tag in a `try_table` block. Branches to a lab
 
 **Example:**
 
-```wat
+```wat-snippet
 (block $handler (result i32)
   (try_table (catch $error_tag $handler)
     (call $may_throw)
@@ -105,7 +118,7 @@ Catches any exception in a `try_table` block, regardless of tag.
 
 **Example:**
 
-```wat
+```wat-snippet
 (block $fallback
   (try_table (catch_all $fallback)
     (call $may_throw_anything)
@@ -122,7 +135,7 @@ Catches exceptions with a specific tag and provides the exception reference.
 
 **Example:**
 
-```wat
+```wat-snippet
 (block $handler (result i32 exnref)
   (try_table (catch_ref $error_tag $handler)
     (call $may_throw)
@@ -140,7 +153,7 @@ Catches any exception and provides the exception reference.
 
 **Example:**
 
-```wat
+```wat-snippet
 (block $handler (result exnref)
   (try_table (catch_all_ref $handler)
     (call $may_throw)

@@ -35,6 +35,7 @@ jobs:
               - 'build.rs'
               - 'packages/docs/instructions.md'
               - 'packages/docs/annotations.md'
+              - 'packages/docs/src/content/docs/**'
               - 'packages/playground/examples/**'
               - 'grammars/tree-sitter-wat/**'
               - 'tests/**'

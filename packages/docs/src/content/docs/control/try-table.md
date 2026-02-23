@@ -36,7 +36,9 @@ sidebar:
 Tags declare exception types with their payload signatures:
 
 ```wat
+# (module
 (tag $my-error (param i32 i32))
+# )
 ```
 
 When a `catch` clause matches, the tag's parameter types are delivered to the branch target label.
