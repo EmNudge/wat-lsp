@@ -165,17 +165,6 @@ impl InstructionArity {
             )
         }
     }
-
-    pub fn expected_operands_message(&self) -> String {
-        match self.operand_mode {
-            OperandMode::Fixed(n) => match n {
-                0 => "0 operands".to_string(),
-                1 => "1 operand".to_string(),
-                _ => format!("{} operands", n),
-            },
-            OperandMode::Dynamic => "variable operands".to_string(),
-        }
-    }
 }
 
 // ============================================================================

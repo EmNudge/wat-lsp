@@ -155,13 +155,6 @@ impl HoverResult {
             range: None,
         }
     }
-
-    pub fn with_range(contents: String, range: Range) -> Self {
-        Self {
-            contents,
-            range: Some(range),
-        }
-    }
 }
 
 /// Definition result - the range where a symbol is defined

@@ -43,6 +43,12 @@ pub struct WatLSP {
     ready: bool,
 }
 
+impl WatLSP {
+    fn symbols_and_tree(&self) -> Option<(&SymbolTable, &Tree)> {
+        Some((self.symbols.as_ref()?, self.tree.as_ref()?))
+    }
+}
+
 #[wasm_bindgen]
 impl WatLSP {
     /// Create a new WAT LSP instance
@@ -136,7 +142,7 @@ impl WatLSP {
     pub fn provide_diagnostics(&self) -> JsValue {
         let js_array = js_sys::Array::new();
 
-        if let (Some(tree), Some(symbols)) = (&self.tree, &self.symbols) {
+        if let Some((symbols, tree)) = self.symbols_and_tree() {
             // Syntax errors from tree-sitter ERROR nodes
             let syntax_diagnostics =
                 crate::diagnostics_core::provide_tree_sitter_diagnostics(tree, &self.document);
@@ -177,19 +183,10 @@ impl WatLSP {
     /// Provide hover information at the given position (uses tree-sitter based hover)
     #[wasm_bindgen(js_name = provideHover)]
     pub fn provide_hover(&self, line: u32, col: u32) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return JsValue::NULL,
+        let Some((symbols, tree)) = self.symbols_and_tree() else {
+            return JsValue::NULL;
         };
-
-        let tree = match &self.tree {
-            Some(t) => t,
-            None => return JsValue::NULL,
-        };
-
         let position = Position::new(line, col);
-
-        // Use the shared tree-sitter based hover implementation
         match provide_hover_core(&self.document, symbols, tree, position) {
             Some(hover) => hover_to_js(&hover),
             None => JsValue::NULL,
@@ -199,16 +196,9 @@ impl WatLSP {
     /// Provide go-to-definition at the given position
     #[wasm_bindgen(js_name = provideDefinition)]
     pub fn provide_definition(&self, line: u32, col: u32) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return JsValue::NULL,
+        let Some((symbols, tree)) = self.symbols_and_tree() else {
+            return JsValue::NULL;
         };
-
-        let tree = match &self.tree {
-            Some(t) => t,
-            None => return JsValue::NULL,
-        };
-
         let position = Position::new(line, col);
 
         match crate::features::definition_core::provide_definition_core(
@@ -217,7 +207,7 @@ impl WatLSP {
             tree,
             position,
         ) {
-            Some(range) => definition_to_js(&range),
+            Some(range) => range_obj_to_js(&range),
             None => JsValue::NULL,
         }
     }
@@ -263,18 +253,10 @@ impl WatLSP {
     /// Provide find-references at the given position
     #[wasm_bindgen(js_name = provideReferences)]
     pub fn provide_references(&self, line: u32, col: u32, include_declaration: bool) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return js_sys::Array::new().into(),
+        let Some((symbols, tree)) = self.symbols_and_tree() else {
+            return js_sys::Array::new().into();
         };
-
-        let tree = match &self.tree {
-            Some(t) => t,
-            None => return js_sys::Array::new().into(),
-        };
-
         let position = Position::new(line, col);
-
         let refs = crate::features::references_core::provide_references_core(
             &self.document,
             symbols,
@@ -282,10 +264,9 @@ impl WatLSP {
             position,
             include_declaration,
         );
-
         let js_array = js_sys::Array::new();
         for range in refs {
-            js_array.push(&reference_to_js(&range));
+            js_array.push(&range_obj_to_js(&range));
         }
         js_array.into()
     }
@@ -294,16 +275,9 @@ impl WatLSP {
     /// Returns null if the symbol cannot be renamed, otherwise returns { range, placeholder }
     #[wasm_bindgen(js_name = prepareRename)]
     pub fn prepare_rename(&self, line: u32, col: u32) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return JsValue::NULL,
+        let Some((symbols, tree)) = self.symbols_and_tree() else {
+            return JsValue::NULL;
         };
-
-        let tree = match &self.tree {
-            Some(t) => t,
-            None => return JsValue::NULL,
-        };
-
         let position = Position::new(line, col);
 
         // Get word at position
@@ -352,14 +326,8 @@ impl WatLSP {
     /// Returns null if rename is not possible, otherwise returns { changes: [{ range, newText }] }
     #[wasm_bindgen(js_name = rename)]
     pub fn rename(&self, line: u32, col: u32, new_name: &str) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return JsValue::NULL,
-        };
-
-        let tree = match &self.tree {
-            Some(t) => t,
-            None => return JsValue::NULL,
+        let Some((symbols, tree)) = self.symbols_and_tree() else {
+            return JsValue::NULL;
         };
 
         // Validation: New name MUST start with $
@@ -610,16 +578,9 @@ impl WatLSP {
     /// Returns an array of folding range objects with startLine, endLine, and kind
     #[wasm_bindgen(js_name = provideFoldingRanges)]
     pub fn provide_folding_ranges(&self) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return js_sys::Array::new().into(),
+        let Some((symbols, tree)) = self.symbols_and_tree() else {
+            return js_sys::Array::new().into();
         };
-
-        let tree = match &self.tree {
-            Some(t) => t,
-            None => return js_sys::Array::new().into(),
-        };
-
         let ranges = provide_folding_ranges(&self.document, symbols, tree);
 
         let js_array = js_sys::Array::new();
@@ -669,16 +630,9 @@ impl WatLSP {
     ///   activeSignature, activeParameter }
     #[wasm_bindgen(js_name = provideSignatureHelp)]
     pub fn provide_signature_help(&self, line: u32, col: u32) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return JsValue::NULL,
+        let Some((symbols, tree)) = self.symbols_and_tree() else {
+            return JsValue::NULL;
         };
-
-        let tree = match &self.tree {
-            Some(t) => t,
-            None => return JsValue::NULL,
-        };
-
         let position = Position::new(line, col);
 
         // Try AST-based approach first
@@ -900,13 +854,7 @@ fn range_to_js(range: &Range) -> JsValue {
     obj.into()
 }
 
-fn definition_to_js(range: &Range) -> JsValue {
-    let obj = js_sys::Object::new();
-    js_sys::Reflect::set(&obj, &"range".into(), &range_to_js(range)).ok();
-    obj.into()
-}
-
-fn reference_to_js(range: &Range) -> JsValue {
+fn range_obj_to_js(range: &Range) -> JsValue {
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(&obj, &"range".into(), &range_to_js(range)).ok();
     obj.into()
