@@ -13,7 +13,7 @@ Exception handling introduces `try_table`, `throw`, and related constructs for s
 
   (func (export "mayThrow") (param $x i32) (result i32)
     (block $handler (result i32)
-      (try_table (catch $e $handler)
+      (try_table (result i32) (catch $e $handler)
         (if (i32.eqz (local.get $x))
           (then (throw $e (i32.const 1))))
         (i32.const 0)

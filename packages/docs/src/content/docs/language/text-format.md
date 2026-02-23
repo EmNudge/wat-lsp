@@ -158,8 +158,8 @@ The same sugar applies to other definitions:
 
 ```wat
 (module
-  (memory (export "mem") 1)                        ;; inline export
   (global $g (import "env" "val") i32)             ;; inline import
+  (memory (export "mem") 1)                        ;; inline export
   (table (export "tbl") 1 funcref)                 ;; inline export
 )
 ```

@@ -10,10 +10,10 @@ sidebar:
 ```wat
 (module
   (func (param $tag i32) (result i32)
-    (block $default (result i32)
-      (block $case2 (result i32)
-        (block $case1 (result i32)
-          (block $case0 (result i32)
+    (block $default
+      (block $case2
+        (block $case1
+          (block $case0
             (br_table $case0 $case1 $case2 $default
               (local.get $tag)))
           (return (i32.const 10)))

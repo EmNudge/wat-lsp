@@ -17,7 +17,7 @@ Typed function references make function refs carry specific types and enable `ca
   (elem (i32.const 0) $inc)
 
   (func (export "dispatch") (param $x i32) (result i32)
-    (call_ref (type $t0) (local.get $x) (ref.func $inc)))
+    (call_ref $t0 (local.get $x) (ref.func $inc)))
 )
 ```
 
