@@ -11,7 +11,7 @@ sidebar:
 
 **Example:**
 
-```wat
+```wat-snippet
 (local $x i32)
 (global $counter (mut i32) (i32.const 0))
 (param $value i32)
@@ -25,7 +25,7 @@ sidebar:
 
 **Example:**
 
-```wat
+```wat-snippet
 (local $timestamp i64)
 (global $big_number i64 (i64.const 9223372036854775807))
 ```
@@ -38,7 +38,7 @@ sidebar:
 
 **Example:**
 
-```wat
+```wat-snippet
 (local $pi f32)
 (global $epsilon f32 (f32.const 1.1920929e-07))
 ```
@@ -51,7 +51,7 @@ sidebar:
 
 **Example:**
 
-```wat
+```wat-snippet
 (local $precise f64)
 (global $e f64 (f64.const 2.718281828459045))
 ```
@@ -64,7 +64,7 @@ sidebar:
 
 **Example:**
 
-```wat
+```wat-snippet
 (local $vec v128)
 (global $zeros v128 (v128.const i32x4 0 0 0 0))
 ```
@@ -78,7 +78,9 @@ SIMD shape annotation for v128 interpreted as 16 lanes of 8-bit integers. Used w
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+# ))
 ```
 
 ---
@@ -90,7 +92,9 @@ SIMD shape annotation for v128 interpreted as 8 lanes of 16-bit integers. Used w
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (v128.const i16x8 0 1 2 3 4 5 6 7)
+# ))
 ```
 
 ---
@@ -102,7 +106,9 @@ SIMD shape annotation for v128 interpreted as 4 lanes of 32-bit integers. Used w
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (v128.const i32x4 1 2 3 4)
+# ))
 ```
 
 ---
@@ -114,7 +120,9 @@ SIMD shape annotation for v128 interpreted as 2 lanes of 64-bit integers. Used w
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (v128.const i64x2 1 2)
+# ))
 ```
 
 ---
@@ -126,7 +134,9 @@ SIMD shape annotation for v128 interpreted as 4 lanes of 32-bit floats. Used wit
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (v128.const f32x4 1.0 2.0 3.0 4.0)
+# ))
 ```
 
 ---
@@ -138,7 +148,9 @@ SIMD shape annotation for v128 interpreted as 2 lanes of 64-bit floats. Used wit
 **Example:**
 
 ```wat
+# (module (func (result v128)
 (v128.const f64x2 1.0 2.0)
+# ))
 ```
 
 ---
@@ -149,7 +161,7 @@ Reference type for functions. Can be null.
 
 **Example:**
 
-```wat
+```wat-snippet
 (table $callbacks 10 funcref)
 (global $current_handler (mut funcref) (ref.null func))
 ```
@@ -162,7 +174,7 @@ Reference type for external (host) values. Can be null.
 
 **Example:**
 
-```wat
+```wat-snippet
 (table $objects 10 externref)
 (func $process (param $obj externref) ...)
 ```
@@ -175,7 +187,7 @@ Reference type that can hold any reference (GC proposal). Equivalent to `(ref nu
 
 **Example:**
 
-```wat
+```wat-snippet
 (global $obj anyref (ref.null any))
 (func $store (param $val anyref) ...)
 ```
@@ -189,8 +201,10 @@ Reference type for values that support equality comparison (GC proposal). Equiva
 **Example:**
 
 ```wat
+# (module
 (func $compare (param $a eqref) (param $b eqref) (result i32)
   (ref.eq (local.get $a) (local.get $b)))
+# )
 ```
 
 ---
@@ -202,10 +216,12 @@ Reference type for 31-bit integers packed into a reference (GC proposal). Equiva
 **Example:**
 
 ```wat
+# (module
 (func $box (param $val i32) (result i31ref)
   (ref.i31 (local.get $val)))
 (func $unbox (param $ref i31ref) (result i32)
   (i31.get_s (local.get $ref)))
+# )
 ```
 
 ---
@@ -216,7 +232,7 @@ Reference type that can hold any struct reference (GC proposal). Equivalent to `
 
 **Example:**
 
-```wat
+```wat-snippet
 (func $get_struct (result structref) ...)
 (func $process (param $s structref) ...)
 ```
@@ -229,7 +245,7 @@ Reference type that can hold any array reference (GC proposal). Equivalent to `(
 
 **Example:**
 
-```wat
+```wat-snippet
 (func $get_array (result arrayref) ...)
 (func $process (param $arr arrayref) ...)
 ```
@@ -243,7 +259,9 @@ Bottom reference type that represents only the null reference (GC proposal). Equ
 **Example:**
 
 ```wat
+# (module
 (global $empty nullref (ref.null none))
+# )
 ```
 
 ---
@@ -255,7 +273,9 @@ Null reference type for functions (GC proposal). Equivalent to `(ref null nofunc
 **Example:**
 
 ```wat
+# (module
 (global $no_func nullfuncref (ref.null nofunc))
+# )
 ```
 
 ---
@@ -267,7 +287,9 @@ Null reference type for external values (GC proposal). Equivalent to `(ref null 
 **Example:**
 
 ```wat
+# (module
 (global $no_extern nullexternref (ref.null noextern))
+# )
 ```
 
 ---
@@ -278,7 +300,7 @@ Reference type for exception objects (exception handling proposal). Equivalent t
 
 **Example:**
 
-```wat
+```wat-snippet
 (block $handler (result exnref)
   (try_table (catch_all_ref $handler)
     (call $may_throw)
@@ -296,7 +318,9 @@ Null reference type for exceptions (exception handling proposal). Equivalent to 
 **Example:**
 
 ```wat
+# (module
 (global $no_exn nullexnref (ref.null noexn))
+# )
 ```
 
 ---
@@ -307,7 +331,7 @@ Null reference type for exceptions (exception handling proposal). Equivalent to 
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Packed array of bytes
 (type $bytes (array (mut i8)))
 
@@ -329,7 +353,7 @@ Null reference type for exceptions (exception handling proposal). Equivalent to 
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Packed array of shorts
 (type $shorts (array (mut i16)))
 

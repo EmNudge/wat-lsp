@@ -14,8 +14,13 @@ Create a null reference.
 **Example:**
 
 ```wat
+# (module (func
+# (drop
 (ref.null func)
+# )
+# (drop
 (ref.null extern)
+# )))
 ```
 
 ---
@@ -29,8 +34,13 @@ Create a function reference.
 **Example:**
 
 ```wat
+# (module
 (func $my_func (result i32) (i32.const 42))
+# (elem declare func $my_func)
+# (func
+# (drop
 (ref.func $my_func)
+# )))
 ```
 
 ---
@@ -44,7 +54,9 @@ Check if reference is null.
 **Example:**
 
 ```wat
+# (module (func (result i32)
 (ref.is_null (ref.null func))  ;; Returns 1
+# ))
 ```
 
 ---
@@ -58,7 +70,9 @@ Assert that a reference is not null and convert it to a non-nullable type. Traps
 **Example:**
 
 ```wat
+# (module (func (param $nullable_ref (ref null func)) (result (ref func))
 (ref.as_non_null (local.get $nullable_ref))  ;; Traps if null, otherwise returns non-null ref
+# ))
 ```
 
 ---
@@ -72,7 +86,9 @@ Convert an externref to anyref. This allows external references to be used with 
 **Example:**
 
 ```wat
+# (module (func (param $ext_ref externref) (result anyref)
 (any.convert_extern (local.get $ext_ref))
+# ))
 ```
 
 ---
@@ -86,7 +102,9 @@ Convert an anyref to externref. This allows any GC reference to be passed out as
 **Example:**
 
 ```wat
+# (module (func (param $any_ref anyref) (result externref)
 (extern.convert_any (local.get $any_ref))
+# ))
 ```
 
 ---

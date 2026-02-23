@@ -29,6 +29,7 @@ Declares a function with optional name, parameters, results, and locals.
 **Example:**
 
 ```wat
+# (module
 ;; Named function with params and result
 (func $add (param $a i32) (param $b i32) (result i32)
   (i32.add (local.get $a) (local.get $b)))
@@ -40,6 +41,7 @@ Declares a function with optional name, parameters, results, and locals.
 ;; Multiple params of same type
 (func $multi (param i32 i32 i32) (result i32)
   (local.get 0))
+# )
 ```
 
 ---
@@ -51,12 +53,14 @@ Declares a function parameter with optional name and type.
 **Example:**
 
 ```wat
+# (module
 (func $example
   (param $x i32)
   (param $y i32)
   (param i64)  ;; Unnamed param
   ;; ...
 )
+# )
 ```
 
 ---
@@ -68,6 +72,7 @@ Declares function result type(s).
 **Example:**
 
 ```wat
+# (module
 (func $single (result i32)
   (i32.const 42))
 
@@ -75,6 +80,7 @@ Declares function result type(s).
 (func $multi (result i32 i32)
   (i32.const 1)
   (i32.const 2))
+# )
 ```
 
 ---
@@ -86,12 +92,14 @@ Declares a local variable with optional name and type.
 **Example:**
 
 ```wat
+# (module
 (func $example
   (local $counter i32)
   (local $temp i64)
   (local i32 i32)  ;; Two unnamed locals
   ;; ...
 )
+# )
 ```
 
 ---
@@ -102,7 +110,7 @@ Declares a global variable with type, mutability, and initial value.
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Immutable global
 (global $pi f64 (f64.const 3.14159))
 
@@ -121,7 +129,7 @@ Declares a table for storing references.
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Table with size 10
 (table $funcs 10 funcref)
 
@@ -140,7 +148,7 @@ Declares linear memory for the module.
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; 1 page minimum
 (memory $mem 1)
 
@@ -160,6 +168,7 @@ Imports an external resource (function, global, table, or memory).
 **Example:**
 
 ```wat
+# (module
 ;; Import function
 (import "env" "log" (func $log (param i32)))
 
@@ -171,6 +180,7 @@ Imports an external resource (function, global, table, or memory).
 
 ;; Import table
 (import "env" "table" (table 10 funcref))
+# )
 ```
 
 ---
@@ -181,7 +191,7 @@ Exports a resource for use by the host.
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Export function
 (export "add" (func $add))
 
@@ -232,7 +242,7 @@ Form 3 is useful when you need both a type index (for `call_indirect`) and named
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Define a binary operation type
 (type $binop (func (param i32 i32) (result i32)))
 
@@ -255,7 +265,7 @@ Declares elements for a table.
 
 **Example:**
 
-```wat
+```wat-snippet
 (table $funcs 10 funcref)
 
 ;; Passive element (for table.init)
@@ -277,6 +287,7 @@ Declares data to be loaded into memory.
 **Example:**
 
 ```wat
+# (module
 (memory 1)
 
 ;; Active data (auto-initialized)
@@ -287,6 +298,7 @@ Declares data to be loaded into memory.
 
 ;; Multiple segments
 (data (i32.const 100) "\00\01\02\03")
+# )
 ```
 
 ---

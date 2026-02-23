@@ -4,12 +4,16 @@ import starlight from '@astrojs/starlight';
 import starlightThemeFlexoki from 'starlight-theme-flexoki';
 import fs from 'node:fs';
 import react from '@astrojs/react';
+import { remarkStripHiddenLines } from './src/plugins/remark-strip-hidden-lines.mjs';
 const watGrammar = JSON.parse(
   fs.readFileSync(new URL('./src/grammars/wat.tmLanguage.json', import.meta.url), 'utf-8'),
 );
 
 // https://astro.build/config
 export default defineConfig({
+  markdown: {
+    remarkPlugins: [remarkStripHiddenLines],
+  },
   vite: {
     optimizeDeps: {
       include: ['monaco-editor', 'vscode-textmate', 'vscode-oniguruma'],

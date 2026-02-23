@@ -12,10 +12,11 @@ Declares a subtype that extends another type, enabling type hierarchies. The sub
 **Example:**
 
 ```wat
+# (module
 ;; Base type
-(type $shape (struct
+(type $shape (sub (struct
   (field $x f32)
-  (field $y f32)))
+  (field $y f32))))
 
 ;; Subtype extending $shape with additional fields
 (type $rectangle (sub $shape (struct
@@ -33,6 +34,7 @@ Declares a subtype that extends another type, enabling type hierarchies. The sub
 
 ;; Subtype without explicit parent (subtypes the top type)
 (type $any_struct (sub (struct (field i32))))
+# )
 ```
 
 ---
@@ -43,7 +45,7 @@ Modifier for subtypes that prevents further subtyping. A final type is sealed an
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; This type cannot be subtyped
 (type $sealed (sub final (struct
   (field $value i32))))
@@ -65,6 +67,7 @@ Declares a recursive type group, allowing mutually recursive type definitions.
 **Example:**
 
 ```wat
+# (module
 ;; Mutually recursive types
 (rec
   (type $tree (struct
@@ -83,6 +86,7 @@ Declares a recursive type group, allowing mutually recursive type definitions.
 (rec
   (type $node (struct
     (field $next (ref null $node)))))
+# )
 ```
 
 ---
@@ -94,6 +98,7 @@ Declares a mutable global variable or struct/array field. Without `mut`, the val
 **Example:**
 
 ```wat
+# (module
 ;; Mutable global
 (global $counter (mut i32) (i32.const 0))
 
@@ -102,6 +107,7 @@ Declares a mutable global variable or struct/array field. Without `mut`, the val
 
 ;; Mutable array elements
 (type $buffer (array (mut i32)))
+# )
 ```
 
 ---
@@ -112,7 +118,7 @@ Declares shared memory that can be accessed by multiple threads (threads proposa
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Shared memory with initial 1 page, max 4 pages
 (memory $mem 1 4 shared)
 
@@ -128,7 +134,7 @@ Heap type representing the null reference. Used in type annotations to indicate 
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Nullable reference to a function type
 (local $callback (ref null func))
 
@@ -149,7 +155,7 @@ Declares a reference type, optionally nullable. Used in type annotations for par
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Non-nullable reference to a struct type
 (param $p (ref $my_struct))
 
@@ -174,7 +180,7 @@ Declares a field within a struct type definition. Fields can be mutable or immut
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Struct with named fields
 (type $point (struct
   (field $x f32)
@@ -204,7 +210,7 @@ Declares a struct type with zero or more fields. Structs are heap-allocated refe
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Simple struct type
 (type $point (struct
   (field $x f32)
@@ -234,7 +240,7 @@ Declares an array type with elements of a specified type. Arrays are heap-alloca
 
 **Example:**
 
-```wat
+```wat-snippet
 ;; Simple array of i32
 (type $int_array (array i32))
 

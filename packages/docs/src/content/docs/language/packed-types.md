@@ -27,7 +27,7 @@ Packed types are valid as storage types inside `field` and `array` definitions:
 
 Using `i8` or `i16` as value types in parameters, results, locals, or globals is an error:
 
-```wat
+```wat-snippet
 ;; All of these are invalid:
 (func (param i8))        ;; error: i8 is not a value type
 (func (result i16))      ;; error: i16 is not a value type

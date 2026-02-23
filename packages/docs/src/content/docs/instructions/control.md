@@ -12,12 +12,14 @@ Define a block with a label at the end. Branching to this label exits the block.
 **Example:**
 
 ```wat
+# (module (func (result i32)
 (block $exit (result i32)
   (i32.const 10)
-  (br_if $exit (i32.const 1))  ;; Exit early
-  (i32.const 20)  ;; This won't execute
+  (br $exit)  ;; Exit with 10
+  (unreachable)  ;; This won't execute
 )
 ;; Returns 10
+# ))
 ```
 
 ---
@@ -29,6 +31,7 @@ Define a loop with a label at the start. Branching to this label restarts the lo
 **Example:**
 
 ```wat
+# (module (func
 (local $i i32)
 (local.set $i (i32.const 0))
 (loop $continue
@@ -36,6 +39,7 @@ Define a loop with a label at the start. Branching to this label restarts the lo
   (br_if $continue (i32.lt_s (local.get $i) (i32.const 10)))
 )
 ;; $i is now 10
+# ))
 ```
 
 ---
@@ -47,16 +51,22 @@ Conditional execution based on stack value. Execute 'then' if non-zero, 'else' i
 **Example:**
 
 ```wat
+# (module
+# (func $handle_zero)
+# (func (param $x i32)
+# (drop
 (if (result i32) (i32.const 1)
   (then (i32.const 42))
   (else (i32.const 0))
 )
 ;; Returns 42
-
+# )
+#
 ;; Without else
 (if (i32.eq (local.get $x) (i32.const 0))
   (then (call $handle_zero))
 )
+# ))
 ```
 
 ---
@@ -68,15 +78,21 @@ Marks the branch of an `if` statement that executes when the condition is non-ze
 **Example:**
 
 ```wat
+# (module
+# (func $log (param i32))
+# (func (param $x i32) (param $condition i32)
+# (local $positive i32)
 (if (i32.gt_s (local.get $x) (i32.const 0))
   (then
     (call $log (i32.const 1))
     (local.set $positive (i32.const 1))))
 
 ;; With result type
+# (drop
 (if (result i32) (local.get $condition)
   (then (i32.const 100))
   (else (i32.const 0)))
+# )))
 ```
 
 ---
@@ -88,16 +104,24 @@ Marks the branch of an `if` statement that executes when the condition is zero (
 **Example:**
 
 ```wat
+# (module
+# (func $handle_zero)
+# (func $handle_nonzero)
+# (func (param $flag i32) (param $x i32)
+# (local $processed i32)
+# (drop
 (if (result i32) (local.get $flag)
   (then (i32.const 1))
   (else (i32.const 0)))
-
+# )
+#
 ;; Multi-statement else
 (if (i32.eqz (local.get $x))
   (then (call $handle_zero))
   (else
     (call $handle_nonzero)
     (local.set $processed (i32.const 1))))
+# ))
 ```
 
 ---
@@ -109,12 +133,14 @@ Unconditional branch to a label. Exits blocks/loops.
 **Example:**
 
 ```wat
+# (module (func
 (block $outer
   (block $inner
     (br $outer)  ;; Jump to end of $outer
     (unreachable)  ;; Never executed
   )
 )
+# ))
 ```
 
 ---
@@ -128,10 +154,13 @@ Conditional branch to a label if top stack value is non-zero.
 **Example:**
 
 ```wat
+# (module
+# (func (param $x i32)
 (block $exit
   (br_if $exit (i32.eq (local.get $x) (i32.const 0)))
   ;; Code here runs if $x != 0
 )
+# ))
 ```
 
 ---
@@ -145,6 +174,8 @@ Table-based branch. Jumps to label based on index.
 **Example:**
 
 ```wat
+# (module
+# (func (param $selector i32)
 (block $case0
   (block $case1
     (block $case2
@@ -162,6 +193,7 @@ Table-based branch. Jumps to label based on index.
   (return)
 )
 ;; case 0
+# ))
 ```
 
 ---
@@ -173,13 +205,19 @@ Call a function by name or index.
 **Example:**
 
 ```wat
+# (module
 (func $add (param i32 i32) (result i32)
   (i32.add (local.get 0) (local.get 1)))
 
 (func $main
+# (drop
   (call $add (i32.const 5) (i32.const 3))  ;; Returns 8
+# )
+# (drop
   (call 0 (i32.const 1) (i32.const 2))     ;; Call by index
+# )
 )
+# )
 ```
 
 ---
@@ -191,6 +229,7 @@ Call a function from a table using a dynamic index.
 **Example:**
 
 ```wat
+# (module
 (type $binop (func (param i32 i32) (result i32)))
 (table 2 funcref)
 (elem (i32.const 0) $add $mul)
@@ -207,6 +246,7 @@ Call a function from a table using a dynamic index.
     (i32.const 3)
     (local.get $fn_index))
 )
+# )
 ```
 
 ---
@@ -218,12 +258,14 @@ Return from the current function immediately.
 **Example:**
 
 ```wat
+# (module
 (func $early_return (param $x i32) (result i32)
   (if (i32.eqz (local.get $x))
     (then (return (i32.const 0))))
   ;; More code here
   (i32.const 1)
 )
+# )
 ```
 
 ---
@@ -235,12 +277,14 @@ Tail call: calls a function and returns its result directly. The current functio
 **Example:**
 
 ```wat
+# (module
 (func $factorial_tail (param $n i32) (param $acc i32) (result i32)
   (if (result i32) (i32.le_s (local.get $n) (i32.const 1))
     (then (local.get $acc))
     (else (return_call $factorial_tail
       (i32.sub (local.get $n) (i32.const 1))
       (i32.mul (local.get $n) (local.get $acc))))))
+# )
 ```
 
 ---
@@ -252,11 +296,13 @@ Trap unconditionally. Used for code that should never be reached.
 **Example:**
 
 ```wat
+# (module
 (func $divide (param $x i32) (param $y i32) (result i32)
   (if (i32.eqz (local.get $y))
     (then (unreachable)))  ;; Trap on division by zero
   (i32.div_s (local.get $x) (local.get $y))
 )
+# )
 ```
 
 ---
@@ -268,7 +314,9 @@ No operation. Does nothing.
 **Example:**
 
 ```wat
+# (module (func
 (nop)  ;; Useful for debugging or as placeholder
+# ))
 ```
 
 ---
@@ -281,7 +329,7 @@ Call a function through a typed function reference. The reference type determine
 
 **Example:**
 
-```wat
+```wat-snippet
 (type $sig (func (param i32) (result i32)))
 (call_ref $sig (i32.const 42) (local.get $func_ref))
 ```
@@ -296,7 +344,7 @@ Tail call a function through a typed function reference. Immediately returns the
 
 **Example:**
 
-```wat
+```wat-snippet
 (type $sig (func (param i32) (result i32)))
 (return_call_ref $sig (i32.const 42) (local.get $func_ref))
 ```
@@ -311,7 +359,7 @@ Branch to a label if the reference is null. If not null, the non-null reference 
 
 **Example:**
 
-```wat
+```wat-snippet
 (block $is_null
   (br_on_null $is_null (local.get $maybe_null_ref))
   ;; Reference is not null here, use it
@@ -330,7 +378,7 @@ Branch to a label if the reference is not null. The non-null reference is passed
 
 **Example:**
 
-```wat
+```wat-snippet
 (block $not_null (param (ref $type))
   (br_on_non_null $not_null (local.get $maybe_null_ref))
   ;; Reference was null, handle null case
