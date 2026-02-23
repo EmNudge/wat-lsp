@@ -7,7 +7,7 @@ sidebar:
 
 Memory64 allows memories and tables to use `i64` indices instead of `i32`, expanding the addressable space from 4 GiB to 16 EiB.
 
-```wat-snippet
+```wat
 (module
   ;; 64-bit addressed memory (1 page minimum)
   (memory $mem i64 1)

@@ -139,14 +139,18 @@ Catches exceptions with a specific tag and provides the exception reference.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (tag $error_tag (param i32))
+# (func $may_throw)
+# (func (result i32 exnref)
 (block $handler (result i32 exnref)
   (try_table (catch_ref $error_tag $handler)
     (call $may_throw)
-    (unreachable)
   )
+  (unreachable)
 )
-;; $handler receives payload and exnref for rethrowing
+# ))
 ```
 
 ---
@@ -157,14 +161,17 @@ Catches any exception and provides the exception reference.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $may_throw)
+# (func (result exnref)
 (block $handler (result exnref)
   (try_table (catch_all_ref $handler)
     (call $may_throw)
-    (unreachable)
   )
+  (unreachable)
 )
-;; Can rethrow with throw_ref
+# ))
 ```
 
 ---

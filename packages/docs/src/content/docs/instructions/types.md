@@ -11,10 +11,15 @@ sidebar:
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func
 (local $x i32)
+# )
 (global $counter (mut i32) (i32.const 0))
+# (func
 (param $value i32)
+# ))
 ```
 
 ---
@@ -25,9 +30,13 @@ sidebar:
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func
 (local $timestamp i64)
+# )
 (global $big_number i64 (i64.const 9223372036854775807))
+# )
 ```
 
 ---
@@ -38,9 +47,13 @@ sidebar:
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func
 (local $pi f32)
+# )
 (global $epsilon f32 (f32.const 1.1920929e-07))
+# )
 ```
 
 ---
@@ -51,9 +64,13 @@ sidebar:
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func
 (local $precise f64)
+# )
 (global $e f64 (f64.const 2.718281828459045))
+# )
 ```
 
 ---
@@ -64,9 +81,13 @@ sidebar:
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func
 (local $vec v128)
+# )
 (global $zeros v128 (v128.const i32x4 0 0 0 0))
+# )
 ```
 
 ---
@@ -202,9 +223,12 @@ Reference type for values that support equality comparison (GC proposal). Equiva
 
 **Example:**
 
-```wat-snippet
-(func $compare (param $a eqref) (param $b eqref) (result i32)
-  (ref.eq (local.get $a) (local.get $b)))
+```wat
+# (module
+(func (param $a eqref) (param $b eqref) (result i32)
+  (ref.eq (local.get $a) (local.get $b))
+)
+# )
 ```
 
 ---
@@ -300,13 +324,17 @@ Reference type for exception objects (exception handling proposal). Equivalent t
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $may_throw)
+# (func (result exnref)
 (block $handler (result exnref)
   (try_table (catch_all_ref $handler)
     (call $may_throw)
-    (unreachable)
   )
+  (unreachable)
 )
+# ))
 ```
 
 ---

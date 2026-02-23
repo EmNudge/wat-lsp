@@ -77,7 +77,10 @@ Immutable fields are **covariant**: if `$sub` is a subtype of `$super`, then an 
 
 Mutable fields are **invariant**: the field type must match exactly, because the field can be both read and written.
 
-```wat-snippet
+```wat
+# (module
+# (type $string (sub (array (mut i8))))
+# (type $nonempty_str (sub $string (array (mut i8))))
 (type $animal (sub (struct
   (field $name (ref $string)))))       ;; immutable -- covariant
 
@@ -90,6 +93,7 @@ Mutable fields are **invariant**: the field type must match exactly, because the
 ;; Invalid: cannot narrow a mutable field
 ;; (type $pet_cell (sub $cell (struct
 ;;   (field $value (mut (ref $pet))))))  ;; NOT allowed
+# )
 ```
 
 ## The `final` keyword
