@@ -349,10 +349,10 @@ pub struct SymbolTable {
     pub num_imported_globals: usize,
 }
 
-/// Macro to generate add/get methods for symbol types.
-/// Eliminates boilerplate for the 8 symbol type method triplets.
+/// Macro to generate add/get/resolve methods for symbol types.
+/// Eliminates boilerplate for the 8 symbol type method sets.
 macro_rules! impl_symbol_accessors {
-    ($add_name:ident, $get_by_name:ident, $get_by_index:ident,
+    ($add_name:ident, $get_by_name:ident, $get_by_index:ident, $resolve:ident,
      $type:ty, $vec:ident, $map:ident) => {
         pub fn $add_name(&mut self, item: $type) {
             let index = self.$vec.len();
@@ -368,6 +368,16 @@ macro_rules! impl_symbol_accessors {
 
         pub fn $get_by_index(&self, index: usize) -> Option<&$type> {
             self.$vec.get(index)
+        }
+
+        /// Resolve by name (starting with '$') or numeric index.
+        pub fn $resolve(&self, name_or_index: &str) -> Option<&$type> {
+            self.$get_by_name(name_or_index).or_else(|| {
+                name_or_index
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|idx| self.$get_by_index(idx))
+            })
         }
     };
 }
@@ -401,6 +411,7 @@ impl SymbolTable {
         add_function,
         get_function_by_name,
         get_function_by_index,
+        resolve_function,
         Function,
         functions,
         function_map
@@ -409,6 +420,7 @@ impl SymbolTable {
         add_global,
         get_global_by_name,
         get_global_by_index,
+        resolve_global,
         Global,
         globals,
         global_map
@@ -417,6 +429,7 @@ impl SymbolTable {
         add_table,
         get_table_by_name,
         get_table_by_index,
+        resolve_table,
         Table,
         tables,
         table_map
@@ -425,6 +438,7 @@ impl SymbolTable {
         add_memory,
         get_memory_by_name,
         get_memory_by_index,
+        resolve_memory,
         Memory,
         memories,
         memory_map
@@ -433,6 +447,7 @@ impl SymbolTable {
         add_type,
         get_type_by_name,
         get_type_by_index,
+        resolve_type,
         TypeDef,
         types,
         type_map
@@ -441,6 +456,7 @@ impl SymbolTable {
         add_tag,
         get_tag_by_name,
         get_tag_by_index,
+        resolve_tag,
         Tag,
         tags,
         tag_map
@@ -449,6 +465,7 @@ impl SymbolTable {
         add_data,
         get_data_by_name,
         get_data_by_index,
+        resolve_data,
         DataSegment,
         data_segments,
         data_map
@@ -457,6 +474,7 @@ impl SymbolTable {
         add_elem,
         get_elem_by_name,
         get_elem_by_index,
+        resolve_elem,
         ElemSegment,
         elem_segments,
         elem_map

@@ -9,7 +9,6 @@ use crate::core::types::{
     CompletionItem, CompletionItemKind, Diagnostic as CoreDiagnostic, HoverResult,
     InsertTextFormat, Position, Range,
 };
-use crate::diagnostics_core::tree_walk::{walk_tree_for_diagnostics, DiagnosticConfig};
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::parse_document_from_tree;
@@ -150,26 +149,11 @@ impl WatLSP {
                 js_array.push(&core_diagnostic_to_js(&diag));
             }
 
-            // Semantic diagnostics via shared tree walk
-            let config = DiagnosticConfig::from_symbols(symbols);
-            let mut diagnostics = Vec::new();
-            walk_tree_for_diagnostics(
+            // Semantic diagnostics via shared pipeline
+            let diagnostics = crate::diagnostics_core::collect_all_semantic_diagnostics(
                 tree.root_node(),
                 &self.document,
                 symbols,
-                &config,
-                &mut diagnostics,
-            );
-
-            // Subtype hierarchy + module-level structural validations
-            diagnostics
-                .extend(crate::diagnostics_core::subtype::validate_subtype_hierarchy(symbols));
-            diagnostics.extend(
-                crate::diagnostics_core::module_checks::validate_module_structure(
-                    &tree.root_node(),
-                    &self.document,
-                    symbols,
-                ),
             );
 
             for diag in diagnostics {

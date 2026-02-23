@@ -11,7 +11,7 @@ use super::type_check::types_compatible_with_symbols;
 /// Validate subtype hierarchy in the symbol table.
 /// Returns diagnostics for invalid parent references, final type violations,
 /// and structural incompatibilities.
-pub fn validate_subtype_hierarchy(symbols: &SymbolTable) -> Vec<Diagnostic> {
+pub(crate) fn validate_subtype_hierarchy(symbols: &SymbolTable) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for type_def in &symbols.types {
@@ -57,14 +57,7 @@ pub fn validate_subtype_hierarchy(symbols: &SymbolTable) -> Vec<Diagnostic> {
 
 /// Resolve a parent reference (either "$name" or numeric index) to a TypeDef.
 fn resolve_parent<'a>(symbols: &'a SymbolTable, parent_ref: &str) -> Option<&'a TypeDef> {
-    if parent_ref.starts_with('$') {
-        symbols.get_type_by_name(parent_ref)
-    } else {
-        parent_ref
-            .parse::<usize>()
-            .ok()
-            .and_then(|idx| symbols.get_type_by_index(idx))
-    }
+    symbols.resolve_type(parent_ref)
 }
 
 /// Check structural compatibility between a child type and its declared parent.

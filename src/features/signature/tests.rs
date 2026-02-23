@@ -3,15 +3,10 @@ use super::*;
 use crate::features::test_utils::{create_signature_test_symbols, create_test_tree};
 use crate::utils::format_function_signature;
 
-// Alias for backwards compatibility with existing tests
-fn create_test_symbols() -> SymbolTable {
-    create_signature_test_symbols()
-}
-
 #[test]
 fn test_signature_help_simple_call() {
     let document = "call $add(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 10); // After opening paren
 
     let sig_help =
@@ -32,7 +27,7 @@ fn test_signature_help_simple_call() {
 #[test]
 fn test_signature_help_with_first_arg() {
     let document = "call $add(5,";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 12); // After first comma
 
     let sig_help =
@@ -47,7 +42,7 @@ fn test_signature_help_with_first_arg() {
 #[test]
 fn test_signature_help_multi_param() {
     let document = "call $process(1,";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 16);
 
     let sig_help =
@@ -65,7 +60,7 @@ fn test_signature_help_multi_param() {
 #[test]
 fn test_signature_help_third_param() {
     let document = "call $process(1, 2,";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 19);
 
     let sig_help =
@@ -79,7 +74,7 @@ fn test_signature_help_third_param() {
 #[test]
 fn test_signature_help_nonexistent_function() {
     let document = "call $nonexistent(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 18);
 
     let sig_help =
@@ -91,7 +86,7 @@ fn test_signature_help_nonexistent_function() {
 #[test]
 fn test_signature_help_by_index() {
     let document = "call 0(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 7);
 
     let sig_help =
@@ -266,7 +261,7 @@ fn test_format_function_signature_unnamed_params() {
 #[test]
 fn test_signature_help_parameter_info() {
     let document = "call $add(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 10);
 
     let sig_help =
@@ -323,7 +318,7 @@ fn test_find_function_call_call_ref_by_index() {
 #[test]
 fn test_signature_help_call_ref() {
     let document = "call_ref $binop(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 16);
 
     let sig_help =
@@ -353,7 +348,7 @@ fn test_signature_help_call_ref() {
 #[test]
 fn test_signature_help_return_call_ref() {
     let document = "return_call_ref $complex_fn(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 28);
 
     let sig_help =
@@ -373,7 +368,7 @@ fn test_signature_help_return_call_ref() {
 #[test]
 fn test_signature_help_call_ref_nonexistent_type() {
     let document = "call_ref $nonexistent(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 22);
 
     let sig_help =
@@ -385,7 +380,7 @@ fn test_signature_help_call_ref_nonexistent_type() {
 #[test]
 fn test_signature_help_call_ref_by_index() {
     let document = "call_ref 0(";
-    let symbols = create_test_symbols();
+    let symbols = create_signature_test_symbols();
     let position = Position::new(0, 11);
 
     let sig_help =

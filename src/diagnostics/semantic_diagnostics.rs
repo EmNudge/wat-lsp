@@ -1,4 +1,4 @@
-use crate::diagnostics_core::tree_walk::{walk_tree_for_diagnostics, DiagnosticConfig};
+use crate::diagnostics_core::collect_all_semantic_diagnostics;
 use crate::symbols::SymbolTable;
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
@@ -9,32 +9,10 @@ pub fn provide_semantic_diagnostics(
     source: &str,
     symbols: &SymbolTable,
 ) -> Vec<Diagnostic> {
-    let config = DiagnosticConfig::from_symbols(symbols);
-
-    // Single unified tree walk for all semantic checks (shared implementation)
-    let mut core_diagnostics = Vec::new();
-    walk_tree_for_diagnostics(
-        tree.root_node(),
-        source,
-        symbols,
-        &config,
-        &mut core_diagnostics,
-    );
-
-    // Validate subtype hierarchy
-    core_diagnostics.extend(crate::diagnostics_core::subtype::validate_subtype_hierarchy(symbols));
-
-    // Module-level structural validations
-    core_diagnostics.extend(
-        crate::diagnostics_core::module_checks::validate_module_structure(
-            &tree.root_node(),
-            source,
-            symbols,
-        ),
-    );
-
-    // Convert all core diagnostics to tower_lsp types
-    core_diagnostics.into_iter().map(Into::into).collect()
+    collect_all_semantic_diagnostics(tree.root_node(), source, symbols)
+        .into_iter()
+        .map(Into::into)
+        .collect()
 }
 
 #[cfg(test)]

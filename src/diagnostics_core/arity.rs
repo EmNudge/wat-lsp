@@ -15,14 +15,16 @@ use tree_sitter::Node;
 use crate::ts_facade::Node;
 
 /// Check if an instruction has the correct number of parameters (linear format)
-pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
+pub(crate) fn check_instruction_parameter_count(
+    node: &Node,
+    source: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut cursor = node.walk();
     let children: Vec<_> = node.children(&mut cursor).collect();
 
     if children.is_empty() {
-        return diagnostics;
+        return;
     }
 
     let first_child = &children[0];
@@ -39,14 +41,14 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                     k_ref == "index" || k_ref == "ref_type"
                 })
                 .count();
-            validate_instruction_arity(instr_name, param_count, node, &mut diagnostics);
+            validate_instruction_arity(instr_name, param_count, node, diagnostics);
         }
         "op_const" => {
             let mut op_const_cursor = first_child.walk();
             let op_const_children: Vec<_> = first_child.children(&mut op_const_cursor).collect();
 
             if op_const_children.is_empty() {
-                return diagnostics;
+                return;
             }
 
             let instr_name = source[op_const_children[0].byte_range()].trim();
@@ -58,7 +60,7 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                     matches!(k_ref, "int" | "float")
                 })
                 .count();
-            validate_instruction_arity(instr_name, param_count, node, &mut diagnostics);
+            validate_instruction_arity(instr_name, param_count, node, diagnostics);
         }
         "op_nullary" => {
             let instr_name = source[first_child.byte_range()].trim();
@@ -70,7 +72,7 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                     matches!(k_ref, "index" | "expr")
                 })
                 .count();
-            validate_instruction_arity(instr_name, param_count, node, &mut diagnostics);
+            validate_instruction_arity(instr_name, param_count, node, diagnostics);
         }
         k if k.starts_with("op_") => {
             let instr_name = source[first_child.byte_range()].trim();
@@ -82,12 +84,10 @@ pub fn check_instruction_parameter_count(node: &Node, source: &str) -> Vec<Diagn
                     k_ref == "index"
                 })
                 .count();
-            validate_instruction_arity(instr_name, param_count, node, &mut diagnostics);
+            validate_instruction_arity(instr_name, param_count, node, diagnostics);
         }
         _ => {}
     }
-
-    diagnostics
 }
 
 fn validate_instruction_arity(

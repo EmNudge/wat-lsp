@@ -27,11 +27,12 @@ use crate::ts_facade::Node;
 /// - Named field not found in struct
 /// - `struct.get_s`/`struct.get_u` on non-packed field type
 /// - Type is not a struct (e.g., array used with struct.get)
-pub fn check_struct_field_access(
+pub(crate) fn check_struct_field_access(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
-) -> Vec<Diagnostic> {
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let text = &source[node.byte_range()];
     let first_token = text.split_whitespace().next().unwrap_or("");
 
@@ -39,34 +40,33 @@ pub fn check_struct_field_access(
         first_token,
         "struct.get" | "struct.get_s" | "struct.get_u" | "struct.set"
     ) {
-        return Vec::new();
+        return;
     }
 
     let (type_ref, field_ref) = match extract_two_indices(node, source) {
         Some(pair) => pair,
-        None => return Vec::new(),
+        None => return,
     };
 
     // Resolve type
     let type_def = match resolve_type_def(type_ref, symbols) {
         Some(td) => td,
-        None => return Vec::new(), // Undefined type caught by reference checker
+        None => return, // Undefined type caught by reference checker
     };
 
     let fields = match &type_def.kind {
         TypeKind::Struct { fields } => fields,
         _ => {
-            return vec![Diagnostic::error(
+            diagnostics.push(Diagnostic::error(
                 node_to_range(node),
                 format!(
                     "struct.get/set used on non-struct type {}",
                     type_ref_display(type_ref, type_def.index)
                 ),
-            )];
+            ));
+            return;
         }
     };
-
-    let mut diagnostics = Vec::new();
 
     // Resolve field index
     let field_idx = match resolve_field_index(field_ref, fields) {
@@ -83,7 +83,7 @@ pub fn check_struct_field_access(
                     format!("unknown field {}", idx),
                 ));
             }
-            return diagnostics;
+            return;
         }
     };
 
@@ -108,8 +108,6 @@ pub fn check_struct_field_access(
             diagnostics.push(Diagnostic::error(node_to_range(node), "immutable field"));
         }
     }
-
-    diagnostics
 }
 
 /// Extract two index children from a struct instruction node.
@@ -154,14 +152,7 @@ fn resolve_type_def<'a>(
     type_ref: &str,
     symbols: &'a SymbolTable,
 ) -> Option<&'a crate::symbols::TypeDef> {
-    if type_ref.starts_with('$') {
-        symbols.get_type_by_name(type_ref)
-    } else {
-        type_ref
-            .parse::<usize>()
-            .ok()
-            .and_then(|idx| symbols.get_type_by_index(idx))
-    }
+    symbols.resolve_type(type_ref)
 }
 
 /// Resolve a field reference to an index within the struct fields.

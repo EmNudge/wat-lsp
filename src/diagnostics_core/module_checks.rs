@@ -32,7 +32,7 @@ use crate::ts_facade::Node;
 // ============================================================================
 
 /// Validate module-level structure and return diagnostics.
-pub fn validate_module_structure(
+pub(crate) fn validate_module_structure(
     root: &Node,
     source: &str,
     symbols: &SymbolTable,
@@ -251,7 +251,7 @@ fn check_start_signature(
 // ============================================================================
 
 fn check_duplicate_exports(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut seen_exports: HashMap<String, Range> = HashMap::new();
+    let mut seen_exports: HashMap<&str, Range> = HashMap::new();
 
     for_each_module_field(module, |field| {
         node_kind!(fk = field);
@@ -300,20 +300,20 @@ fn extract_name_child<'a>(node: &Node, source: &'a str) -> Option<&'a str> {
     None
 }
 
-fn check_export_name(
-    name: &str,
+fn check_export_name<'a>(
+    name: &'a str,
     node: &Node,
-    seen: &mut HashMap<String, Range>,
+    seen: &mut HashMap<&'a str, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let range = node_to_range(node);
-    if let Some(_first) = seen.get(name) {
+    if seen.contains_key(name) {
         diagnostics.push(Diagnostic::error(
             range,
             format!("Duplicate export name \"{}\"", name),
         ));
     } else {
-        seen.insert(name.to_string(), range);
+        seen.insert(name, range);
     }
 }
 
@@ -391,12 +391,12 @@ pub(super) fn has_inline_import(node: &Node) -> bool {
 // ============================================================================
 
 fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut seen_func: HashMap<String, Range> = HashMap::new();
-    let mut seen_global: HashMap<String, Range> = HashMap::new();
-    let mut seen_table: HashMap<String, Range> = HashMap::new();
-    let mut seen_memory: HashMap<String, Range> = HashMap::new();
-    let mut seen_type: HashMap<String, Range> = HashMap::new();
-    let mut seen_tag: HashMap<String, Range> = HashMap::new();
+    let mut seen_func: HashMap<&str, Range> = HashMap::new();
+    let mut seen_global: HashMap<&str, Range> = HashMap::new();
+    let mut seen_table: HashMap<&str, Range> = HashMap::new();
+    let mut seen_memory: HashMap<&str, Range> = HashMap::new();
+    let mut seen_type: HashMap<&str, Range> = HashMap::new();
+    let mut seen_tag: HashMap<&str, Range> = HashMap::new();
 
     for_each_module_field(module, |field| {
         node_kind!(fk = field);
@@ -455,10 +455,10 @@ fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Ve
     });
 }
 
-fn check_identifier_dup(
+fn check_identifier_dup<'a>(
     node: &Node,
-    source: &str,
-    seen: &mut HashMap<String, Range>,
+    source: &'a str,
+    seen: &mut HashMap<&'a str, Range>,
     kind_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -466,27 +466,27 @@ fn check_identifier_dup(
         let name = node_text(&id_node, source);
         if name.starts_with('$') {
             let range = node_to_range(&id_node);
-            if let Some(_first) = seen.get(name) {
+            if seen.contains_key(name) {
                 diagnostics.push(Diagnostic::error(
                     range,
                     format!("Duplicate {} identifier {}", kind_name, name),
                 ));
             } else {
-                seen.insert(name.to_string(), range);
+                seen.insert(name, range);
             }
         }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn check_import_identifier_dup(
+fn check_import_identifier_dup<'a>(
     import_node: &Node,
-    source: &str,
-    seen_func: &mut HashMap<String, Range>,
-    seen_global: &mut HashMap<String, Range>,
-    seen_table: &mut HashMap<String, Range>,
-    seen_memory: &mut HashMap<String, Range>,
-    seen_tag: &mut HashMap<String, Range>,
+    source: &'a str,
+    seen_func: &mut HashMap<&'a str, Range>,
+    seen_global: &mut HashMap<&'a str, Range>,
+    seen_table: &mut HashMap<&'a str, Range>,
+    seen_memory: &mut HashMap<&'a str, Range>,
+    seen_tag: &mut HashMap<&'a str, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut cursor = import_node.walk();
@@ -549,15 +549,15 @@ fn check_duplicate_struct_fields(
     source: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let mut seen_fields: HashMap<String, Range> = HashMap::new();
+    let mut seen_fields: HashMap<&str, Range> = HashMap::new();
     find_struct_and_check_fields(type_node, source, &mut seen_fields, diagnostics);
 }
 
 /// Recursively find struct_type nodes and check their fields for duplicates.
-fn find_struct_and_check_fields(
+fn find_struct_and_check_fields<'a>(
     node: &Node,
-    source: &str,
-    seen: &mut HashMap<String, Range>,
+    source: &'a str,
+    seen: &mut HashMap<&'a str, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut cursor = node.walk();
@@ -572,10 +572,10 @@ fn find_struct_and_check_fields(
 }
 
 /// Collect and check named fields in a struct for duplicates.
-fn collect_struct_field_names(
+fn collect_struct_field_names<'a>(
     node: &Node,
-    source: &str,
-    seen: &mut HashMap<String, Range>,
+    source: &'a str,
+    seen: &mut HashMap<&'a str, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut cursor = node.walk();
@@ -588,13 +588,13 @@ fn collect_struct_field_names(
                 if inner_child.kind() == "identifier" {
                     let name = node_text(&inner_child, source);
                     let range = node_to_range(&inner_child);
-                    if let Some(_first) = seen.get(name) {
+                    if seen.contains_key(name) {
                         diagnostics.push(Diagnostic::error(
                             range,
                             format!("duplicate field {}", name),
                         ));
                     } else {
-                        seen.insert(name.to_string(), range);
+                        seen.insert(name, range);
                     }
                 }
             }
@@ -691,27 +691,16 @@ fn resolve_type_use<'a>(
         node_kind!(ck = child);
         if ck == "index" {
             let text = node_text(&child, source);
-            // Try as name reference
-            if text.starts_with('$') {
-                return symbols.get_type_by_name(text);
+            if let Some(td) = symbols.resolve_type(text) {
+                return Some(td);
             }
-            // Try as numeric index
-            if let Ok(idx) = text.parse::<usize>() {
-                return symbols.get_type_by_index(idx);
-            }
-            // Index may contain an identifier child
+            // Index may contain an identifier or nat child
             let mut ic = child.walk();
             for idx_child in child.children(&mut ic) {
                 node_kind!(ik = idx_child);
-                if ik == "identifier" {
-                    let id_text = node_text(&idx_child, source);
-                    return symbols.get_type_by_name(id_text);
-                }
-                if ik == "nat" {
-                    let nat_text = node_text(&idx_child, source);
-                    if let Ok(idx) = nat_text.parse::<usize>() {
-                        return symbols.get_type_by_index(idx);
-                    }
+                if ik == "identifier" || ik == "nat" {
+                    let child_text = node_text(&idx_child, source);
+                    return symbols.resolve_type(child_text);
                 }
             }
         }
@@ -1754,17 +1743,20 @@ fn check_ref_func_target(
 // ============================================================================
 
 /// Check that end labels match opening labels on block/loop/if statements.
-pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+pub(crate) fn check_block_label_mismatch(
+    node: &Node,
+    source: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     node_kind!(kind = node);
 
     if !matches!(kind, "block_block" | "block_loop" | "block_if") {
-        return diagnostics;
+        return;
     }
 
     let child_count = node.child_count();
     if child_count == 0 {
-        return diagnostics;
+        return;
     }
 
     // Single-pass: find opening label and check end/else labels
@@ -1790,7 +1782,7 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
                         &end_label,
                         &child,
                         "end",
-                        &mut diagnostics,
+                        diagnostics,
                     );
                 } else if after_else {
                     let else_label = normalize_identifier(node_text(&child, source));
@@ -1799,7 +1791,7 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
                         &else_label,
                         &child,
                         "else",
-                        &mut diagnostics,
+                        diagnostics,
                     );
                 }
                 after_end = false;
@@ -1826,8 +1818,6 @@ pub fn check_block_label_mismatch(node: &Node, source: &str) -> Vec<Diagnostic> 
             }
         }
     }
-
-    diagnostics
 }
 
 fn check_label_match(
@@ -3519,7 +3509,7 @@ mod tests {
     ) {
         let kind = node.kind();
         if matches!(kind, "block_block" | "block_loop" | "block_if") {
-            diags.extend(check_block_label_mismatch(&node, source));
+            check_block_label_mismatch(&node, source, diags);
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {

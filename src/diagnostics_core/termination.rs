@@ -22,7 +22,7 @@ use crate::ts_facade::Node;
 /// This is used to determine whether a block's declared result types should be
 /// pushed onto the stack - if the block always terminates, it doesn't produce
 /// values via fall-through.
-pub fn sequence_always_terminates(node: &Node, source: &str) -> bool {
+pub(crate) fn sequence_always_terminates(node: &Node, source: &str) -> bool {
     node_kind!(kind = node);
 
     match kind.as_ref() {

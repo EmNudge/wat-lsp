@@ -23,27 +23,26 @@ use crate::ts_facade::Node;
 
 /// Check operand count in folded expressions (expr1_plain nodes).
 ///
-/// Returns diagnostics for instructions with too many or too few operands.
-pub fn check_folded_operand_count(
+/// Pushes diagnostics for instructions with too many or too few operands.
+pub(crate) fn check_folded_operand_count(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut cursor = node.walk();
 
     // First child should be instr_plain
     let first_child = match node.children(&mut cursor).next() {
         Some(c) if c.kind() == "instr_plain" => c,
-        _ => return diagnostics,
+        _ => return,
     };
 
     // Get the instruction name from instr_plain
     let mut instr_cursor = first_child.walk();
     let first_instr_child = match first_child.children(&mut instr_cursor).next() {
         Some(c) => c,
-        None => return diagnostics,
+        None => return,
     };
 
     let instr_kind = first_instr_child.kind();
@@ -53,7 +52,7 @@ pub fn check_folded_operand_count(
             let result = first_instr_child.children(&mut const_cursor).next();
             match result {
                 Some(c) => source[c.byte_range()].trim(),
-                None => return diagnostics,
+                None => return,
             }
         }
         _ => source[first_instr_child.byte_range()].trim(),
@@ -112,14 +111,12 @@ pub fn check_folded_operand_count(
                     deficit,
                     symbols,
                     source,
-                    &mut diagnostics,
+                    diagnostics,
                 );
             }
             _ => {}
         }
     }
-
-    diagnostics
 }
 
 /// Validate operand count for instructions with dynamic arity (call, throw, struct.new, call_ref, etc.)

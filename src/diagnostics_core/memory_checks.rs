@@ -16,29 +16,32 @@ use tree_sitter::Node;
 use crate::ts_facade::Node;
 
 /// Check if an atomic operation is used on non-shared memory
-pub fn check_atomic_operation(node: &Node, first_token: &str) -> Vec<Diagnostic> {
+pub(crate) fn check_atomic_operation(
+    node: &Node,
+    first_token: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if !is_atomic_memory_operation(first_token) {
-        return vec![];
+        return;
     }
 
-    vec![Diagnostic::warning(
+    diagnostics.push(Diagnostic::warning(
         node_to_range(node),
         format!(
             "Atomic operation '{}' requires shared memory. Declare memory with 'shared' keyword: (memory 1 1 shared)",
             first_token
         ),
-    )]
+    ));
 }
 
 /// Check memory64 hints for a specific instruction
-pub fn check_memory64_for_instruction(
+pub(crate) fn check_memory64_for_instruction(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
     first_token: &str,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     // Check memory.size and memory.grow
     if first_token == "memory.size" || first_token == "memory.grow" {
         if let Some(memory) = get_memory_for_instruction(node, source, symbols) {
@@ -82,12 +85,10 @@ pub fn check_memory64_for_instruction(
             }
         }
     }
-
-    diagnostics
 }
 
 /// Check if an instruction is an atomic memory operation that requires shared memory
-pub fn is_atomic_memory_operation(instr: &str) -> bool {
+pub(crate) fn is_atomic_memory_operation(instr: &str) -> bool {
     if instr == "atomic.fence" {
         return false;
     }
@@ -119,7 +120,7 @@ fn get_memory_for_instruction<'a>(
 }
 
 /// Check if an instruction is a memory load or store operation
-pub fn is_memory_load_store(instr: &str) -> bool {
+pub(crate) fn is_memory_load_store(instr: &str) -> bool {
     if instr.ends_with(".load")
         || instr.contains(".load8_")
         || instr.contains(".load16_")
