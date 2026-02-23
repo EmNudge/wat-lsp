@@ -16,6 +16,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { createWatLSP } from '@emnudge/wat-lsp';
 import treeSitterWasmUrl from '@emnudge/wat-lsp/wasm/tree-sitter.wasm?url';
 import watLspWasmUrl from '@emnudge/wat-lsp/wasm/wat_lsp_rust_bg.wasm?url';
+import { foldedToLinear } from '../lib/wat-linearizer';
 
 // WAT language definition for CodeMirror StreamLanguage
 const watLanguage = StreamLanguage.define({
@@ -486,7 +487,27 @@ async function enhanceCodeBlock(pre: HTMLElement) {
 
   if (!code.trim()) return;
 
-  // Create container - use max-height to let CodeMirror size itself properly
+  // Pre-compute linear form for toggle
+  const isInstructionPage = window.location.pathname.includes('/instructions/');
+  const hasFoldedExprs = code.includes('(func') && /\(\w+[\w.]*\s+\(/.test(code);
+  let linearCode: string | null = null;
+  if (hasFoldedExprs && !isInstructionPage) {
+    try {
+      const converted = foldedToLinear(code);
+      if (converted !== code) linearCode = converted;
+    } catch {
+      // Conversion failed — skip toggle
+    }
+  }
+
+  // Create outer wrapper (position context for toggle) and inner scroll container
+  const wrapper = document.createElement('div');
+  wrapper.className = 'wat-editor-wrapper not-content';
+  wrapper.style.cssText = `
+    position: relative;
+    margin-block: 1rem;
+  `;
+
   const container = document.createElement('div');
   container.className = 'wat-editor-container';
   container.style.cssText = `
@@ -494,12 +515,13 @@ async function enhanceCodeBlock(pre: HTMLElement) {
     min-height: 120px;
     border-radius: 8px;
     overflow: auto;
-    margin-block: 1rem;
   `;
+
+  wrapper.appendChild(container);
 
   // Replace only the figure, not the entire .expressive-code wrapper
   // (the wrapper may contain sibling figures for other languages)
-  target.replaceWith(container);
+  target.replaceWith(wrapper);
 
   // Build extensions list
   const extensions = [
@@ -529,10 +551,51 @@ async function enhanceCodeBlock(pre: HTMLElement) {
     extensions,
   });
 
-  new EditorView({
+  const view = new EditorView({
     state,
     parent: container,
   });
+
+  // Add folded/linear toggle if applicable
+  if (linearCode) {
+    let isFolded = true;
+    const foldedCode = code;
+
+    const toggle = document.createElement('div');
+    toggle.className = 'wat-format-toggle';
+
+    const btnFolded = document.createElement('button');
+    btnFolded.className = 'wat-format-btn active';
+    btnFolded.textContent = 'Folded';
+    btnFolded.type = 'button';
+
+    const btnLinear = document.createElement('button');
+    btnLinear.className = 'wat-format-btn';
+    btnLinear.textContent = 'Linear';
+    btnLinear.type = 'button';
+
+    toggle.appendChild(btnFolded);
+    toggle.appendChild(btnLinear);
+    wrapper.appendChild(toggle);
+
+    const switchTo = (folded: boolean) => {
+      if (folded === isFolded) return;
+      isFolded = folded;
+      const newCode = folded ? foldedCode : linearCode!;
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: newCode },
+      });
+      // Re-parse for hover/diagnostics
+      initLSP().then((lsp) => {
+        if (lsp?.ready) lsp.parse(newCode);
+      });
+      btnFolded.className = `wat-format-btn${folded ? ' active' : ''}`;
+      btnLinear.className = `wat-format-btn${folded ? '' : ' active'}`;
+    };
+
+    btnFolded.addEventListener('click', () => switchTo(true));
+    btnLinear.addEventListener('click', () => switchTo(false));
+  }
 }
 
 async function enhanceAllWatBlocks() {

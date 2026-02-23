@@ -14,3 +14,39 @@
   padding-top: 6rem;
   padding-bottom: 6rem;
 }
+
+/* Folded/Linear format toggle */
+.wat-format-toggle {
+  display: flex;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 10;
+  background: #2d2d2d;
+  border-radius: 4px;
+  padding: 2px;
+  gap: 1px;
+}
+
+.wat-format-btn {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  color: #888;
+  border-radius: 3px;
+  line-height: 1.4;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.wat-format-btn:hover {
+  color: #bbb;
+}
+
+.wat-format-btn.active {
+  background: #3c3c3c;
+  color: #d4d4d4;
+}
