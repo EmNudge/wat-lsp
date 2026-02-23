@@ -1273,6 +1273,19 @@ fn derive_consumed_types_from_name(
         "memory.atomic.wait64" => Some(vec![ValueType::I32, ValueType::I64, ValueType::I64]),
         "memory.atomic.notify" => Some(vec![ValueType::I32, ValueType::I32]),
 
+        // Atomic RMW — address (i32) + value (prefix type)
+        name if name.contains(".atomic.rmw") => {
+            if let Some(ty) = type_from_prefix(name) {
+                if name.contains("cmpxchg") {
+                    Some(vec![ValueType::I32, ty, ty]) // addr + expected + replacement
+                } else {
+                    Some(vec![ValueType::I32, ty]) // addr + value
+                }
+            } else {
+                None
+            }
+        }
+
         // br_on_null/br_on_non_null handled specially in process_instruction
 
         // Scalar binary operations — 2 operands of prefix type
