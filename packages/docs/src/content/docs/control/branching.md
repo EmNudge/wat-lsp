@@ -10,10 +10,10 @@ sidebar:
 ```wat
 (module
   (func (param $n i32) (result i32)
-    (block $exit (result i32)
+    (block $exit
       (br_if $exit (i32.gt_s (local.get $n) (i32.const 10)))
-      (i32.const 1)
-      (br $exit)))
+      (return (i32.const 1)))
+    (i32.const 2))
 )
 ```
 

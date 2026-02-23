@@ -23,18 +23,6 @@ use wat_lsp_rust::ts_facade;
 /// incomplete type checking or missing proposal support.
 /// Format: "relative/path.md:line_number"
 const KNOWN_ISSUES: &[&str] = &[
-    // br_if/br_table stack validation in typed blocks (type checker limitation)
-    "control/block.md:11",
-    "control/br-table.md:11",
-    "control/branching.md:11",
-    // try_table type checking not fully supported
-    "extensions/exception-handling.md:11",
-    // call_ref syntax: `(call_ref (type $t))` vs `(call_ref $t)`
-    "extensions/typed-func-refs.md:11",
-    // ref.null funcref syntax difference
-    "language/reference-types.md:18",
-    // Inline import after inline export (import ordering with inline syntax)
-    "language/text-format.md:160",
     // try_table catch clause: type checker doesn't track values delivered via branch
     "instructions/exceptions.md:78",
     // i64 atomic RMW operations: type checker returns i32 instead of i64

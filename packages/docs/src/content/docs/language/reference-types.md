@@ -23,7 +23,7 @@ Reference types let Wasm refer to functions and host objects.
   (elem (i32.const 0) $double)
 
   (func (result i32)
-    (ref.is_null (ref.null funcref)))    ;; -> 1
+    (ref.is_null (ref.null func)))       ;; -> 1
 
   (func (result i32)
     (ref.is_null (ref.func $double)))    ;; -> 0
