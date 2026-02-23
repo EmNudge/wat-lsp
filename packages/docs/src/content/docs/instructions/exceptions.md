@@ -118,13 +118,17 @@ Catches any exception in a `try_table` block, regardless of tag.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $may_throw_anything)
+# (func
 (block $fallback
   (try_table (catch_all $fallback)
     (call $may_throw_anything)
   )
 )
 ;; $fallback receives exnref
+# ))
 ```
 
 ---

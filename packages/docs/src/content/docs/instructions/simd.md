@@ -2179,8 +2179,10 @@ Lane-wise subtraction of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2193,8 +2195,10 @@ Lane-wise negation of an i8x16 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i8x16.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -2207,8 +2211,10 @@ Lane-wise signed minimum of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.min_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2221,8 +2227,10 @@ Lane-wise unsigned minimum of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.min_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2235,8 +2243,10 @@ Lane-wise signed maximum of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.max_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2249,8 +2259,10 @@ Lane-wise unsigned maximum of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.max_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2263,8 +2275,10 @@ Lane-wise unsigned rounding average of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.avgr_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2277,8 +2291,10 @@ Lane-wise absolute value of an i8x16 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i8x16.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -2305,8 +2321,10 @@ Extract the high bit of each lane as an i32 bitmask.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result i32) (local $a v128)
 (i8x16.bitmask (local.get $a))
+# ))
 ```
 
 ---
@@ -2319,8 +2337,10 @@ Narrow two i16x8 vectors to i8x16 with signed saturation.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.narrow_i16x8_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2333,8 +2353,10 @@ Narrow two i16x8 vectors to i8x16 with unsigned saturation.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.narrow_i16x8_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2347,8 +2369,10 @@ Lane-wise saturating signed addition of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.add_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2361,8 +2385,10 @@ Lane-wise saturating unsigned addition of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.add_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2375,8 +2401,10 @@ Lane-wise saturating signed subtraction of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.sub_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2389,8 +2417,10 @@ Lane-wise saturating unsigned subtraction of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.sub_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2403,8 +2433,10 @@ Lane-wise subtraction of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2417,8 +2449,10 @@ Lane-wise negation of an i16x8 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -2431,8 +2465,10 @@ Lane-wise multiplication of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2445,8 +2481,10 @@ Lane-wise signed minimum of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.min_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2459,8 +2497,10 @@ Lane-wise unsigned minimum of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.min_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2473,8 +2513,10 @@ Lane-wise signed maximum of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.max_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2487,8 +2529,10 @@ Lane-wise unsigned maximum of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.max_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2501,8 +2545,10 @@ Lane-wise unsigned rounding average of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.avgr_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2515,8 +2561,10 @@ Lane-wise absolute value of an i16x8 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i16x8.abs (local.get $a))
+# ))
 ```
 
 ---
@@ -2529,8 +2577,10 @@ Returns 1 if all lanes are non-zero, 0 otherwise.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result i32) (local $a v128)
 (i16x8.all_true (local.get $a))
+# ))
 ```
 
 ---
@@ -2543,8 +2593,10 @@ Extract the high bit of each lane as an i32 bitmask.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result i32) (local $a v128)
 (i16x8.bitmask (local.get $a))
+# ))
 ```
 
 ---
@@ -2557,8 +2609,10 @@ Narrow two i32x4 vectors to i16x8 with signed saturation.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.narrow_i32x4_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2571,8 +2625,10 @@ Narrow two i32x4 vectors to i16x8 with unsigned saturation.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.narrow_i32x4_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2585,8 +2641,10 @@ Lane-wise saturating signed addition of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.add_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2599,8 +2657,10 @@ Lane-wise saturating unsigned addition of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.add_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2613,8 +2673,10 @@ Lane-wise saturating signed subtraction of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.sub_sat_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2627,8 +2689,10 @@ Lane-wise saturating unsigned subtraction of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.sub_sat_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2795,8 +2859,10 @@ Lane-wise subtraction of two i32x4 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2809,8 +2875,10 @@ Lane-wise negation of an i32x4 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i32x4.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -2823,8 +2891,10 @@ Lane-wise multiplication of two i32x4 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2837,8 +2907,10 @@ Lane-wise signed minimum of two i32x4 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.min_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2851,8 +2923,10 @@ Lane-wise unsigned minimum of two i32x4 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.min_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2865,8 +2939,10 @@ Lane-wise signed maximum of two i32x4 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.max_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -2879,8 +2955,10 @@ Lane-wise unsigned maximum of two i32x4 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i32x4.max_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3075,8 +3153,10 @@ Lane-wise subtraction of two i64x2 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.sub (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3089,8 +3169,10 @@ Lane-wise negation of an i64x2 vector.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128)
 (i64x2.neg (local.get $a))
+# ))
 ```
 
 ---
@@ -3103,8 +3185,10 @@ Lane-wise multiplication of two i64x2 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i64x2.mul (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3327,8 +3411,10 @@ Bitwise AND NOT of two v128 vectors (a AND (NOT b)).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (v128.andnot (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3341,8 +3427,10 @@ Bitwise select from two v128 vectors based on a mask.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128) (local $mask v128)
 (v128.bitselect (local.get $a) (local.get $b) (local.get $mask))
+# ))
 ```
 
 ---
@@ -3355,8 +3443,10 @@ Lane-wise equality comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.eq (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3369,8 +3459,10 @@ Lane-wise inequality comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3383,8 +3475,10 @@ Lane-wise signed less-than comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.lt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3397,8 +3491,10 @@ Lane-wise unsigned less-than comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.lt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3411,8 +3507,10 @@ Lane-wise signed greater-than comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.gt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3425,8 +3523,10 @@ Lane-wise unsigned greater-than comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.gt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3439,8 +3539,10 @@ Lane-wise signed less-than-or-equal comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.le_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3453,8 +3555,10 @@ Lane-wise unsigned less-than-or-equal comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.le_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3467,8 +3571,10 @@ Lane-wise signed greater-than-or-equal comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.ge_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3481,8 +3587,10 @@ Lane-wise unsigned greater-than-or-equal comparison of two i8x16 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i8x16.ge_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3495,8 +3603,10 @@ Lane-wise equality comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.eq (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3509,8 +3619,10 @@ Lane-wise inequality comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.ne (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3523,8 +3635,10 @@ Lane-wise signed less-than comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.lt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3537,8 +3651,10 @@ Lane-wise unsigned less-than comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.lt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3551,8 +3667,10 @@ Lane-wise signed greater-than comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.gt_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3565,8 +3683,10 @@ Lane-wise unsigned greater-than comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.gt_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3579,8 +3699,10 @@ Lane-wise signed less-than-or-equal comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.le_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3593,8 +3715,10 @@ Lane-wise unsigned less-than-or-equal comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.le_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3607,8 +3731,10 @@ Lane-wise signed greater-than-or-equal comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.ge_s (local.get $a) (local.get $b))
+# ))
 ```
 
 ---
@@ -3621,8 +3747,10 @@ Lane-wise unsigned greater-than-or-equal comparison of two i16x8 vectors.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module (func (result v128) (local $a v128) (local $b v128)
 (i16x8.ge_u (local.get $a) (local.get $b))
+# ))
 ```
 
 ---

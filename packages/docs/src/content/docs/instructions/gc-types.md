@@ -45,7 +45,9 @@ Modifier for subtypes that prevents further subtyping. A final type is sealed an
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $node (sub (struct (field $data i32))))
 ;; This type cannot be subtyped
 (type $sealed (sub final (struct
   (field $value i32))))
@@ -56,6 +58,7 @@ Modifier for subtypes that prevents further subtyping. A final type is sealed an
 
 ;; Error: cannot subtype a final type
 ;; (type $invalid (sub $sealed (struct ...)))  ;; not allowed
+# )
 ```
 
 ---
@@ -118,12 +121,15 @@ Declares shared memory that can be accessed by multiple threads (threads proposa
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 ;; Shared memory with initial 1 page, max 4 pages
 (memory $mem 1 4 shared)
 
+# (func (result i32)
 ;; Used with atomic operations
 (i32.atomic.load (i32.const 0))
+# ))
 ```
 
 ---
@@ -180,7 +186,9 @@ Declares a field within a struct type definition. Fields can be mutable or immut
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $string (array (mut i8)))
 ;; Struct with named fields
 (type $point (struct
   (field $x f32)
@@ -200,6 +208,7 @@ Declares a field within a struct type definition. Fields can be mutable or immut
 (type $packed (struct
   (field i8)
   (field i16)))
+# )
 ```
 
 ---
@@ -210,7 +219,9 @@ Declares a struct type with zero or more fields. Structs are heap-allocated refe
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $data_type (struct (field i32)))
 ;; Simple struct type
 (type $point (struct
   (field $x f32)
@@ -230,6 +241,7 @@ Declares a struct type with zero or more fields. Structs are heap-allocated refe
 ;; Using the struct
 (func $create_point (result (ref $point))
   (struct.new $point (f32.const 1.0) (f32.const 2.0)))
+# )
 ```
 
 ---
@@ -240,7 +252,10 @@ Declares an array type with elements of a specified type. Arrays are heap-alloca
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $shape (struct (field i32)))
+# (type $callback (func (param i32) (result i32)))
 ;; Simple array of i32
 (type $int_array (array i32))
 
@@ -256,6 +271,7 @@ Declares an array type with elements of a specified type. Arrays are heap-alloca
 ;; Using arrays
 (func $create_int_array (result (ref $int_array))
   (array.new $int_array (i32.const 0) (i32.const 10)))  ;; 10 elements initialized to 0
+# )
 ```
 
 ---

@@ -161,9 +161,11 @@ Reference type for functions. Can be null.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 (table $callbacks 10 funcref)
 (global $current_handler (mut funcref) (ref.null func))
+# )
 ```
 
 ---
@@ -200,11 +202,9 @@ Reference type for values that support equality comparison (GC proposal). Equiva
 
 **Example:**
 
-```wat
-# (module
+```wat-snippet
 (func $compare (param $a eqref) (param $b eqref) (result i32)
   (ref.eq (local.get $a) (local.get $b)))
-# )
 ```
 
 ---
@@ -331,7 +331,8 @@ Null reference type for exceptions (exception handling proposal). Equivalent to 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 ;; Packed array of bytes
 (type $bytes (array (mut i8)))
 
@@ -341,8 +342,10 @@ Null reference type for exceptions (exception handling proposal). Equivalent to 
   (field $g i8)
   (field $b i8)))
 
+# (func (param $arr (ref $bytes)) (result i32)
 ;; Access widens to i32
 (array.get_u $bytes (local.get $arr) (i32.const 0))  ;; returns i32
+# ))
 ```
 
 ---
@@ -353,7 +356,8 @@ Null reference type for exceptions (exception handling proposal). Equivalent to 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 ;; Packed array of shorts
 (type $shorts (array (mut i16)))
 
@@ -362,8 +366,10 @@ Null reference type for exceptions (exception handling proposal). Equivalent to 
   (field $x i16)
   (field $y i16)))
 
+# (func (param $arr (ref $shorts)) (result i32)
 ;; Access widens to i32
 (array.get_s $shorts (local.get $arr) (i32.const 0))  ;; returns i32 (sign-extended)
+# ))
 ```
 
 ---

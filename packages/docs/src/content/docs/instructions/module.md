@@ -129,7 +129,9 @@ Declares a table for storing references.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $f1) (func $f2) (func $f3)
 ;; Table with size 10
 (table $funcs 10 funcref)
 
@@ -138,6 +140,7 @@ Declares a table for storing references.
 
 ;; Inline elem declaration
 (table $inline funcref (elem $f1 $f2 $f3))
+# )
 ```
 
 ---
@@ -191,7 +194,11 @@ Exports a resource for use by the host.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $add (param i32 i32) (result i32) (i32.add (local.get 0) (local.get 1)))
+# (memory $mem 1)
+# (global $counter (mut i32) (i32.const 0))
 ;; Export function
 (export "add" (func $add))
 
@@ -204,6 +211,7 @@ Exports a resource for use by the host.
 ;; Inline export
 (func (export "main") (result i32)
   (i32.const 42))
+# )
 ```
 
 ---
@@ -214,8 +222,10 @@ Declares a function to be called automatically when the module is instantiated.
 
 **Example:**
 
-```wat-snippet
+```wat
 (module
+# (func $setup_globals)
+# (func $init_memory)
   (func $init
     ;; Initialization code here
     (call $setup_globals)
@@ -242,7 +252,8 @@ Form 3 is useful when you need both a type index (for `call_indirect`) and named
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 ;; Define a binary operation type
 (type $binop (func (param i32 i32) (result i32)))
 
@@ -250,11 +261,15 @@ Form 3 is useful when you need both a type index (for `call_indirect`) and named
 (func $add (type $binop)
   (i32.add (local.get 0) (local.get 1)))
 
+# (table 1 funcref)
+# (func (param $index i32)
+# (drop
 ;; Use in call_indirect
 (call_indirect (type $binop)
   (i32.const 5)
   (i32.const 3)
   (local.get $index))
+# )))
 ```
 
 ---
@@ -265,7 +280,9 @@ Declares elements for a table.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $f1) (func $f2) (func $f3) (func $helper)
 (table $funcs 10 funcref)
 
 ;; Passive element (for table.init)
@@ -276,6 +293,7 @@ Declares elements for a table.
 
 ;; Declarative (just for ref.func)
 (elem declare func $helper)
+# )
 ```
 
 ---
