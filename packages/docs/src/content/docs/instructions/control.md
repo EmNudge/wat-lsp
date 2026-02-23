@@ -329,9 +329,12 @@ Call a function through a typed function reference. The reference type determine
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 (type $sig (func (param i32) (result i32)))
+# (func (param $func_ref (ref $sig)) (result i32)
 (call_ref $sig (i32.const 42) (local.get $func_ref))
+# ))
 ```
 
 ---
@@ -344,9 +347,12 @@ Tail call a function through a typed function reference. Immediately returns the
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 (type $sig (func (param i32) (result i32)))
+# (func (param $func_ref (ref $sig)) (result i32)
 (return_call_ref $sig (i32.const 42) (local.get $func_ref))
+# ))
 ```
 
 ---
@@ -359,13 +365,17 @@ Branch to a label if the reference is null. If not null, the non-null reference 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $use_ref (param (ref func)))
+# (func (param $maybe_null_ref (ref null func))
 (block $is_null
   (br_on_null $is_null (local.get $maybe_null_ref))
   ;; Reference is not null here, use it
   (call $use_ref)
 )
 ;; Jumped here if ref was null
+# ))
 ```
 
 ---
@@ -397,7 +407,7 @@ Tail-call version of `call_indirect`. Calls a function from a table by index and
 
 **Example:**
 
-```wat-snippet
+```wat
 (module
   (type $sig (func (param i32) (result i32)))
   (table 1 funcref)

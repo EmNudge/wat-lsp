@@ -19,30 +19,6 @@ use wat_lsp_rust::diagnostics::{
 use wat_lsp_rust::parser;
 use wat_lsp_rust::ts_facade;
 
-/// Known LSP false positives — valid WAT that the LSP incorrectly flags due to
-/// incomplete type checking or missing proposal support.
-/// Format: "relative/path.md:line_number"
-const KNOWN_ISSUES: &[&str] = &[
-    // try_table catch clause: type checker doesn't track values delivered via branch
-    "instructions/exceptions.md:78",
-    // i64 atomic RMW operations: type checker returns i32 instead of i64
-    "instructions/atomic.md:397",
-    "instructions/atomic.md:416",
-    "instructions/atomic.md:435",
-    "instructions/atomic.md:454",
-    "instructions/atomic.md:473",
-];
-
-fn is_known_issue(rel_path: &Path, line_number: usize) -> bool {
-    // Normalize Windows backslashes to forward slashes for cross-platform matching
-    let key = format!(
-        "{}:{}",
-        rel_path.display().to_string().replace('\\', "/"),
-        line_number
-    );
-    KNOWN_ISSUES.contains(&key.as_str())
-}
-
 fn get_all_diagnostics(wat: &str) -> Vec<Diagnostic> {
     let mut parser = ts_facade::create_parser();
     let tree = parser.parse(wat, None).expect("Failed to parse");
@@ -140,7 +116,6 @@ fn doc_samples_have_no_errors() {
 
     let mut failures: Vec<String> = Vec::new();
     let mut total_blocks = 0;
-    let mut skipped_known = 0;
 
     for md_path in &md_files {
         let rel_path = md_path.strip_prefix(&docs_dir).unwrap_or(md_path);
@@ -162,11 +137,6 @@ fn doc_samples_have_no_errors() {
             );
 
             total_blocks += 1;
-
-            if is_known_issue(rel_path, block.line_number) {
-                skipped_known += 1;
-                continue;
-            }
 
             let diagnostics = get_all_diagnostics(&block.code);
             let errors: Vec<&Diagnostic> = diagnostics
@@ -199,9 +169,8 @@ fn doc_samples_have_no_errors() {
     }
 
     eprintln!(
-        "Doc samples: {} blocks validated, {} known issues skipped, {} failures",
+        "Doc samples: {} blocks validated, {} failures",
         total_blocks,
-        skipped_known,
         failures.len()
     );
 

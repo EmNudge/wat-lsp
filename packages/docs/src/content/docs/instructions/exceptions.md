@@ -77,7 +77,7 @@ Define a block that catches exceptions using a jump table.
 ```wat
 # (module
 # (tag $tag (param i32))
-# (func
+# (func (result i32)
 # (block $handler_label (result i32)
 (try_table (catch $tag $handler_label)
   (throw $tag (i32.const 1))
@@ -118,13 +118,17 @@ Catches any exception in a `try_table` block, regardless of tag.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (func $may_throw_anything)
+# (func
 (block $fallback
   (try_table (catch_all $fallback)
     (call $may_throw_anything)
   )
 )
 ;; $fallback receives exnref
+# ))
 ```
 
 ---

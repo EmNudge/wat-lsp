@@ -49,8 +49,12 @@ Get a field from a structure.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $my_struct (struct (field $field_name i32)))
+# (func (param $s (ref $my_struct)) (result i32)
 (struct.get $my_struct $field_name (local.get $s))
+# ))
 ```
 
 ---
@@ -63,8 +67,12 @@ Get a signed field from a structure (sign-extending).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $my_struct (struct (field $field_index i8)))
+# (func (param $s (ref $my_struct)) (result i32)
 (struct.get_s $my_struct $field_index (local.get $s))
+# ))
 ```
 
 ---
@@ -77,8 +85,12 @@ Get an unsigned field from a structure (zero-extending).
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $my_struct (struct (field $field_index i8)))
+# (func (param $s (ref $my_struct)) (result i32)
 (struct.get_u $my_struct $field_index (local.get $s))
+# ))
 ```
 
 ---
@@ -91,8 +103,12 @@ Set a field in a structure.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $my_struct (struct (field $field_index (mut i32))))
+# (func (param $s (ref $my_struct))
 (struct.set $my_struct $field_index (local.get $s) (i32.const 42))
+# ))
 ```
 
 ---
