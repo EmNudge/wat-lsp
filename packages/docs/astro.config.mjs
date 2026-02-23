@@ -30,6 +30,10 @@ export default defineConfig({
         'Cross-Origin-Opener-Policy': 'same-origin',
         'Cross-Origin-Embedder-Policy': 'require-corp',
       },
+      fs: {
+        // Allow serving files from the workspace root (needed for workspace:* linked packages)
+        allow: ['../..'],
+      },
     },
   },
   integrations: [

@@ -733,8 +733,12 @@ jobs:
 
   docs-typecheck:
     name: Docs Typecheck
-    needs: changes
-    if: needs.changes.outputs.docs == 'true'
+    needs: [changes, build-npm-package]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -743,12 +747,26 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Clean package directory
+        run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
+      - name: Restore NPM package from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
+      - name: Download NPM package artifact
+        if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter wat-docs run typecheck
 
   docs-build:
     name: Docs Build
-    needs: [changes, playground]
+    needs: [changes, build-npm-package, playground]
     if: |
       always() &&
       !failure() &&
@@ -762,6 +780,20 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Clean package directory
+        run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
+      - name: Restore NPM package from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
+      - name: Download NPM package artifact
+        if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter wat-docs run build
 
@@ -780,8 +812,12 @@ jobs:
 
   docs-test-wat:
     name: Docs Test WAT
-    needs: changes
-    if: needs.changes.outputs.docs == 'true'
+    needs: [changes, build-npm-package]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -790,13 +826,31 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Clean package directory
+        run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
+      - name: Restore NPM package from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
+      - name: Download NPM package artifact
+        if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter wat-docs run test:wat
 
   docs-test:
     name: Docs Test
-    needs: changes
-    if: needs.changes.outputs.docs == 'true'
+    needs: [changes, build-npm-package]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -805,6 +859,20 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Clean package directory
+        run: rm -rf packages/wat-lsp/dist packages/wat-lsp/node_modules
+      - name: Restore NPM package from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/wat-lsp/dist
+          key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
+      - name: Download NPM package artifact
+        if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: emnudge-wat-lsp
+          path: packages/wat-lsp/dist
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter wat-docs exec playwright install --with-deps chromium
       - run: pnpm --filter wat-docs test

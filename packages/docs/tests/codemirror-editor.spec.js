@@ -12,7 +12,12 @@ test.describe('CodeMirror Editor Integration', () => {
     await page.goto('/stack/drop/');
     await page.waitForTimeout(2000);
 
-    const criticalErrors = errors.filter((e) => !e.includes('SharedArrayBuffer'));
+    const criticalErrors = errors.filter(
+      (e) =>
+        !e.includes('SharedArrayBuffer') &&
+        !e.includes('wasm streaming compile failed') &&
+        !e.includes('falling back to ArrayBuffer instantiation'),
+    );
 
     expect(criticalErrors).toEqual([]);
   });

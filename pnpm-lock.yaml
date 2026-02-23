@@ -38,8 +38,8 @@ importers:
         specifier: ^6.39.12
         version: 6.39.12
       '@emnudge/wat-lsp':
-        specifier: ^0.5.0
-        version: 0.5.0(web-tree-sitter@0.25.10)
+        specifier: workspace:*
+        version: link:../wat-lsp
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
@@ -440,15 +440,6 @@ packages:
 
   '@emnapi/runtime@1.8.1':
     resolution: {integrity: sha512-mehfKSMWjjNol8659Z8KxEMrdSJDDot5SXMq00dM8BN4o+CLNXQ0xH2V7EchNHV4RmbZLmmPdEaXZc5H2FXmDg==}
-
-  '@emnudge/wat-lsp@0.5.0':
-    resolution: {integrity: sha512-1Y2JfIhN4VYgNyL8UEdTesFZDa3ohbMRbFUKg/8m3rcRsyCbgJ2tubRFUc9DqaoMUZC24WYQBqDJP7WSq0HPMQ==}
-    hasBin: true
-    peerDependencies:
-      web-tree-sitter: ^0.25.3
-    peerDependenciesMeta:
-      web-tree-sitter:
-        optional: true
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -4933,10 +4924,6 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
-
-  '@emnudge/wat-lsp@0.5.0(web-tree-sitter@0.25.10)':
-    optionalDependencies:
-      web-tree-sitter: 0.25.10
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true
