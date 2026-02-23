@@ -27,17 +27,18 @@ pub(crate) fn check_uninitialized_locals(
     func_node: &Node,
     source: &str,
     symbols: &SymbolTable,
-) -> Vec<Diagnostic> {
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let func_line = func_node.start_position().row as u32;
     let func = match symbols.find_function_containing_line(func_line) {
         Some(f) => f,
-        None => return vec![],
+        None => return,
     };
 
     // Scan the AST to find which locals have non-defaultable (non-nullable ref) types
     let non_defaultable = find_non_defaultable_locals(func_node, source, func);
     if non_defaultable.is_empty() {
-        return vec![];
+        return;
     }
 
     // Initialize tracking: params are always initialized, defaultable locals are initialized
@@ -45,8 +46,6 @@ pub(crate) fn check_uninitialized_locals(
     let num_params = func.parameters.len();
     let total = num_params + func.locals.len();
     let mut initialized: Vec<bool> = (0..total).map(|i| !non_defaultable.contains(&i)).collect();
-
-    let mut diagnostics = Vec::new();
 
     // Find and walk the instr_list
     let mut cursor = func_node.walk();
@@ -59,13 +58,11 @@ pub(crate) fn check_uninitialized_locals(
                 func,
                 &non_defaultable,
                 &mut initialized,
-                &mut diagnostics,
+                diagnostics,
             );
             break;
         }
     }
-
-    diagnostics
 }
 
 /// Scan function AST for local declarations with non-nullable reference types.
@@ -458,7 +455,7 @@ mod tests {
         diagnostics: &mut Vec<Diagnostic>,
     ) {
         if node.kind() == "module_field_func" {
-            diagnostics.extend(check_uninitialized_locals(&node, source, symbols));
+            check_uninitialized_locals(&node, source, symbols, diagnostics);
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {

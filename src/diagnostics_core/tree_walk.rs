@@ -17,14 +17,14 @@ use tree_sitter::Node;
 use crate::ts_facade::Node;
 
 /// Pre-computed configuration for which diagnostic checks to perform.
-pub struct DiagnosticConfig {
-    pub check_atomics: bool,
-    pub check_memory64: bool,
+pub(crate) struct DiagnosticConfig {
+    pub(crate) check_atomics: bool,
+    pub(crate) check_memory64: bool,
 }
 
 impl DiagnosticConfig {
     /// Build config from symbol table state.
-    pub fn from_symbols(symbols: &SymbolTable) -> Self {
+    pub(crate) fn from_symbols(symbols: &SymbolTable) -> Self {
         let (has_shared, has_memory64) = symbols
             .memories
             .iter()
@@ -43,7 +43,7 @@ impl DiagnosticConfig {
 /// This is the shared implementation used by both native and WASM builds.
 /// Callers can convert the returned `Vec<Diagnostic>` to platform-specific
 /// types as needed (e.g., `tower_lsp::lsp_types::Diagnostic` for native).
-pub fn walk_tree_for_diagnostics(
+pub(crate) fn walk_tree_for_diagnostics(
     node: Node,
     source: &str,
     symbols: &SymbolTable,
@@ -69,8 +69,10 @@ pub fn walk_tree_for_diagnostics(
 
     // Check block label mismatches
     if matches!(kind_str, "block_block" | "block_loop" | "block_if") {
-        diagnostics.extend(
-            crate::diagnostics_core::module_checks::check_block_label_mismatch(&node, source),
+        crate::diagnostics_core::module_checks::check_block_label_mismatch(
+            &node,
+            source,
+            diagnostics,
         );
     }
 
@@ -111,10 +113,11 @@ pub fn walk_tree_for_diagnostics(
 
         // Check for uninitialized non-nullable ref locals
         if !is_import {
-            diagnostics.extend(
-                crate::diagnostics_core::local_init::check_uninitialized_locals(
-                    &node, source, symbols,
-                ),
+            crate::diagnostics_core::local_init::check_uninitialized_locals(
+                &node,
+                source,
+                symbols,
+                diagnostics,
             );
         }
 
@@ -126,90 +129,91 @@ pub fn walk_tree_for_diagnostics(
 
     // Special handling for catch clauses (try_table)
     if kind_str == "catch_clause" {
-        diagnostics.extend(
-            crate::diagnostics_core::references::check_catch_clause_references(
-                &node, source, symbols,
-            ),
+        crate::diagnostics_core::references::check_catch_clause_references(
+            &node,
+            source,
+            symbols,
+            diagnostics,
         );
         return;
     }
 
     // Special handling for legacy try catch clause
     if kind_str == "try_catch_clause" {
-        diagnostics.extend(
-            crate::diagnostics_core::references::check_first_index_reference(
-                &node,
-                source,
-                symbols,
-                &InstructionContext::Tag,
-            ),
+        crate::diagnostics_core::references::check_first_index_reference(
+            &node,
+            source,
+            symbols,
+            &InstructionContext::Tag,
+            diagnostics,
         );
         // Continue recursing to check nested instructions
     }
 
     // Special handling for start directive
     if kind_str == "module_field_start" {
-        diagnostics.extend(
-            crate::diagnostics_core::references::check_first_index_reference(
-                &node,
-                source,
-                symbols,
-                &InstructionContext::Call,
-            ),
+        crate::diagnostics_core::references::check_first_index_reference(
+            &node,
+            source,
+            symbols,
+            &InstructionContext::Call,
+            diagnostics,
         );
         return;
     }
 
     // Check module-level references (exports, elem/data segment refs)
     {
-        let module_ref_diags = crate::diagnostics_core::references::check_module_level_references(
-            &node, source, symbols,
+        let prev_len = diagnostics.len();
+        crate::diagnostics_core::references::check_module_level_references(
+            &node,
+            source,
+            symbols,
+            diagnostics,
         );
-        if !module_ref_diags.is_empty() {
-            diagnostics.extend(module_ref_diags);
-            if kind_str != "module_field_elem" {
-                return;
-            }
+        if diagnostics.len() > prev_len && kind_str != "module_field_elem" {
+            return;
         }
     }
 
     // Special handling for try_delegate_clause (legacy try): index is a label reference
     if kind_str == "try_delegate_clause" {
-        diagnostics.extend(
-            crate::diagnostics_core::references::check_first_index_reference(
-                &node,
-                source,
-                symbols,
-                &InstructionContext::Branch,
-            ),
+        crate::diagnostics_core::references::check_first_index_reference(
+            &node,
+            source,
+            symbols,
+            &InstructionContext::Branch,
+            diagnostics,
         );
         return;
     }
 
     // Check folded expression operand count (expr1_plain nodes)
     if kind_str == "expr1_plain" {
-        diagnostics.extend(
-            crate::diagnostics_core::folded_checks::check_folded_operand_count(
-                &node, source, symbols,
-            ),
+        crate::diagnostics_core::folded_checks::check_folded_operand_count(
+            &node,
+            source,
+            symbols,
+            diagnostics,
         );
 
         let text = &source[node.byte_range()];
         let first_token = text.split_whitespace().next().unwrap_or("");
 
         if config.check_atomics {
-            diagnostics.extend(
-                crate::diagnostics_core::memory_checks::check_atomic_operation(&node, first_token),
+            crate::diagnostics_core::memory_checks::check_atomic_operation(
+                &node,
+                first_token,
+                diagnostics,
             );
         }
         if config.check_memory64 {
-            diagnostics.extend(
-                crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
-                    &node,
-                    source,
-                    symbols,
-                    first_token,
-                ),
+            crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
+                &node,
+                source,
+                symbols,
+                first_token,
+                diagnostics,
             );
         }
     }
@@ -231,9 +235,13 @@ pub fn walk_tree_for_diagnostics(
     // Check for undefined references based on instruction context
     let context = determine_instruction_context_at_node(&node, source);
     if context != InstructionContext::General {
-        diagnostics.extend(crate::diagnostics_core::references::check_references(
-            &node, source, symbols, &context,
-        ));
+        crate::diagnostics_core::references::check_references(
+            &node,
+            source,
+            symbols,
+            &context,
+            diagnostics,
+        );
 
         // For instr_plain, also check atomic, memory64, and arity (linear format)
         if kind_str == "instr_plain" {
@@ -241,11 +249,10 @@ pub fn walk_tree_for_diagnostics(
             let first_token = text.split_whitespace().next().unwrap_or("");
 
             if config.check_atomics {
-                diagnostics.extend(
-                    crate::diagnostics_core::memory_checks::check_atomic_operation(
-                        &node,
-                        first_token,
-                    ),
+                crate::diagnostics_core::memory_checks::check_atomic_operation(
+                    &node,
+                    first_token,
+                    diagnostics,
                 );
             }
 
@@ -255,19 +262,18 @@ pub fn walk_tree_for_diagnostics(
                 .unwrap_or(false);
             if !parent_is_expr1 {
                 if config.check_memory64 {
-                    diagnostics.extend(
-                        crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
-                            &node,
-                            source,
-                            symbols,
-                            first_token,
-                        ),
+                    crate::diagnostics_core::memory_checks::check_memory64_for_instruction(
+                        &node,
+                        source,
+                        symbols,
+                        first_token,
+                        diagnostics,
                     );
                 }
-                diagnostics.extend(
-                    crate::diagnostics_core::arity::check_instruction_parameter_count(
-                        &node, source,
-                    ),
+                crate::diagnostics_core::arity::check_instruction_parameter_count(
+                    &node,
+                    source,
+                    diagnostics,
                 );
             }
         }
@@ -296,14 +302,18 @@ fn check_instruction_diagnostics(
     symbols: &SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    diagnostics.extend(crate::diagnostics_core::simd_checks::check_simd_lane_index(
-        instr_node, source,
-    ));
-    diagnostics.extend(crate::diagnostics_core::alignment_checks::check_alignment(
-        instr_node, source, symbols,
-    ));
-    diagnostics.extend(
-        crate::diagnostics_core::gc_checks::check_struct_field_access(instr_node, source, symbols),
+    crate::diagnostics_core::simd_checks::check_simd_lane_index(instr_node, source, diagnostics);
+    crate::diagnostics_core::alignment_checks::check_alignment(
+        instr_node,
+        source,
+        symbols,
+        diagnostics,
+    );
+    crate::diagnostics_core::gc_checks::check_struct_field_access(
+        instr_node,
+        source,
+        symbols,
+        diagnostics,
     );
 }
 

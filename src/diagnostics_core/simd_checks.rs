@@ -15,9 +15,7 @@ use crate::ts_facade::Node;
 ///
 /// Returns diagnostics for any lane index that exceeds the valid range
 /// for the given instruction.
-pub fn check_simd_lane_index(node: &Node, source: &str) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
+pub(crate) fn check_simd_lane_index(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind_ref = child);
@@ -58,8 +56,6 @@ pub fn check_simd_lane_index(node: &Node, source: &str) -> Vec<Diagnostic> {
             }
         }
     }
-
-    diagnostics
 }
 
 /// Find the instruction name from an op_simd_lane node.

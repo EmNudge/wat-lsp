@@ -19,8 +19,12 @@ use crate::ts_facade::Node;
 /// - `align=N` where N is not a power of 2
 /// - `align=N` where N exceeds the instruction's natural alignment
 /// - `offset=N` where N exceeds u32::MAX for memory32 targets
-pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+pub(crate) fn check_alignment(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut instr_name: Option<&str> = None;
     let mut align_node = None;
     let mut offset_node = None;
@@ -62,13 +66,13 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
 
     // Only check alignment if we have both a memory instruction and an align_value
     let (Some(instr), Some(align_nd)) = (instr_name, align_node) else {
-        return diagnostics;
+        return;
     };
 
     // Extract the numeric value (u64 to detect overflow)
     let align_val = parse_align_value_u64(&align_nd, source);
     let Some(align) = align_val else {
-        return diagnostics;
+        return;
     };
 
     // Check power of 2
@@ -77,7 +81,7 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
             node_to_range(&align_nd),
             "alignment must be a power of 2",
         ));
-        return diagnostics;
+        return;
     }
 
     // Check against natural alignment
@@ -89,8 +93,6 @@ pub fn check_alignment(node: &Node, source: &str, symbols: &SymbolTable) -> Vec<
             ));
         }
     }
-
-    diagnostics
 }
 
 /// Parse the alignment value as u64 to detect values that overflow u32.

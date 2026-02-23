@@ -176,7 +176,6 @@ pub enum DiagnosticSeverity {
 
 /// A diagnostic message (error, warning, etc.)
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 pub struct Diagnostic {
     /// The range where the diagnostic applies
     pub range: Range,
@@ -185,9 +184,9 @@ pub struct Diagnostic {
     /// The diagnostic message
     pub message: String,
     /// Optional diagnostic code
-    pub code: Option<String>,
-    /// Optional source identifier (e.g., "wat-lsp")
-    pub source: Option<String>,
+    pub code: Option<&'static str>,
+    /// Source identifier
+    pub source: &'static str,
 }
 
 impl Diagnostic {
@@ -198,7 +197,7 @@ impl Diagnostic {
             severity: DiagnosticSeverity::Error,
             message: message.into(),
             code: None,
-            source: Some("wat-lsp".to_string()),
+            source: "wat-lsp",
         }
     }
 
@@ -209,7 +208,7 @@ impl Diagnostic {
             severity: DiagnosticSeverity::Warning,
             message: message.into(),
             code: None,
-            source: Some("wat-lsp".to_string()),
+            source: "wat-lsp",
         }
     }
 
@@ -220,13 +219,13 @@ impl Diagnostic {
             severity: DiagnosticSeverity::Hint,
             message: message.into(),
             code: None,
-            source: Some("wat-lsp".to_string()),
+            source: "wat-lsp",
         }
     }
 
     /// Set the diagnostic code
-    pub fn with_code(mut self, code: impl Into<String>) -> Self {
-        self.code = Some(code.into());
+    pub fn with_code(mut self, code: &'static str) -> Self {
+        self.code = Some(code);
         self
     }
 }
@@ -373,9 +372,11 @@ impl From<Diagnostic> for lsp::Diagnostic {
         lsp::Diagnostic {
             range: diag.range.into(),
             severity: Some(diag.severity.into()),
-            code: diag.code.map(lsp::NumberOrString::String),
+            code: diag
+                .code
+                .map(|c| lsp::NumberOrString::String(c.to_string())),
             code_description: None,
-            source: diag.source,
+            source: Some(diag.source.to_string()),
             message: diag.message,
             related_information: None,
             tags: None,

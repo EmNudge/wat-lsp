@@ -12,6 +12,8 @@
 // but is a no-op for native (&str -> &str)
 #![allow(clippy::useless_asref)]
 
+use std::borrow::Cow;
+
 use crate::core::types::Diagnostic;
 use crate::instruction_metadata::{
     infer_simd_instruction_arity, is_terminating_instruction, lookup_instruction_arity, OperandMode,
@@ -73,31 +75,42 @@ fn simd_splat_input_type(name: &str) -> ValueType {
     }
 }
 
+/// Check if a node kind represents an inner block wrapper (block/loop/if/try).
+fn is_inner_block_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "block_block" | "block_loop" | "if_block" | "block_if" | "block_try_table" | "block_try"
+    )
+}
+
 /// Derive consumed types for SIMD lane instructions (i8x16.*, i16x8.*, i32x4.*, i64x2.*, f32x4.*, f64x2.*).
-fn derive_simd_consumed_types(name: &str) -> Option<Vec<ValueType>> {
+fn derive_simd_consumed_types(name: &str) -> Option<Cow<'static, [ValueType]>> {
     // Splat: scalar -> v128
     if name.ends_with(".splat") {
-        return Some(vec![simd_splat_input_type(name)]);
+        return Some(Cow::Owned(vec![simd_splat_input_type(name)]));
     }
 
     // Extract lane: v128 -> scalar (lane index is immediate, not stack operand)
     if name.contains(".extract_lane") {
-        return Some(vec![ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128]));
     }
 
     // Replace lane: v128 + scalar -> v128
     if name.contains(".replace_lane") {
-        return Some(vec![ValueType::V128, simd_splat_input_type(name)]);
+        return Some(Cow::Owned(vec![
+            ValueType::V128,
+            simd_splat_input_type(name),
+        ]));
     }
 
     // Reductions: v128 -> i32
     if name.ends_with(".all_true") || name.ends_with(".bitmask") {
-        return Some(vec![ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128]));
     }
 
     // Shift operations: v128 + i32 -> v128
     if name.ends_with(".shl") || name.ends_with(".shr_s") || name.ends_with(".shr_u") {
-        return Some(vec![ValueType::V128, ValueType::I32]);
+        return Some(Cow::Borrowed(&[ValueType::V128, ValueType::I32]));
     }
 
     // Unary ops: v128 -> v128
@@ -118,7 +131,7 @@ fn derive_simd_consumed_types(name: &str) -> Option<Vec<ValueType>> {
         || name.contains(".demote_")
         || name.contains(".extadd_pairwise_")
     {
-        return Some(vec![ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128]));
     }
 
     // Ternary relaxed SIMD ops: (v128, v128, v128) -> v128
@@ -127,41 +140,45 @@ fn derive_simd_consumed_types(name: &str) -> Option<Vec<ValueType>> {
         || name.contains(".relaxed_laneselect")
         || name.contains(".relaxed_dot_i8x16_i7x16_add")
     {
-        return Some(vec![ValueType::V128, ValueType::V128, ValueType::V128]);
+        return Some(Cow::Borrowed(&[
+            ValueType::V128,
+            ValueType::V128,
+            ValueType::V128,
+        ]));
     }
 
     // Unary relaxed SIMD ops
     if name.contains(".relaxed_trunc") {
-        return Some(vec![ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128]));
     }
 
     // i8x16.shuffle: (v128, v128) -> v128 (lane indices are immediates)
     if name == "i8x16.shuffle" {
-        return Some(vec![ValueType::V128, ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128, ValueType::V128]));
     }
 
     // Narrow operations: (v128, v128) -> v128
     if name.contains(".narrow_") {
-        return Some(vec![ValueType::V128, ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128, ValueType::V128]));
     }
 
     // Swizzle: (v128, v128) -> v128
     if name.ends_with(".swizzle") || name.contains(".relaxed_swizzle") {
-        return Some(vec![ValueType::V128, ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128, ValueType::V128]));
     }
 
     // Dot product: (v128, v128) -> v128
     if name.contains(".dot_") {
-        return Some(vec![ValueType::V128, ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128, ValueType::V128]));
     }
 
     // Extmul: (v128, v128) -> v128
     if name.contains(".extmul_") {
-        return Some(vec![ValueType::V128, ValueType::V128]);
+        return Some(Cow::Borrowed(&[ValueType::V128, ValueType::V128]));
     }
 
-    // Default: binary ops (v128, v128) -> v128 (add, sub, mul, min, max, eq, ne, lt, gt, le, ge, etc.)
-    Some(vec![ValueType::V128, ValueType::V128])
+    // Default: binary ops (v128, v128) -> v128
+    Some(Cow::Borrowed(&[ValueType::V128, ValueType::V128]))
 }
 
 /// Track stack state through an instruction list and report underflow/type errors.
@@ -169,7 +186,7 @@ fn derive_simd_consumed_types(name: &str) -> Option<Vec<ValueType>> {
 /// Returns diagnostics as core::types::Diagnostic.
 ///
 /// Uses TypeChecker with typed value stack + control stack per Wasm spec §3.3.
-pub fn track_stack_in_instr_list(
+pub(crate) fn track_stack_in_instr_list(
     instr_list: &Node,
     source: &str,
     symbols: &SymbolTable,
@@ -440,13 +457,7 @@ fn get_block_label(node: &Node, source: &str) -> Option<String> {
             return Some(source[child.byte_range()].trim().to_string());
         }
         // Check inside block_block, loop_block, block_if, block_try_table, etc.
-        let is_inner_block = kind == "block_block"
-            || kind == "block_loop"
-            || kind == "if_block"
-            || kind == "block_if"
-            || kind == "block_try_table"
-            || kind == "block_try";
-        if is_inner_block {
+        if is_inner_block_kind(kind) {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
                 node_kind!(ik = inner_child);
@@ -507,7 +518,7 @@ fn is_try_table_node(node: &Node) -> bool {
 
 /// Get the instruction name from an instr_plain node.
 /// Returns a borrowed slice from `source`, avoiding allocation.
-pub fn get_instruction_name<'a>(instr_node: &Node, source: &'a str) -> Option<&'a str> {
+pub(crate) fn get_instruction_name<'a>(instr_node: &Node, source: &'a str) -> Option<&'a str> {
     let mut cursor = instr_node.walk();
     for child in instr_node.children(&mut cursor) {
         node_kind!(kind = child);
@@ -841,15 +852,7 @@ fn process_instruction(
     // Check global.set targets a mutable global
     if instr_name == "global.set" {
         if let Some(index) = get_index_from_node(node, source) {
-            let is_immutable = if let Some(global) = symbols.get_global_by_name(index) {
-                !global.is_mutable
-            } else if let Ok(idx) = index.parse::<usize>() {
-                symbols
-                    .get_global_by_index(idx)
-                    .is_some_and(|g| !g.is_mutable)
-            } else {
-                false
-            };
+            let is_immutable = symbols.resolve_global(index).is_some_and(|g| !g.is_mutable);
             if is_immutable {
                 checker.diagnostics.push(
                     Diagnostic::error(node_to_range(node), "global is immutable")
@@ -897,7 +900,7 @@ fn get_instruction_consumed_types(
     instr_name: &str,
     symbols: &SymbolTable,
     source: &str,
-) -> Vec<ValueType> {
+) -> Cow<'static, [ValueType]> {
     // Try pattern-based type derivation first
     if let Some(types) = derive_consumed_types_from_name(instr_name, node, symbols, source) {
         return types;
@@ -912,10 +915,10 @@ fn get_instruction_consumed_types(
     } else if let Some((c, _p)) = infer_simd_instruction_arity(instr_name) {
         c
     } else {
-        return vec![];
+        return Cow::Borrowed(&[]);
     };
 
-    vec![ValueType::Unknown; count]
+    Cow::Owned(vec![ValueType::Unknown; count])
 }
 
 /// Derive typed consumed operands from instruction name pattern.
@@ -925,7 +928,7 @@ fn derive_consumed_types_from_name(
     node: &Node,
     symbols: &SymbolTable,
     source: &str,
-) -> Option<Vec<ValueType>> {
+) -> Option<Cow<'static, [ValueType]>> {
     // Helper to check if an instruction is a scalar binary op (2 operands of prefix type)
     let is_binary_scalar = |name: &str| -> bool {
         if is_simd_instruction(name) {
@@ -973,53 +976,52 @@ fn derive_consumed_types_from_name(
 
     match instr_name {
         // Constants — consume nothing
-        "i32.const" | "i64.const" | "f32.const" | "f64.const" | "v128.const" => Some(vec![]),
+        "i32.const" | "i64.const" | "f32.const" | "f64.const" | "v128.const" => {
+            Some(Cow::Borrowed(&[]))
+        }
 
         // Nop, unreachable — consume nothing
-        "nop" | "unreachable" => Some(vec![]),
+        "nop" | "unreachable" => Some(Cow::Borrowed(&[])),
 
         // Drop — consume any one value
-        "drop" => Some(vec![ValueType::Unknown]),
+        "drop" => Some(Cow::Borrowed(&[ValueType::Unknown])),
 
         // Select — 2 same-type values + i32 condition
         // Typed select: (select (result T)) uses declared type for operands
         "select" => {
             let ty = get_select_result_type(node, source).unwrap_or(ValueType::Unknown);
-            Some(vec![ty, ty, ValueType::I32])
+            Some(Cow::Owned(vec![ty, ty, ValueType::I32]))
         }
 
         // Local/global get — consume nothing
-        "local.get" | "global.get" => Some(vec![]),
+        "local.get" | "global.get" => Some(Cow::Borrowed(&[])),
 
         // Local set — consume the local's type
         "local.set" => {
             let ty = get_local_type_from_node(node, symbols, source).unwrap_or(ValueType::Unknown);
-            Some(vec![ty])
+            Some(Cow::Owned(vec![ty]))
         }
 
         // Local tee — consume and re-produce the local's type
         "local.tee" => {
             let ty = get_local_type_from_node(node, symbols, source).unwrap_or(ValueType::Unknown);
-            Some(vec![ty])
+            Some(Cow::Owned(vec![ty]))
         }
 
         // Global set — consume the global's type
         "global.set" => {
             let ty = get_global_type_from_node(node, symbols, source).unwrap_or(ValueType::Unknown);
-            Some(vec![ty])
+            Some(Cow::Owned(vec![ty]))
         }
 
         // Call — consume parameter types
         "call" | "return_call" => {
             if let Some(func_ref) = get_index_from_node(node, source) {
-                let func = symbols.get_function_by_name(func_ref).or_else(|| {
-                    func_ref
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|idx| symbols.get_function_by_index(idx))
-                });
+                let func = symbols.resolve_function(func_ref);
                 if let Some(f) = func {
-                    return Some(f.parameters.iter().map(|p| p.param_type).collect());
+                    return Some(Cow::Owned(
+                        f.parameters.iter().map(|p| p.param_type).collect(),
+                    ));
                 }
             }
             None // fall back to untyped
@@ -1028,12 +1030,12 @@ fn derive_consumed_types_from_name(
         // Call_ref — consume param types + typed funcref (ref null $type)
         "call_ref" | "return_call_ref" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                if let Some(td) = symbols.resolve_type(type_ref) {
                     if let TypeKind::Func { params, .. } = &td.kind {
                         let mut types = Vec::with_capacity(params.len() + 1);
                         types.extend_from_slice(params);
                         types.push(ValueType::RefNull(td.index as u32));
-                        return Some(types);
+                        return Some(Cow::Owned(types));
                     }
                 }
             }
@@ -1041,42 +1043,46 @@ fn derive_consumed_types_from_name(
         }
 
         // Conversions — consume source type
-        "i32.wrap_i64" => Some(vec![ValueType::I64]),
-        "i64.extend_i32_s" | "i64.extend_i32_u" => Some(vec![ValueType::I32]),
+        "i32.wrap_i64" => Some(Cow::Borrowed(&[ValueType::I64])),
+        "i64.extend_i32_s" | "i64.extend_i32_u" => Some(Cow::Borrowed(&[ValueType::I32])),
         "i32.trunc_f32_s" | "i32.trunc_f32_u" | "i32.trunc_sat_f32_s" | "i32.trunc_sat_f32_u" => {
-            Some(vec![ValueType::F32])
+            Some(Cow::Borrowed(&[ValueType::F32]))
         }
         "i32.trunc_f64_s" | "i32.trunc_f64_u" | "i32.trunc_sat_f64_s" | "i32.trunc_sat_f64_u" => {
-            Some(vec![ValueType::F64])
+            Some(Cow::Borrowed(&[ValueType::F64]))
         }
         "i64.trunc_f32_s" | "i64.trunc_f32_u" | "i64.trunc_sat_f32_s" | "i64.trunc_sat_f32_u" => {
-            Some(vec![ValueType::F32])
+            Some(Cow::Borrowed(&[ValueType::F32]))
         }
         "i64.trunc_f64_s" | "i64.trunc_f64_u" | "i64.trunc_sat_f64_s" | "i64.trunc_sat_f64_u" => {
-            Some(vec![ValueType::F64])
+            Some(Cow::Borrowed(&[ValueType::F64]))
         }
-        "f32.convert_i32_s" | "f32.convert_i32_u" => Some(vec![ValueType::I32]),
-        "f32.convert_i64_s" | "f32.convert_i64_u" => Some(vec![ValueType::I64]),
-        "f64.convert_i32_s" | "f64.convert_i32_u" => Some(vec![ValueType::I32]),
-        "f64.convert_i64_s" | "f64.convert_i64_u" => Some(vec![ValueType::I64]),
-        "f32.demote_f64" => Some(vec![ValueType::F64]),
-        "f64.promote_f32" => Some(vec![ValueType::F32]),
-        "i32.reinterpret_f32" => Some(vec![ValueType::F32]),
-        "i64.reinterpret_f64" => Some(vec![ValueType::F64]),
-        "f32.reinterpret_i32" => Some(vec![ValueType::I32]),
-        "f64.reinterpret_i64" => Some(vec![ValueType::I64]),
+        "f32.convert_i32_s" | "f32.convert_i32_u" => Some(Cow::Borrowed(&[ValueType::I32])),
+        "f32.convert_i64_s" | "f32.convert_i64_u" => Some(Cow::Borrowed(&[ValueType::I64])),
+        "f64.convert_i32_s" | "f64.convert_i32_u" => Some(Cow::Borrowed(&[ValueType::I32])),
+        "f64.convert_i64_s" | "f64.convert_i64_u" => Some(Cow::Borrowed(&[ValueType::I64])),
+        "f32.demote_f64" => Some(Cow::Borrowed(&[ValueType::F64])),
+        "f64.promote_f32" => Some(Cow::Borrowed(&[ValueType::F32])),
+        "i32.reinterpret_f32" => Some(Cow::Borrowed(&[ValueType::F32])),
+        "i64.reinterpret_f64" => Some(Cow::Borrowed(&[ValueType::F64])),
+        "f32.reinterpret_i32" => Some(Cow::Borrowed(&[ValueType::I32])),
+        "f64.reinterpret_i64" => Some(Cow::Borrowed(&[ValueType::I64])),
 
         // ---- SIMD instruction type signatures ----
         // v128 bitwise: (v128, v128) -> v128
         "v128.and" | "v128.or" | "v128.xor" | "v128.andnot" => {
-            Some(vec![ValueType::V128, ValueType::V128])
+            Some(Cow::Borrowed(&[ValueType::V128, ValueType::V128]))
         }
         // v128 bitselect: (v128, v128, v128) -> v128
-        "v128.bitselect" => Some(vec![ValueType::V128, ValueType::V128, ValueType::V128]),
+        "v128.bitselect" => Some(Cow::Borrowed(&[
+            ValueType::V128,
+            ValueType::V128,
+            ValueType::V128,
+        ])),
         // v128 not: (v128) -> v128
-        "v128.not" => Some(vec![ValueType::V128]),
+        "v128.not" => Some(Cow::Borrowed(&[ValueType::V128])),
         // v128.any_true: (v128) -> i32
-        "v128.any_true" => Some(vec![ValueType::V128]),
+        "v128.any_true" => Some(Cow::Borrowed(&[ValueType::V128])),
 
         // SIMD lane instructions
         name if is_simd_instruction(name) => derive_simd_consumed_types(name),
@@ -1084,60 +1090,66 @@ fn derive_consumed_types_from_name(
         // SIMD lane load/store — consume address + v128 vector
         name if name.contains("_lane") && name.starts_with("v128.load") => {
             let addr_type = get_memory_address_type(node, symbols, source);
-            Some(vec![addr_type, ValueType::V128])
+            Some(Cow::Owned(vec![addr_type, ValueType::V128]))
         }
         name if name.contains("_lane") && name.starts_with("v128.store") => {
             let addr_type = get_memory_address_type(node, symbols, source);
-            Some(vec![addr_type, ValueType::V128])
+            Some(Cow::Owned(vec![addr_type, ValueType::V128]))
         }
 
         // Memory load — consume address (i32 for memory32, i64 for memory64)
         name if name.contains(".load") => {
             let addr_type = get_memory_address_type(node, symbols, source);
-            Some(vec![addr_type])
+            Some(Cow::Owned(vec![addr_type]))
         }
 
         // Memory store — consume address + value
         name if name.contains(".store") => {
             let addr_type = get_memory_address_type(node, symbols, source);
             let value_type = type_from_prefix(name).unwrap_or(ValueType::Unknown);
-            Some(vec![addr_type, value_type])
+            Some(Cow::Owned(vec![addr_type, value_type]))
         }
 
         // Memory size — no operands
-        "memory.size" => Some(vec![]),
+        "memory.size" => Some(Cow::Borrowed(&[])),
         // Memory grow — consume delta (i32 for memory32, i64 for memory64)
         "memory.grow" => {
             let addr_type = get_memory_address_type(node, symbols, source);
-            Some(vec![addr_type])
+            Some(Cow::Owned(vec![addr_type]))
         }
 
         // Reference instructions
-        "ref.null" => Some(vec![]),
-        "ref.func" => Some(vec![]),
-        "ref.is_null" => Some(vec![ValueType::Unknown]), // any ref
+        "ref.null" => Some(Cow::Borrowed(&[])),
+        "ref.func" => Some(Cow::Borrowed(&[])),
+        "ref.is_null" => Some(Cow::Borrowed(&[ValueType::Unknown])), // any ref
         // ref.as_non_null handled specially in process_instruction
-        "ref.eq" => Some(vec![ValueType::Eqref, ValueType::Eqref]),
+        "ref.eq" => Some(Cow::Borrowed(&[ValueType::Eqref, ValueType::Eqref])),
 
         // GC instructions
-        "ref.i31" => Some(vec![ValueType::I32]),
-        "i31.get_s" | "i31.get_u" => Some(vec![ValueType::I31ref]),
-        "any.convert_extern" => Some(vec![ValueType::Externref]),
-        "extern.convert_any" => Some(vec![ValueType::Anyref]),
+        "ref.i31" => Some(Cow::Borrowed(&[ValueType::I32])),
+        "i31.get_s" | "i31.get_u" => Some(Cow::Borrowed(&[ValueType::I31ref])),
+        "any.convert_extern" => Some(Cow::Borrowed(&[ValueType::Externref])),
+        "extern.convert_any" => Some(Cow::Borrowed(&[ValueType::Anyref])),
 
         // Struct operations
-        "struct.get" | "struct.get_s" | "struct.get_u" => Some(vec![ValueType::Unknown]), // structref
-        "struct.set" => Some(vec![ValueType::Unknown, ValueType::Unknown]), // structref + value
-        "struct.new_default" => Some(vec![]),
+        "struct.get" | "struct.get_s" | "struct.get_u" => {
+            Some(Cow::Borrowed(&[ValueType::Unknown]))
+        } // structref
+        "struct.set" => Some(Cow::Borrowed(&[ValueType::Unknown, ValueType::Unknown])), // structref + value
+        "struct.new_default" => Some(Cow::Borrowed(&[])),
 
         // Array operations
-        "array.new" => Some(vec![ValueType::Unknown, ValueType::I32]), // value, length
-        "array.new_default" => Some(vec![ValueType::I32]),             // length
+        "array.new" => Some(Cow::Borrowed(&[ValueType::Unknown, ValueType::I32])), // value, length
+        "array.new_default" => Some(Cow::Borrowed(&[ValueType::I32])),             // length
         "array.get" | "array.get_s" | "array.get_u" => {
-            Some(vec![ValueType::Unknown, ValueType::I32])
+            Some(Cow::Borrowed(&[ValueType::Unknown, ValueType::I32]))
         } // arrayref, index
-        "array.set" => Some(vec![ValueType::Unknown, ValueType::I32, ValueType::Unknown]), // arrayref, index, value
-        "array.len" => Some(vec![ValueType::Unknown]), // arrayref
+        "array.set" => Some(Cow::Borrowed(&[
+            ValueType::Unknown,
+            ValueType::I32,
+            ValueType::Unknown,
+        ])), // arrayref, index, value
+        "array.len" => Some(Cow::Borrowed(&[ValueType::Unknown])),                 // arrayref
         "array.fill" => {
             // arrayref, i32 offset, value, i32 length
             // Resolve element type from the type index to type-check the value operand
@@ -1149,20 +1161,20 @@ fn derive_consumed_types_from_name(
                     _ => None,
                 })
                 .unwrap_or(ValueType::Unknown);
-            Some(vec![
+            Some(Cow::Owned(vec![
                 ValueType::Unknown,
                 ValueType::I32,
                 val_ty,
                 ValueType::I32,
-            ])
+            ]))
         }
-        "array.copy" => Some(vec![
+        "array.copy" => Some(Cow::Borrowed(&[
             ValueType::Unknown,
             ValueType::I32,
             ValueType::Unknown,
             ValueType::I32,
             ValueType::I32,
-        ]),
+        ])),
         "array.new_fixed" => {
             // array.new_fixed $type N: consumes N elements of the array's element type
             let elem_ty = resolve_first_type_index(node, symbols, source)
@@ -1174,18 +1186,20 @@ fn derive_consumed_types_from_name(
                 })
                 .unwrap_or(ValueType::Unknown);
             let count = get_array_new_fixed_count(node, source);
-            Some(vec![elem_ty; count])
+            Some(Cow::Owned(vec![elem_ty; count]))
         }
-        "array.new_data" | "array.new_elem" => Some(vec![ValueType::I32, ValueType::I32]), // offset, length
-        "array.init_data" | "array.init_elem" => Some(vec![
+        "array.new_data" | "array.new_elem" => {
+            Some(Cow::Borrowed(&[ValueType::I32, ValueType::I32]))
+        } // offset, length
+        "array.init_data" | "array.init_elem" => Some(Cow::Borrowed(&[
             ValueType::Unknown,
             ValueType::I32,
             ValueType::I32,
             ValueType::I32,
-        ]),
+        ])),
 
         // Ref test/cast
-        "ref.test" | "ref.cast" | "ref.cast_null" => Some(vec![ValueType::Unknown]),
+        "ref.test" | "ref.cast" | "ref.cast_null" => Some(Cow::Borrowed(&[ValueType::Unknown])),
         // br_on_cast/br_on_cast_fail handled as branch instructions above
 
         // Exceptions
@@ -1196,48 +1210,48 @@ fn derive_consumed_types_from_name(
                     .get_tag_by_name(tag_ref)
                     .or_else(|| parse_wat_nat(tag_ref).and_then(|i| symbols.tags.get(i as usize)));
                 if let Some(tag) = tag {
-                    return Some(tag.params.clone());
+                    return Some(Cow::Owned(tag.params.clone()));
                 }
             }
-            Some(vec![])
+            Some(Cow::Borrowed(&[]))
         }
-        "throw_ref" => Some(vec![ValueType::Unknown]), // exnref
+        "throw_ref" => Some(Cow::Borrowed(&[ValueType::Unknown])), // exnref
 
         // Bulk memory — addresses are i32/i64 depending on memory type
         "memory.copy" => {
             let addr_type = get_memory_address_type(node, symbols, source);
-            Some(vec![addr_type, addr_type, addr_type])
+            Some(Cow::Owned(vec![addr_type, addr_type, addr_type]))
         }
         "memory.fill" => {
             let addr_type = get_memory_address_type(node, symbols, source);
-            Some(vec![addr_type, ValueType::I32, addr_type])
+            Some(Cow::Owned(vec![addr_type, ValueType::I32, addr_type]))
         }
         "memory.init" => {
             let addr_type = get_memory_address_type(node, symbols, source);
-            Some(vec![addr_type, ValueType::I32, ValueType::I32])
+            Some(Cow::Owned(vec![addr_type, ValueType::I32, ValueType::I32]))
         }
-        "data.drop" | "elem.drop" => Some(vec![]),
+        "data.drop" | "elem.drop" => Some(Cow::Borrowed(&[])),
 
         // Table operations — resolve element type and index type from symbol table
         "table.get" => {
             let idx_type = get_table_index_type(node, symbols, source);
-            Some(vec![idx_type])
+            Some(Cow::Owned(vec![idx_type]))
         }
         "table.set" => {
             let idx_type = get_table_index_type(node, symbols, source);
             let elem_type = get_table_elem_type(node, symbols, source);
-            Some(vec![idx_type, elem_type])
+            Some(Cow::Owned(vec![idx_type, elem_type]))
         }
-        "table.size" => Some(vec![]),
+        "table.size" => Some(Cow::Borrowed(&[])),
         "table.grow" => {
             let idx_type = get_table_index_type(node, symbols, source);
             let elem_type = get_table_elem_type(node, symbols, source);
-            Some(vec![elem_type, idx_type])
+            Some(Cow::Owned(vec![elem_type, idx_type]))
         }
         "table.fill" => {
             let idx_type = get_table_index_type(node, symbols, source);
             let elem_type = get_table_elem_type(node, symbols, source);
-            Some(vec![idx_type, elem_type, idx_type])
+            Some(Cow::Owned(vec![idx_type, elem_type, idx_type]))
         }
         "table.copy" => {
             // table.copy $dst $src: (d:dst_addr, s:src_addr, n:min(dst_addr, src_addr))
@@ -1248,7 +1262,7 @@ fn derive_consumed_types_from_name(
             } else {
                 ValueType::I32
             };
-            Some(vec![dst_type, src_type, n_type])
+            Some(Cow::Owned(vec![dst_type, src_type, n_type]))
         }
         "table.init" => {
             // table.init $table $elem: (d:table_addr, s:i32, n:i32)
@@ -1262,24 +1276,32 @@ fn derive_consumed_types_from_name(
                     }
                 })
                 .unwrap_or(ValueType::I32);
-            Some(vec![addr_type, ValueType::I32, ValueType::I32])
+            Some(Cow::Owned(vec![addr_type, ValueType::I32, ValueType::I32]))
         }
 
         // Atomic fence — no operands
-        "atomic.fence" => Some(vec![]),
+        "atomic.fence" => Some(Cow::Borrowed(&[])),
 
         // Wait/notify
-        "memory.atomic.wait32" => Some(vec![ValueType::I32, ValueType::I32, ValueType::I64]),
-        "memory.atomic.wait64" => Some(vec![ValueType::I32, ValueType::I64, ValueType::I64]),
-        "memory.atomic.notify" => Some(vec![ValueType::I32, ValueType::I32]),
+        "memory.atomic.wait32" => Some(Cow::Borrowed(&[
+            ValueType::I32,
+            ValueType::I32,
+            ValueType::I64,
+        ])),
+        "memory.atomic.wait64" => Some(Cow::Borrowed(&[
+            ValueType::I32,
+            ValueType::I64,
+            ValueType::I64,
+        ])),
+        "memory.atomic.notify" => Some(Cow::Borrowed(&[ValueType::I32, ValueType::I32])),
 
         // Atomic RMW — address (i32) + value (prefix type)
         name if name.contains(".atomic.rmw") => {
             if let Some(ty) = type_from_prefix(name) {
                 if name.contains("cmpxchg") {
-                    Some(vec![ValueType::I32, ty, ty]) // addr + expected + replacement
+                    Some(Cow::Owned(vec![ValueType::I32, ty, ty])) // addr + expected + replacement
                 } else {
-                    Some(vec![ValueType::I32, ty]) // addr + value
+                    Some(Cow::Owned(vec![ValueType::I32, ty])) // addr + value
                 }
             } else {
                 None
@@ -1291,7 +1313,7 @@ fn derive_consumed_types_from_name(
         // Scalar binary operations — 2 operands of prefix type
         name if is_binary_scalar(name) => {
             if let Some(ty) = type_from_prefix(name) {
-                Some(vec![ty, ty])
+                Some(Cow::Owned(vec![ty, ty]))
             } else {
                 None
             }
@@ -1300,7 +1322,7 @@ fn derive_consumed_types_from_name(
         // Scalar unary operations — 1 operand of prefix type
         name if is_unary_scalar(name) => {
             if let Some(ty) = type_from_prefix(name) {
-                Some(vec![ty])
+                Some(Cow::Owned(vec![ty]))
             } else {
                 None
             }
@@ -1468,12 +1490,7 @@ fn get_dynamic_operand_count(
     match instr_name {
         "call" | "return_call" => {
             if let Some(func_ref) = get_index_from_node(node, source) {
-                let func = symbols.get_function_by_name(func_ref).or_else(|| {
-                    func_ref
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|idx| symbols.get_function_by_index(idx))
-                });
+                let func = symbols.resolve_function(func_ref);
                 if let Some(f) = func {
                     return f.parameters.len();
                 }
@@ -1482,7 +1499,7 @@ fn get_dynamic_operand_count(
         }
         "call_ref" | "return_call_ref" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                if let Some(td) = symbols.resolve_type(type_ref) {
                     if let TypeKind::Func { params, .. } = &td.kind {
                         return params.len() + 1;
                     }
@@ -1492,7 +1509,7 @@ fn get_dynamic_operand_count(
         }
         "call_indirect" | "return_call_indirect" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                if let Some(td) = symbols.resolve_type(type_ref) {
                     if let TypeKind::Func { params, .. } = &td.kind {
                         return params.len() + 1;
                     }
@@ -1502,7 +1519,7 @@ fn get_dynamic_operand_count(
         }
         "struct.new" => {
             if let Some(type_ref) = get_index_from_node(node, source) {
-                if let Some(td) = resolve_type_ref(type_ref, symbols) {
+                if let Some(td) = symbols.resolve_type(type_ref) {
                     if let TypeKind::Struct { fields } = &td.kind {
                         return fields.len();
                     }
@@ -1513,12 +1530,7 @@ fn get_dynamic_operand_count(
         "array.new_fixed" => get_array_new_fixed_count(node, source),
         "throw" => {
             if let Some(tag_ref) = get_index_from_node(node, source) {
-                let tag = symbols.get_tag_by_name(tag_ref).or_else(|| {
-                    tag_ref
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|idx| symbols.get_tag_by_index(idx))
-                });
+                let tag = symbols.resolve_tag(tag_ref);
                 if let Some(t) = tag {
                     return t.params.len();
                 }
@@ -1894,12 +1906,7 @@ fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) ->
 /// Get result types for a call instruction
 fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(func_ref) = get_index_from_node(node, source) {
-        let func = symbols.get_function_by_name(func_ref).or_else(|| {
-            func_ref
-                .parse::<usize>()
-                .ok()
-                .and_then(|idx| symbols.get_function_by_index(idx))
-        });
+        let func = symbols.resolve_function(func_ref);
         if let Some(f) = func {
             return f.results.clone();
         }
@@ -1910,7 +1917,7 @@ fn get_call_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Ve
 /// Get result types for a call_ref instruction
 fn get_call_ref_result_types(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
     if let Some(type_ref) = get_index_from_node(node, source) {
-        if let Some(td) = resolve_type_ref(type_ref, symbols) {
+        if let Some(td) = symbols.resolve_type(type_ref) {
             if let TypeKind::Func { results, .. } = &td.kind {
                 return results.clone();
             }
@@ -1942,7 +1949,7 @@ fn resolve_call_indirect_type<'a>(
     }
     // No type_use found — try first index as a type reference (single-table mode)
     if let Some(idx_text) = first_index {
-        return resolve_type_ref(idx_text, symbols);
+        return symbols.resolve_type(idx_text);
     }
     None
 }
@@ -2589,12 +2596,7 @@ fn get_expr1_result_types(expr1: &Node, source: &str, symbols: &SymbolTable) -> 
                 }
             }
             if let Some(func_ref) = get_index_from_expr1_call(expr1, source) {
-                let func = symbols.get_function_by_name(func_ref).or_else(|| {
-                    func_ref
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|idx| symbols.get_function_by_index(idx))
-                });
+                let func = symbols.resolve_function(func_ref);
                 if let Some(f) = func {
                     return f.results.clone();
                 }
@@ -2632,13 +2634,7 @@ fn resolve_block_type_use<'a>(
         if kind == "type_use" {
             return resolve_type_use_node(&child, source, symbols);
         }
-        if kind == "block_block"
-            || kind == "block_loop"
-            || kind == "if_block"
-            || kind == "block_if"
-            || kind == "block_try_table"
-            || kind == "block_try"
-        {
+        if is_inner_block_kind(kind) {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
                 node_kind!(inner_kind = inner_child);
@@ -2650,16 +2646,6 @@ fn resolve_block_type_use<'a>(
         }
     }
     None
-}
-
-/// Resolve a type reference (name or numeric index) to a TypeDef.
-fn resolve_type_ref<'a>(type_ref: &str, symbols: &'a SymbolTable) -> Option<&'a TypeDef> {
-    symbols.get_type_by_name(type_ref).or_else(|| {
-        type_ref
-            .parse::<usize>()
-            .ok()
-            .and_then(|idx| symbols.get_type_by_index(idx))
-    })
 }
 
 /// Resolve a type_use node to a TypeDef via the symbol table.
@@ -2745,13 +2731,7 @@ fn get_block_result_types(
         if kind == "block_type" {
             return parse_result_types(&child, source, symbols);
         }
-        if kind == "block_block"
-            || kind == "block_loop"
-            || kind == "if_block"
-            || kind == "block_if"
-            || kind == "block_try_table"
-            || kind == "block_try"
-        {
+        if is_inner_block_kind(kind) {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
                 node_kind!(inner_kind = inner_child);
@@ -2786,13 +2766,7 @@ fn get_block_param_types(block_node: &Node, source: &str, symbols: &SymbolTable)
             has_explicit_params = true;
             types.extend(parse_func_type_results(&child, source, Some(symbols)));
         }
-        if kind == "block_block"
-            || kind == "block_loop"
-            || kind == "if_block"
-            || kind == "block_if"
-            || kind == "block_try_table"
-            || kind == "block_try"
-        {
+        if is_inner_block_kind(kind) {
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
                 node_kind!(inner_kind = inner_child);
@@ -3111,23 +3085,13 @@ fn apply_nonnull_to_callee_results(
 ) -> Vec<ValueType> {
     // Find the callee's type definition
     let type_def = match instr_name {
-        "return_call_ref" => get_index_from_node(node, source).and_then(|type_ref| {
-            symbols.get_type_by_name(type_ref).or_else(|| {
-                type_ref
-                    .parse::<usize>()
-                    .ok()
-                    .and_then(|idx| symbols.get_type_by_index(idx))
-            })
-        }),
+        "return_call_ref" => {
+            get_index_from_node(node, source).and_then(|type_ref| symbols.resolve_type(type_ref))
+        }
         "return_call" => {
             // For return_call, get the function's type via its type_index
             get_index_from_node(node, source).and_then(|func_ref| {
-                let func = symbols.get_function_by_name(func_ref).or_else(|| {
-                    func_ref
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|idx| symbols.get_function_by_index(idx))
-                })?;
+                let func = symbols.resolve_function(func_ref)?;
                 func.type_index
                     .and_then(|tidx| symbols.get_type_by_index(tidx))
             })

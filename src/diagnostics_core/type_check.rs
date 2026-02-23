@@ -17,7 +17,7 @@ use crate::ts_facade::Node;
 
 /// What kind of control frame this is. Affects label_types resolution.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CtrlOpcode {
+pub(super) enum CtrlOpcode {
     Function,
     Block,
     Loop,
@@ -27,35 +27,35 @@ pub enum CtrlOpcode {
 
 /// A control frame on the control stack, per spec §3.3 appendix.
 #[derive(Debug, Clone)]
-pub struct CtrlFrame {
-    pub opcode: CtrlOpcode,
+pub(super) struct CtrlFrame {
+    pub(super) opcode: CtrlOpcode,
     /// Block parameter types (consumed from outer stack on entry)
-    pub start_types: Vec<ValueType>,
+    pub(super) start_types: Vec<ValueType>,
     /// Block result types (left on stack on exit)
-    pub end_types: Vec<ValueType>,
+    pub(super) end_types: Vec<ValueType>,
     /// Value stack height when this frame was entered
-    pub height: usize,
+    pub(super) height: usize,
     /// True after unreachable/br/return — polymorphic stack bottom
-    pub unreachable: bool,
+    pub(super) unreachable: bool,
     /// Optional label name (e.g., "$loop1") for named branch resolution
-    pub label: Option<String>,
+    pub(super) label: Option<String>,
 }
 
 /// Core type checker state machine implementing Wasm spec validation.
 #[derive(Default)]
-pub struct TypeChecker {
+pub(super) struct TypeChecker {
     /// Value stack of types
     val_stack: Vec<ValueType>,
     /// Control frame stack
     ctrl_stack: Vec<CtrlFrame>,
     /// Collected diagnostics
-    pub diagnostics: Vec<Diagnostic>,
+    pub(super) diagnostics: Vec<Diagnostic>,
 }
 
 /// Check if two types are compatible for validation purposes.
 /// Unknown matches anything (polymorphic). Otherwise types must match exactly,
 /// with basic reference subtyping.
-pub fn types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
+pub(super) fn types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
     if *actual == ValueType::Unknown || *expected == ValueType::Unknown {
         return true;
     }
@@ -127,7 +127,7 @@ fn is_ref_subtype(sub: &ValueType, sup: &ValueType) -> bool {
 /// This extends `types_compatible()` with knowledge of concrete type definitions,
 /// enabling validation of `Ref(n)` / `RefNull(n)` against abstract supertypes
 /// (structref, arrayref, eqref, anyref) and concrete parent chains.
-pub fn types_compatible_with_symbols(
+pub(super) fn types_compatible_with_symbols(
     actual: &ValueType,
     expected: &ValueType,
     symbols: &SymbolTable,
@@ -502,19 +502,19 @@ fn resolve_type_ref(ref_str: &str, symbols: &SymbolTable) -> Option<usize> {
 
 impl TypeChecker {
     /// Create a new TypeChecker.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self::default()
     }
 
     /// Push a value type onto the value stack.
-    pub fn push_val(&mut self, ty: ValueType) {
+    pub(super) fn push_val(&mut self, ty: ValueType) {
         self.val_stack.push(ty);
     }
 
     /// Pop a value from the value stack.
     /// If stack is at or below frame height AND frame is unreachable, returns Unknown.
     /// If stack underflows (below frame height, not unreachable), returns None.
-    pub fn pop_val(&mut self) -> Option<ValueType> {
+    pub(super) fn pop_val(&mut self) -> Option<ValueType> {
         let height = self.current_frame_height();
         if self.val_stack.len() == height {
             if self.is_current_unreachable() {
@@ -528,7 +528,7 @@ impl TypeChecker {
     /// Pop a value and check it matches the expected type.
     /// Returns the actual type popped, or None on underflow.
     /// Emits diagnostic on type mismatch or underflow.
-    pub fn pop_expect(&mut self, expected: &ValueType, node: &Node) -> Option<ValueType> {
+    pub(super) fn pop_expect(&mut self, expected: &ValueType, node: &Node) -> Option<ValueType> {
         let actual = self.pop_val();
         match actual {
             Some(ref ty) => {
@@ -562,7 +562,7 @@ impl TypeChecker {
     /// Pop a value and check it matches, without emitting diagnostics (caller handles errors).
     /// Returns (actual_type, matched). matched is false if type mismatch.
     /// Push multiple values onto the stack.
-    pub fn push_vals(&mut self, types: &[ValueType]) {
+    pub(super) fn push_vals(&mut self, types: &[ValueType]) {
         self.val_stack.extend_from_slice(types);
     }
 
@@ -570,14 +570,14 @@ impl TypeChecker {
     /// Returns true if all popped successfully and matched.
     /// Does NOT emit diagnostics — callers should use `pop_vals_for_instr` for
     /// instruction-level checks with proper diagnostic messages.
-    pub fn pop_vals(&mut self, expected: &[ValueType], node: &Node) -> bool {
+    pub(super) fn pop_vals(&mut self, expected: &[ValueType], node: &Node) -> bool {
         self.pop_vals_inner(expected, node, None)
     }
 
     /// Pop multiple values for a named instruction.
     /// On underflow, emits a "Stack underflow" diagnostic with instruction name.
     /// On type mismatch, emits a "type mismatch" diagnostic.
-    pub fn pop_vals_for_instr(
+    pub(super) fn pop_vals_for_instr(
         &mut self,
         expected: &[ValueType],
         node: &Node,
@@ -656,7 +656,7 @@ impl TypeChecker {
     }
 
     /// Enter a new control frame (block, loop, if, function).
-    pub fn push_ctrl(
+    pub(super) fn push_ctrl(
         &mut self,
         opcode: CtrlOpcode,
         start_types: Vec<ValueType>,
@@ -666,7 +666,7 @@ impl TypeChecker {
     }
 
     /// Enter a new control frame with an optional label name for named branch resolution.
-    pub fn push_ctrl_labeled(
+    pub(super) fn push_ctrl_labeled(
         &mut self,
         opcode: CtrlOpcode,
         start_types: Vec<ValueType>,
@@ -688,7 +688,7 @@ impl TypeChecker {
 
     /// Exit a control frame. Validates that end_types match the stack.
     /// Returns the popped frame, or None if ctrl_stack is empty.
-    pub fn pop_ctrl(&mut self, node: &Node) {
+    pub(super) fn pop_ctrl(&mut self, node: &Node) {
         if self.ctrl_stack.is_empty() {
             return;
         }
@@ -729,7 +729,7 @@ impl TypeChecker {
     /// Handle the else transition in an if block.
     /// Validates the then branch produced end_types, resets stack to frame height,
     /// and pushes start_types for the else branch.
-    pub fn else_transition(&mut self, node: &Node) {
+    pub(super) fn else_transition(&mut self, node: &Node) {
         if let Some(frame) = self.ctrl_stack.last() {
             let end_types = frame.end_types.clone();
             let start_types = frame.start_types.clone();
@@ -769,7 +769,7 @@ impl TypeChecker {
 
     /// Mark the current frame as unreachable.
     /// Truncates val_stack to frame height (polymorphic bottom).
-    pub fn mark_unreachable(&mut self) {
+    pub(super) fn mark_unreachable(&mut self) {
         if let Some(frame) = self.ctrl_stack.last_mut() {
             self.val_stack.truncate(frame.height);
             frame.unreachable = true;
@@ -777,7 +777,7 @@ impl TypeChecker {
     }
 
     /// Check if the current frame is in an unreachable state (polymorphic stack).
-    pub fn is_unreachable(&self) -> bool {
+    pub(super) fn is_unreachable(&self) -> bool {
         self.ctrl_stack
             .last()
             .map(|f| f.unreachable)
@@ -787,7 +787,7 @@ impl TypeChecker {
     /// Get the label types for a frame at the given depth.
     /// For loops, label types are start_types (br restarts with params).
     /// For everything else, label types are end_types.
-    pub fn label_types(&self, depth: usize) -> Option<&[ValueType]> {
+    pub(super) fn label_types(&self, depth: usize) -> Option<&[ValueType]> {
         let idx = self.ctrl_stack.len().checked_sub(1 + depth)?;
         let frame = &self.ctrl_stack[idx];
         Some(match frame.opcode {
@@ -798,7 +798,7 @@ impl TypeChecker {
 
     /// Look up label types at depth, copy them, and pop them for the given instruction.
     /// Returns the label types if found (owned, for callers that need to push them back).
-    pub fn pop_label_types_for_instr(
+    pub(super) fn pop_label_types_for_instr(
         &mut self,
         depth: usize,
         node: &Node,
@@ -811,7 +811,7 @@ impl TypeChecker {
 
     /// Get an owned copy of label types at the given depth.
     /// Useful when the caller needs both the types and a mutable borrow on self.
-    pub fn label_types_vec(&self, depth: usize) -> Option<Vec<ValueType>> {
+    pub(super) fn label_types_vec(&self, depth: usize) -> Option<Vec<ValueType>> {
         self.label_types(depth).map(|t| t.to_vec())
     }
 
@@ -830,7 +830,7 @@ impl TypeChecker {
 
     /// Resolve a named label (e.g., "$loop1") to a control stack depth.
     /// Returns the depth (0 = current frame) if found.
-    pub fn resolve_label_depth(&self, label: &str) -> Option<usize> {
+    pub(super) fn resolve_label_depth(&self, label: &str) -> Option<usize> {
         for (i, frame) in self.ctrl_stack.iter().rev().enumerate() {
             if let Some(ref name) = frame.label {
                 if name == label {
@@ -843,7 +843,7 @@ impl TypeChecker {
 
     /// Peek at the Nth value from the top of the stack (0 = top).
     /// Returns None if the stack doesn't have enough values.
-    pub fn peek(&self, n: usize) -> Option<&ValueType> {
+    pub(super) fn peek(&self, n: usize) -> Option<&ValueType> {
         let len = self.val_stack.len();
         let height = self.current_frame_height();
         if len > height + n {
@@ -854,20 +854,20 @@ impl TypeChecker {
     }
 
     /// Get the current control stack depth.
-    pub fn ctrl_depth(&self) -> usize {
+    pub(super) fn ctrl_depth(&self) -> usize {
         self.ctrl_stack.len()
     }
 
     /// Pop the function's return types for a `return` instruction.
     /// Copies end_types from the function frame and pops them from the stack.
-    pub fn pop_function_return_types(&mut self, node: &Node, instr_name: &str) {
+    pub(super) fn pop_function_return_types(&mut self, node: &Node, instr_name: &str) {
         if let Some(end_types) = self.ctrl_stack.first().map(|f| f.end_types.clone()) {
             self.pop_vals_for_instr(&end_types, node, instr_name);
         }
     }
 
     /// Take all collected diagnostics out of the checker.
-    pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
+    pub(super) fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
         std::mem::take(&mut self.diagnostics)
     }
 }

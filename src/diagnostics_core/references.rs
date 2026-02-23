@@ -19,12 +19,12 @@ use crate::ts_facade::Node;
 /// Check references in a catch_clause node (try_table syntax)
 /// For (catch $tag $label) and (catch_ref $tag $label): first index is tag, second is label
 /// For (catch_all $label) and (catch_all_ref $label): single index is label
-pub fn check_catch_clause_references(
+pub(crate) fn check_catch_clause_references(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let text = &source[node.byte_range()];
 
     // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
@@ -49,30 +49,27 @@ pub fn check_catch_clause_references(
         } else {
             InstructionContext::Branch
         };
-        diagnostics.extend(find_undefined_identifiers(
-            index_node, source, symbols, &context,
-        ));
+        find_undefined_identifiers(index_node, source, symbols, &context, diagnostics);
     }
-
-    diagnostics
 }
 
 /// Check the first index child of a node against the given instruction context.
 /// Used for nodes that contain a single index reference (start, try_catch, try_delegate).
-pub fn check_first_index_reference(
+pub(crate) fn check_first_index_reference(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
     context: &InstructionContext,
-) -> Vec<Diagnostic> {
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
         if kind == "index" {
-            return find_undefined_identifiers(&child, source, symbols, context);
+            find_undefined_identifiers(&child, source, symbols, context, diagnostics);
+            return;
         }
     }
-    vec![]
 }
 
 /// Find and validate only the first index identifier in a node
@@ -82,25 +79,23 @@ fn find_first_index_identifier(
     source: &str,
     symbols: &SymbolTable,
     context: &InstructionContext,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(kind = child);
 
         if kind == "index" {
             // Found the first index, check its identifier
-            diagnostics.extend(find_undefined_identifiers(&child, source, symbols, context));
-            return diagnostics; // Only check the first one
+            find_undefined_identifiers(&child, source, symbols, context, diagnostics);
+            return; // Only check the first one
         }
         // Recurse into instr_plain to find the index
         if kind == "instr_plain" {
-            return find_first_index_identifier(&child, source, symbols, context);
+            find_first_index_identifier(&child, source, symbols, context, diagnostics);
+            return;
         }
     }
-
-    diagnostics
 }
 
 /// Recursively find identifier nodes and check if they're defined
@@ -109,9 +104,8 @@ fn find_undefined_identifiers(
     source: &str,
     symbols: &SymbolTable,
     context: &InstructionContext,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     node_kind!(kind = node);
 
     if kind == "identifier" {
@@ -119,7 +113,7 @@ fn find_undefined_identifiers(
 
         // Only check identifiers that start with $
         if !raw_name.starts_with('$') {
-            return diagnostics;
+            return;
         }
 
         // Normalize quoted identifiers: $"fh" → $fh
@@ -205,7 +199,7 @@ fn find_undefined_identifiers(
             let diagnostic = create_undefined_reference_diagnostic(node, identifier_name, context);
             diagnostics.push(diagnostic);
         }
-        return diagnostics;
+        return;
     }
 
     // Check numeric indices (nat nodes inside index parents)
@@ -267,31 +261,30 @@ fn find_undefined_identifiers(
                 }
             }
         }
-        return diagnostics;
+        return;
     }
 
     // Don't recurse into nested expr nodes - they contain nested instructions
     // that will be checked separately with their own context
     if kind == "expr" {
-        return diagnostics;
+        return;
     }
 
     // Recursively check children (but not nested expressions)
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        diagnostics.extend(find_undefined_identifiers(&child, source, symbols, context));
+        find_undefined_identifiers(&child, source, symbols, context, diagnostics);
     }
-
-    diagnostics
 }
 
 /// Check if references in this instruction are defined
-pub fn check_references(
+pub(crate) fn check_references(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
     context: &InstructionContext,
-) -> Vec<Diagnostic> {
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let text = &source[node.byte_range()];
     let first_token = text.split_whitespace().next().unwrap_or("");
 
@@ -299,7 +292,8 @@ pub fn check_references(
     // The second index is a field reference which we don't validate yet
     if *context == InstructionContext::Type && STRUCT_OPS.contains(&first_token) {
         // Only validate the first index child
-        return find_first_index_identifier(node, source, symbols, context);
+        find_first_index_identifier(node, source, symbols, context, diagnostics);
+        return;
     }
 
     // Multi-index instructions: table.init / memory.init
@@ -312,42 +306,55 @@ pub fn check_references(
         } else {
             InstructionContext::Memory
         };
-        return check_init_instruction(node, source, symbols, context, &secondary);
+        check_init_instruction(node, source, symbols, context, &secondary, diagnostics);
+        return;
     }
 
     // memory.copy and table.copy take two indices of the same context (dest, src)
     if first_token == "memory.copy" || first_token == "table.copy" {
-        return check_multi_index_instruction(node, source, symbols, context, context);
+        check_multi_index_instruction(node, source, symbols, context, context, diagnostics);
+        return;
     }
 
     // array.new_data / array.init_data: first index is Type, second is Data
     if first_token == "array.new_data" || first_token == "array.init_data" {
-        return check_multi_index_instruction(
+        check_multi_index_instruction(
             node,
             source,
             symbols,
             &InstructionContext::Type,
             &InstructionContext::Data,
+            diagnostics,
         );
+        return;
     }
 
     // array.new_elem / array.init_elem: first index is Type, second is Elem
     if first_token == "array.new_elem" || first_token == "array.init_elem" {
-        return check_multi_index_instruction(
+        check_multi_index_instruction(
             node,
             source,
             symbols,
             &InstructionContext::Type,
             &InstructionContext::Elem,
+            diagnostics,
         );
+        return;
     }
 
     // br_on_cast / br_on_cast_fail: first index is Branch, rest are heap types (not validated)
     if first_token == "br_on_cast" || first_token == "br_on_cast_fail" {
-        return check_first_index_reference(node, source, symbols, &InstructionContext::Branch);
+        check_first_index_reference(
+            node,
+            source,
+            symbols,
+            &InstructionContext::Branch,
+            diagnostics,
+        );
+        return;
     }
 
-    find_undefined_identifiers(node, source, symbols, context)
+    find_undefined_identifiers(node, source, symbols, context, diagnostics);
 }
 
 /// Check table.init / memory.init where the index order depends on count:
@@ -359,14 +366,14 @@ fn check_init_instruction(
     symbols: &SymbolTable,
     primary_context: &InstructionContext,   // Elem or Data
     secondary_context: &InstructionContext, // Table or Memory
-) -> Vec<Diagnostic> {
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     // Count indices first
     let mut total_indices = 0usize;
     find_indices_recursive(node, &mut |_| {
         total_indices += 1;
     });
 
-    let mut diagnostics = Vec::new();
     let mut index_count = 0usize;
     find_indices_recursive(node, &mut |index_node| {
         let ctx = if total_indices == 1 {
@@ -379,11 +386,9 @@ fn check_init_instruction(
             // Full form: second is primary (elem/data)
             primary_context
         };
-        diagnostics.extend(find_undefined_identifiers(index_node, source, symbols, ctx));
+        find_undefined_identifiers(index_node, source, symbols, ctx, diagnostics);
         index_count += 1;
     });
-
-    diagnostics
 }
 
 /// Check a multi-index instruction where the first and second index have different contexts.
@@ -393,8 +398,8 @@ fn check_multi_index_instruction(
     symbols: &SymbolTable,
     first_context: &InstructionContext,
     second_context: &InstructionContext,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut index_count = 0;
 
     // Walk the node tree to find index nodes. They may be nested several
@@ -405,11 +410,9 @@ fn check_multi_index_instruction(
         } else {
             second_context
         };
-        diagnostics.extend(find_undefined_identifiers(index_node, source, symbols, ctx));
+        find_undefined_identifiers(index_node, source, symbols, ctx, diagnostics);
         index_count += 1;
     });
-
-    diagnostics
 }
 
 /// Recursively find all `index` nodes within instruction wrapper nodes.
@@ -462,11 +465,12 @@ fn create_undefined_reference_diagnostic(
 /// These are module-level constructs that reference symbols (functions, globals, tables,
 /// memories, tags) but aren't inside instructions, so the normal instruction-context
 /// checking doesn't cover them.
-pub fn check_module_level_references(
+pub(crate) fn check_module_level_references(
     node: &Node,
     source: &str,
     symbols: &SymbolTable,
-) -> Vec<Diagnostic> {
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     node_kind!(kind = node);
 
     let context = match &*kind {
@@ -483,7 +487,6 @@ pub fn check_module_level_references(
             // module_field_elem: in the abbreviated form `(elem (offset) $a $b)`, bare
             //   index nodes appear directly under module_field_elem without an elem_list.
             //   The first index child (before offset) is the elem segment's own name — skip it.
-            let mut diagnostics = Vec::new();
             let mut cursor = node.walk();
             let is_field = &*kind == "module_field_elem";
             let mut seen_offset = false;
@@ -505,16 +508,17 @@ pub fn check_module_level_references(
                     continue;
                 }
 
-                diagnostics.extend(find_undefined_identifiers(
+                find_undefined_identifiers(
                     &child,
                     source,
                     symbols,
                     &InstructionContext::Call,
-                ));
+                    diagnostics,
+                );
             }
-            return diagnostics;
+            return;
         }
-        _ => return vec![],
+        _ => return,
     };
 
     // For export descriptors and table_use/memory_use, find the index child
@@ -524,15 +528,14 @@ pub fn check_module_level_references(
         node_kind!(child_kind = child);
 
         if child_kind == "index" {
-            return find_undefined_identifiers(&child, source, symbols, &context);
+            find_undefined_identifiers(&child, source, symbols, &context, diagnostics);
+            return;
         }
     }
-
-    vec![]
 }
 
 /// Check if a node is nested inside another expr (meaning it can't use stack values)
-pub fn is_nested_in_expr(node: &Node) -> bool {
+pub(crate) fn is_nested_in_expr(node: &Node) -> bool {
     let mut current = node.parent();
     while let Some(parent) = current {
         node_kind!(kind = parent);

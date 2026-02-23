@@ -12,7 +12,7 @@ use tree_sitter::{Node, Tree};
 use crate::ts_facade::{Node, Tree};
 
 /// Provide diagnostics for syntax errors in the document.
-pub fn provide_tree_sitter_diagnostics(tree: &Tree, source: &str) -> Vec<Diagnostic> {
+pub(crate) fn provide_tree_sitter_diagnostics(tree: &Tree, source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     walk_tree_for_errors(tree.root_node(), source, &mut diagnostics);
     diagnostics
@@ -49,7 +49,7 @@ fn create_error_diagnostic(node: &Node, source: &str) -> Diagnostic {
         severity: DiagnosticSeverity::Error,
         message,
         code: None,
-        source: Some("wat-lsp".to_string()),
+        source: "wat-lsp",
     }
 }
 
@@ -59,7 +59,7 @@ fn create_missing_diagnostic(node: &Node) -> Diagnostic {
         severity: DiagnosticSeverity::Error,
         message: format!("Missing {}", node.kind()),
         code: None,
-        source: Some("wat-lsp".to_string()),
+        source: "wat-lsp",
     }
 }
 
