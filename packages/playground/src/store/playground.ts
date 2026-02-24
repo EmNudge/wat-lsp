@@ -2,12 +2,17 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { examples, getDefaultExample } from '../../examples';
 import init, { parseWat } from 'js-wasm-tools';
+import { extractWatTypes, generateHostCode } from '../codegen';
+import { runHostCode } from '../runner/hostRunner';
+import type { ConsoleLine } from '../runner/hostRunner';
 
 export interface OpenFile {
     id: string;
     filename: string;
     code: string;
     isDirty: boolean;
+    hostCode: string;
+    hostDirty: boolean;
 }
 
 export const usePlaygroundStore = defineStore('playground', () => {
@@ -24,6 +29,7 @@ export const usePlaygroundStore = defineStore('playground', () => {
     const wasmModule = ref<WebAssembly.Module | null>(null);
     const wasmInstance = ref<WebAssembly.Instance | null>(null);
     const isCompiling = ref(false);
+    const isRunning = ref(false);
     const recentlyUsedIds = ref<string[]>([]);
 
     let wasmToolsReady = false;
@@ -41,11 +47,14 @@ export const usePlaygroundStore = defineStore('playground', () => {
 
     // Initial load
     const defaultEx = getDefaultExample();
+    const defaultInfo = extractWatTypes(defaultEx.code);
     openFiles.value = [{
         id: defaultEx.id,
         filename: defaultEx.filename,
         code: defaultEx.code,
-        isDirty: false
+        isDirty: false,
+        hostCode: generateHostCode(defaultInfo, defaultEx.filename),
+        hostDirty: false
     }];
     activeFileId.value = defaultEx.id;
     recentlyUsedIds.value = [defaultEx.id];
@@ -71,6 +80,9 @@ export const usePlaygroundStore = defineStore('playground', () => {
 
         const example = examples.find(ex => ex.id === id);
         if (example) {
+            const info = extractWatTypes(example.code);
+            const hostCode = generateHostCode(info, example.filename);
+
             const current = currentFile.value;
             if (current && !current.isDirty) {
                 // Replace current unedited tab
@@ -80,7 +92,9 @@ export const usePlaygroundStore = defineStore('playground', () => {
                         id: example.id,
                         filename: example.filename,
                         code: example.code,
-                        isDirty: false
+                        isDirty: false,
+                        hostCode,
+                        hostDirty: false
                     };
                     activeFileId.value = id;
                     return;
@@ -92,7 +106,9 @@ export const usePlaygroundStore = defineStore('playground', () => {
                 id: example.id,
                 filename: example.filename,
                 code: example.code,
-                isDirty: false
+                isDirty: false,
+                hostCode,
+                hostDirty: false
             });
             activeFileId.value = id;
         }
@@ -129,6 +145,24 @@ export const usePlaygroundStore = defineStore('playground', () => {
     const moduleImports = ref<WebAssembly.ModuleImportDescriptor[]>([]);
     const moduleExports = ref<WebAssembly.ModuleExportDescriptor[]>([]);
 
+    function generateHostForFile(file: OpenFile) {
+        const info = extractWatTypes(file.code);
+        file.hostCode = generateHostCode(info, file.filename);
+        file.hostDirty = false;
+    }
+
+    function generateHost() {
+        if (!currentFile.value) return;
+        generateHostForFile(currentFile.value);
+    }
+
+    function updateHostCode(code: string) {
+        if (currentFile.value) {
+            currentFile.value.hostCode = code;
+            currentFile.value.hostDirty = true;
+        }
+    }
+
     async function compile() {
         if (!currentFile.value) return false;
         isCompiling.value = true;
@@ -147,12 +181,39 @@ export const usePlaygroundStore = defineStore('playground', () => {
             moduleImports.value = WebAssembly.Module.imports(compiledModule);
             moduleExports.value = WebAssembly.Module.exports(compiledModule);
 
+            // Auto-generate host code if not manually edited
+            if (!currentFile.value.hostDirty) {
+                generateHost();
+            }
+
             return true;
         } catch (e: any) {
             log(`Compilation failed: ${e.message}`, 'error');
             return false;
         } finally {
             isCompiling.value = false;
+        }
+    }
+
+    async function runHost() {
+        if (!wasmBytes.value || !currentFile.value?.hostCode) return;
+        isRunning.value = true;
+        log('Running host code...', 'info');
+
+        try {
+            const lines: ConsoleLine[] = await runHostCode(wasmBytes.value, currentFile.value.hostCode);
+            for (const line of lines) {
+                const msg = line.args.join(' ');
+                const typeMap: Record<string, string> = { log: 'log', info: 'info', warn: 'warn', error: 'error' };
+                log(msg, typeMap[line.level] ?? 'log');
+            }
+            if (lines.length === 0) {
+                log('Execution completed (no output)', 'info');
+            }
+        } catch (e: any) {
+            log(`Runtime error: ${e.message}`, 'error');
+        } finally {
+            isRunning.value = false;
         }
     }
 
@@ -180,13 +241,17 @@ export const usePlaygroundStore = defineStore('playground', () => {
         wasmModule,
         wasmInstance,
         isCompiling,
+        isRunning,
         recentlyUsedIds,
         log,
         clearConsole,
         openFile,
         closeFile,
         updateCode,
+        updateHostCode,
+        generateHost,
         compile,
+        runHost,
         setSymbols,
         setHoverInfo
     };

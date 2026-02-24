@@ -63,7 +63,13 @@ onBeforeUnmount(() => {
 async function initMonaco() {
   // Configure Monaco web workers to avoid fallback warning
   self.MonacoEnvironment = {
-    getWorker: function () {
+    getWorker: function (_workerId: string, label: string) {
+      if (label === 'typescript' || label === 'javascript') {
+        return new Worker(
+          new URL('monaco-editor/esm/vs/language/typescript/ts.worker.js', import.meta.url),
+          { type: 'module' }
+        );
+      }
       return new Worker(
         new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url),
         { type: 'module' }

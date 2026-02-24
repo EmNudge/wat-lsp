@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import Sidebar from './components/Sidebar.vue';
-import Editor from './components/Editor.vue';
+import SplitEditorLayout from './components/SplitEditorLayout.vue';
 import OutputPanel from './components/OutputPanel.vue';
 import { usePlaygroundStore } from './store/playground';
 
@@ -80,7 +80,7 @@ function stopHeightResize() {
       </div>
       <div class="content-section">
         <div class="editor-section">
-          <Editor />
+          <SplitEditorLayout />
           <div class="resize-handle vertical" @mousedown="startHeightResize"></div>
         </div>
         <div class="bottom-panel-section" :style="{ height: `${panelHeight}px` }">

@@ -57,7 +57,7 @@ test.describe('WAT LSP Playground', () => {
     await expect(editor).toBeVisible({ timeout: 10000 });
 
     // Verify some WAT code is loaded (the hello example)
-    const editorContent = page.locator('.view-lines');
+    const editorContent = page.locator('.editor-container .view-lines');
     await expect(editorContent).toContainText('module');
   });
 
@@ -92,8 +92,8 @@ test.describe('WAT LSP Playground', () => {
     // Verify it's selected
     await expect(invalidItem).toHaveClass(/selected/);
 
-    // Verify editor has some content
-    const editorContent = page.locator('.view-lines');
+    // Verify editor has some content (scope to WAT editor, not JS editor)
+    const editorContent = page.locator('.editor-container .view-lines');
     await expect(editorContent).toContainText('module');
   });
 
