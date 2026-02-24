@@ -318,4 +318,82 @@ describe('foldedToLinear', () => {
 )`);
     });
   });
+
+  describe('try_table', () => {
+    it('linearizes try_table as a block', () => {
+      const input = `(module
+  (tag $e (param i32))
+  (func (result i32)
+    (block $handler (result i32)
+      (try_table (result i32) (catch $e $handler)
+        (i32.const 42)
+        (throw $e (i32.const 1)))
+      (i32.const 0)))
+)`;
+      const output = foldedToLinear(input);
+      expect(output).toBe(`(module
+  (tag $e (param i32))
+  (func (result i32)
+    block $handler (result i32)
+      try_table (result i32) (catch $e $handler)
+        i32.const 42
+        i32.const 1
+        throw $e
+      end
+      i32.const 0
+    end $handler
+  )
+)`);
+    });
+
+    it('linearizes try_table with catch_all', () => {
+      const input = `(module
+  (func $may_throw)
+  (func
+    (block $fallback
+      (try_table (catch_all $fallback)
+        (call $may_throw))))
+)`;
+      const output = foldedToLinear(input);
+      expect(output).toBe(`(module
+  (func $may_throw)
+  (func
+    block $fallback
+      try_table (catch_all $fallback)
+        call $may_throw
+      end
+    end $fallback
+  )
+)`);
+    });
+  });
+
+  describe('if with comments between branches', () => {
+    it('preserves else when comment separates then and else', () => {
+      const input = `(module
+  (func (param $a i32) (param $b i32) (result i32)
+    (if (result i32) (i32.eqz (local.get $b))
+      (then (i32.const 0)) ;; zero case
+      (else (i32.div_s (local.get $a) (local.get $b)))))
+)`;
+      const output = foldedToLinear(input);
+      expect(output).toContain('else');
+      expect(output).toContain('i32.div_s');
+    });
+  });
+
+  describe('line comments in non-folded code', () => {
+    it('preserves code after line comments', () => {
+      const input = `(module
+  (func (param $a i32) (param $b i32) (result i32)
+    (i32.add
+      (local.get $a) ;; first operand
+      (local.get $b)))
+)`;
+      const output = foldedToLinear(input);
+      expect(output).toContain('local.get $a');
+      expect(output).toContain('local.get $b');
+      expect(output).toContain('i32.add');
+    });
+  });
 });

@@ -140,6 +140,11 @@ jobs:
           fi
           echo "All examples validated correctly"
 
+      - name: Validate linearized examples
+        shell: bash
+        run: |
+          npx tsx scripts/check-linearized-examples.ts
+
   validate-wasm-tools:
     name: Validate Examples (wasm-tools)
     needs: changes

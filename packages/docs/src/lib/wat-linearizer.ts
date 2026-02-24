@@ -256,7 +256,17 @@ function exprToString(expr: SExpr): string {
   if (expr.type === 'string') return expr.value;
   if (expr.type === 'comment') return expr.value;
   if (expr.type === 'list') {
-    return '(' + expr.children.map(exprToString).join(' ') + ')';
+    const parts = expr.children.map(exprToString);
+    let result = '(';
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) {
+        // After a line comment, use newline so the comment doesn't eat subsequent code
+        const prev = expr.children[i - 1];
+        result += prev.type === 'comment' && !prev.block ? '\n' : ' ';
+      }
+      result += parts[i];
+    }
+    return result + ')';
   }
   return '';
 }
@@ -303,6 +313,12 @@ function linearizeBody(exprs: SExpr[], baseIndent: number): LinearLine[] {
     // Control: if
     if (head === 'if') {
       linearizeIf(expr, baseIndent, lines);
+      continue;
+    }
+
+    // Control: try_table
+    if (head === 'try_table') {
+      linearizeTryTable(expr, baseIndent, lines);
       continue;
     }
 
@@ -405,6 +421,15 @@ function linearizeIf(expr: SExpr & { type: 'list' }, indent: number, lines: Line
     idx++;
   }
 
+  // Skip comments between then and else
+  while (idx < children.length && children[idx].type === 'comment') {
+    lines.push({
+      text: (children[idx] as { type: 'comment'; value: string }).value,
+      indent: indent + 2,
+    });
+    idx++;
+  }
+
   // Else branch
   const maybeElse = children[idx];
   if (maybeElse && maybeElse.type === 'list' && maybeElse.head === 'else') {
@@ -414,6 +439,45 @@ function linearizeIf(expr: SExpr & { type: 'list' }, indent: number, lines: Line
     lines.push(...elseLines);
     idx++;
   }
+
+  lines.push({ text: label ? `end ${label}` : 'end', indent });
+}
+
+const CATCH_HEADS = new Set(['catch', 'catch_ref', 'catch_all', 'catch_all_ref']);
+
+function linearizeTryTable(expr: SExpr & { type: 'list' }, indent: number, lines: LinearLine[]) {
+  const children = expr.children;
+  // children[0] = 'try_table' atom
+  const headerParts: string[] = ['try_table'];
+  let bodyStart = 1;
+  let label: string | undefined;
+
+  for (let i = 1; i < children.length; i++) {
+    const c = children[i];
+    if (c.type === 'atom' && c.value.startsWith('$')) {
+      headerParts.push(c.value);
+      label = c.value;
+      bodyStart = i + 1;
+    } else if (
+      c.type === 'list' &&
+      (c.head === 'result' || c.head === 'type' || c.head === 'param')
+    ) {
+      headerParts.push(exprToString(c));
+      bodyStart = i + 1;
+    } else if (c.type === 'list' && c.head && CATCH_HEADS.has(c.head)) {
+      headerParts.push(exprToString(c));
+      bodyStart = i + 1;
+    } else {
+      bodyStart = i;
+      break;
+    }
+  }
+
+  lines.push({ text: headerParts.join(' '), indent });
+
+  const bodyExprs = children.slice(bodyStart);
+  const bodyLines = linearizeBody(bodyExprs, indent + 2);
+  lines.push(...bodyLines);
 
   lines.push({ text: label ? `end ${label}` : 'end', indent });
 }
