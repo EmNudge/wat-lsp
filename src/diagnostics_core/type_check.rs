@@ -566,14 +566,6 @@ impl TypeChecker {
         self.val_stack.extend_from_slice(types);
     }
 
-    /// Pop multiple values and check types (in reverse order, as per spec).
-    /// Returns true if all popped successfully and matched.
-    /// Does NOT emit diagnostics — callers should use `pop_vals_for_instr` for
-    /// instruction-level checks with proper diagnostic messages.
-    pub(super) fn pop_vals(&mut self, expected: &[ValueType], node: &Node) -> bool {
-        self.pop_vals_inner(expected, node, None)
-    }
-
     /// Pop multiple values for a named instruction.
     /// On underflow, emits a "Stack underflow" diagnostic with instruction name.
     /// On type mismatch, emits a "type mismatch" diagnostic.
@@ -583,20 +575,34 @@ impl TypeChecker {
         node: &Node,
         instr_name: &str,
     ) -> bool {
-        self.pop_vals_inner(expected, node, Some(instr_name))
+        let height = self.current_frame_height();
+        let unreachable = self.is_current_unreachable();
+        self.pop_vals_ctx(expected, node, Some(instr_name), height, unreachable)
     }
 
-    /// Inner implementation for pop_vals with optional instruction name for diagnostics.
-    fn pop_vals_inner(
+    /// Pop a value using explicit frame context (for use when ctrl_stack has been modified).
+    fn pop_val_ctx(&mut self, height: usize, unreachable: bool) -> Option<ValueType> {
+        if self.val_stack.len() == height {
+            if unreachable {
+                return Some(ValueType::Unknown);
+            }
+            return None; // underflow
+        }
+        self.val_stack.pop()
+    }
+
+    /// Pop values with explicit frame context (avoids borrow conflicts with ctrl_stack).
+    fn pop_vals_ctx(
         &mut self,
         expected: &[ValueType],
         node: &Node,
         instr_name: Option<&str>,
+        height: usize,
+        unreachable: bool,
     ) -> bool {
         // Check for underflow first (before modifying the stack)
-        let height = self.current_frame_height();
         let available = self.val_stack.len().saturating_sub(height);
-        if available < expected.len() && !self.is_current_unreachable() {
+        if available < expected.len() && !unreachable {
             // Underflow — emit diagnostic and drain what we can
             let range = node_to_range(node);
             let needed = expected.len();
@@ -632,7 +638,7 @@ impl TypeChecker {
         let mut ok = true;
         // Pop in reverse order (last expected type is on top of stack)
         for ty in expected.iter().rev() {
-            match self.pop_val() {
+            match self.pop_val_ctx(height, unreachable) {
                 Some(ref actual) => {
                     if !types_compatible(actual, ty) {
                         let range = node_to_range(node);
@@ -687,22 +693,25 @@ impl TypeChecker {
     }
 
     /// Exit a control frame. Validates that end_types match the stack.
-    /// Returns the popped frame, or None if ctrl_stack is empty.
     pub(super) fn pop_ctrl(&mut self, node: &Node) {
-        if self.ctrl_stack.is_empty() {
-            return;
-        }
-        let frame = self.ctrl_stack.last().unwrap();
-        let end_types = frame.end_types.clone();
-        let height = frame.height;
+        let frame = match self.ctrl_stack.pop() {
+            Some(f) => f,
+            None => return,
+        };
 
-        // Pop expected end types from the stack
-        self.pop_vals(&end_types, node);
+        // Pop expected end types using the popped frame's context (avoids clone)
+        self.pop_vals_ctx(
+            &frame.end_types,
+            node,
+            None,
+            frame.height,
+            frame.unreachable,
+        );
 
         // Check that we're back to frame height
         // Even in unreachable context, concrete values pushed after unreachable
         // count as excess values (spec §3.3 validation rules).
-        let extra = self.val_stack.len().saturating_sub(height);
+        let extra = self.val_stack.len().saturating_sub(frame.height);
         if extra > 0 {
             let range = node_to_range(node);
             self.diagnostics.push(
@@ -718,53 +727,57 @@ impl TypeChecker {
         }
 
         // Restore val_stack to frame height
-        self.val_stack.truncate(height);
+        self.val_stack.truncate(frame.height);
 
-        self.ctrl_stack.pop();
-
-        // Push end_types onto outer stack (reuse the already-cloned vec)
-        self.push_vals(&end_types);
+        // Push end_types onto outer stack directly from owned Vec (no clone)
+        self.val_stack.extend(frame.end_types);
     }
 
     /// Handle the else transition in an if block.
     /// Validates the then branch produced end_types, resets stack to frame height,
     /// and pushes start_types for the else branch.
     pub(super) fn else_transition(&mut self, node: &Node) {
-        if let Some(frame) = self.ctrl_stack.last() {
-            let end_types = frame.end_types.clone();
-            let start_types = frame.start_types.clone();
-            let height = frame.height;
-            let was_unreachable = frame.unreachable;
+        let idx = match self.ctrl_stack.len().checked_sub(1) {
+            Some(i) => i,
+            None => return,
+        };
+        let height = self.ctrl_stack[idx].height;
+        let was_unreachable = self.ctrl_stack[idx].unreachable;
 
-            // Validate then branch produced the expected end types
-            if !was_unreachable {
-                self.pop_vals(&end_types, node);
-                // Check for excess values
-                if self.val_stack.len() > height {
-                    let extra = self.val_stack.len() - height;
-                    let range = node_to_range(node);
-                    self.diagnostics.push(
-                        Diagnostic::error(
-                            range,
-                            format!(
-                                "type mismatch: block leaves {} extra value(s) on stack",
-                                extra
-                            ),
-                        )
-                        .with_code("type-mismatch"),
-                    );
-                }
-            }
-
-            // Reset stack to frame height + start_types for else branch
-            self.val_stack.truncate(height);
-            self.push_vals(&start_types);
-
-            // Reset unreachable flag for else branch
-            if let Some(frame) = self.ctrl_stack.last_mut() {
-                frame.unreachable = false;
+        // Validate then branch produced the expected end types
+        if !was_unreachable {
+            self.pop_vals_ctx(
+                &self.ctrl_stack[idx].end_types.clone(),
+                node,
+                None,
+                height,
+                false,
+            );
+            // Check for excess values
+            if self.val_stack.len() > height {
+                let extra = self.val_stack.len() - height;
+                let range = node_to_range(node);
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        range,
+                        format!(
+                            "type mismatch: block leaves {} extra value(s) on stack",
+                            extra
+                        ),
+                    )
+                    .with_code("type-mismatch"),
+                );
             }
         }
+
+        // Reset stack to frame height
+        self.val_stack.truncate(height);
+        // Take start_types to push (not needed by the frame after else transition)
+        let start_types = std::mem::take(&mut self.ctrl_stack[idx].start_types);
+        self.val_stack.extend(start_types);
+
+        // Reset unreachable flag for else branch
+        self.ctrl_stack[idx].unreachable = false;
     }
 
     /// Mark the current frame as unreachable.

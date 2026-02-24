@@ -527,14 +527,15 @@ fn format_tag_hover(word: &str, tag: &Tag) -> HoverResult {
 }
 
 fn format_data_hover(word: &str, data: &DataSegment) -> HoverResult {
-    let preview = if data.content.len() > 32 {
-        format!("{}...", &data.content[..32])
+    let preview: &str = if data.content.len() > 32 {
+        &data.content[..32]
     } else {
-        data.content.clone()
+        &data.content
     };
+    let suffix = if data.content.len() > 32 { "..." } else { "" };
     HoverResult::new(format!(
-        "```wat\n(data {} \"{}\")\n```\nLength: {} bytes",
-        word, preview, data.byte_length
+        "```wat\n(data {} \"{}{}\")\n```\nLength: {} bytes",
+        word, preview, suffix, data.byte_length
     ))
 }
 

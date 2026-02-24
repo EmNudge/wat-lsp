@@ -31,25 +31,21 @@ pub(crate) fn check_catch_clause_references(
     let has_tag =
         text.contains("catch_ref") || (text.contains("catch") && !text.contains("catch_all"));
 
-    // Collect all index children
+    // Walk index children directly (avoids intermediate Vec allocation)
     let mut cursor = node.walk();
-    let indices: Vec<_> = node
-        .children(&mut cursor)
-        .filter(|c| {
-            node_kind!(kind = c);
-            kind == "index"
-        })
-        .collect();
-
-    for (i, index_node) in indices.iter().enumerate() {
-        // First index is tag (if has_tag), remaining are labels
-        let is_tag_reference = has_tag && i == 0;
-        let context = if is_tag_reference {
-            InstructionContext::Tag
-        } else {
-            InstructionContext::Branch
-        };
-        find_undefined_identifiers(index_node, source, symbols, &context, diagnostics);
+    let mut index_count = 0;
+    for child in node.children(&mut cursor) {
+        node_kind!(kind = child);
+        if kind == "index" {
+            // First index is tag (if has_tag), remaining are labels
+            let context = if has_tag && index_count == 0 {
+                InstructionContext::Tag
+            } else {
+                InstructionContext::Branch
+            };
+            find_undefined_identifiers(&child, source, symbols, &context, diagnostics);
+            index_count += 1;
+        }
     }
 }
 

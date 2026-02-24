@@ -48,8 +48,8 @@ pub fn provide_completion(
                         CompletionItem::new(format!("l{}", name))
                             .with_kind(CompletionItemKind::Snippet)
                             .with_detail(format!("(param) {}", param.param_type))
-                            .with_insert_text(insert_text.clone())
-                            .with_documentation(format!("Expands to: {}", insert_text)),
+                            .with_documentation(format!("Expands to: {}", insert_text))
+                            .with_insert_text(insert_text),
                     );
                 }
             }
@@ -60,8 +60,8 @@ pub fn provide_completion(
                         CompletionItem::new(format!("l{}", name))
                             .with_kind(CompletionItemKind::Snippet)
                             .with_detail(format!("(local) {}", local.var_type))
-                            .with_insert_text(insert_text.clone())
-                            .with_documentation(format!("Expands to: {}", insert_text)),
+                            .with_documentation(format!("Expands to: {}", insert_text))
+                            .with_insert_text(insert_text),
                     );
                 }
             }
@@ -109,8 +109,8 @@ pub fn provide_completion(
                     CompletionItem::new(format!("g{}", name))
                         .with_kind(CompletionItemKind::Snippet)
                         .with_detail(format!("(global) {}", global.var_type))
-                        .with_insert_text(insert_text.clone())
-                        .with_documentation(format!("Expands to: {}", insert_text)),
+                        .with_documentation(format!("Expands to: {}", insert_text))
+                        .with_insert_text(insert_text),
                 );
             }
         }

@@ -112,20 +112,20 @@ enum ShellType {
 
 /// ANSI escape codes for formatting
 mod ansi {
-    pub const RESET: &str = "\x1b[0m";
-    pub const BOLD: &str = "\x1b[1m";
-    pub const DIM: &str = "\x1b[2m";
+    pub(super) const RESET: &str = "\x1b[0m";
+    pub(super) const BOLD: &str = "\x1b[1m";
+    pub(super) const DIM: &str = "\x1b[2m";
 
     // Colors
-    pub const GREEN: &str = "\x1b[32m";
-    pub const YELLOW: &str = "\x1b[33m";
-    pub const BLUE: &str = "\x1b[34m";
-    pub const MAGENTA: &str = "\x1b[35m";
-    pub const CYAN: &str = "\x1b[36m";
+    pub(super) const GREEN: &str = "\x1b[32m";
+    pub(super) const YELLOW: &str = "\x1b[33m";
+    pub(super) const BLUE: &str = "\x1b[34m";
+    pub(super) const MAGENTA: &str = "\x1b[35m";
+    pub(super) const CYAN: &str = "\x1b[36m";
 
     // Bright colors
-    pub const BRIGHT_RED: &str = "\x1b[91m";
-    pub const BRIGHT_CYAN: &str = "\x1b[96m";
+    pub(super) const BRIGHT_RED: &str = "\x1b[91m";
+    pub(super) const BRIGHT_CYAN: &str = "\x1b[96m";
 }
 
 struct Highlighter {

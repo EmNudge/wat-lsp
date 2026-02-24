@@ -289,21 +289,20 @@ fn determine_catch_clause_context(node: &Node, document: &str) -> Option<Instruc
                 || (text.contains("catch") && !text.contains("catch_all"));
 
             if let Some(idx_node) = index_node {
-                // Find the position of this index among all index children
+                // Find the position of this index among all index children (no Vec allocation)
                 let mut cursor = current.walk();
-                let indices: Vec<_> = current
-                    .children(&mut cursor)
-                    .filter(|c| c.kind() == "index")
-                    .collect();
-
-                for (i, idx) in indices.iter().enumerate() {
-                    if idx.byte_range() == idx_node.byte_range() {
-                        // Found our index - first index in catch/catch_ref is tag, rest are labels
-                        if has_tag && i == 0 {
-                            return Some(InstructionContext::Tag);
-                        } else {
-                            return Some(InstructionContext::Branch);
+                let mut index_count = 0;
+                for child in current.children(&mut cursor) {
+                    if child.kind() == "index" {
+                        if child.byte_range() == idx_node.byte_range() {
+                            // Found our index - first index in catch/catch_ref is tag, rest are labels
+                            return Some(if has_tag && index_count == 0 {
+                                InstructionContext::Tag
+                            } else {
+                                InstructionContext::Branch
+                            });
                         }
+                        index_count += 1;
                     }
                 }
             }
