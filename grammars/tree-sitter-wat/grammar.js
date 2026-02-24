@@ -260,14 +260,14 @@ module.exports = grammar({
     instr_block: $ => choice($.block_block, $.block_loop, $.block_if, $.block_try, $.block_try_table),
 
     instr_call: $ =>
-      seq(choice("call_indirect", "return_call_indirect"), optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results), $.instr),
+      seq(choice("call_indirect", "return_call_indirect"), optional($.index), optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results), $.instr),
 
     // NOTE: this must be wrapped in "optional"
     instr_list: $ => repeat1(choice($.instr_list_call, $.instr)),
 
     instr_list_call: $ =>
       prec.right(
-        seq(choice("call_indirect", "return_call_indirect"), optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results)),
+        seq(choice("call_indirect", "return_call_indirect"), optional($.index), optional($.type_use), repeat($.func_type_params_many), repeat($.func_type_results)),
       ),
 
     instr_plain: $ =>
