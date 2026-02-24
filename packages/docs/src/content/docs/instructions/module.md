@@ -11,12 +11,13 @@ Declares a WebAssembly module. Top-level container for all declarations.
 
 **Example:**
 
-```wat-snippet
+```wat
 (module $my_module
-  ;; Module contents here
-  (func ...)
-  (memory ...)
-  (export ...)
+  (memory $mem 1)
+  (func $add (param $a i32) (param $b i32) (result i32)
+    (i32.add (local.get $a) (local.get $b)))
+  (export "add" (func $add))
+  (export "memory" (memory $mem))
 )
 ```
 
@@ -110,15 +111,17 @@ Declares a global variable with type, mutability, and initial value.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+;; Import global
+(import "env" "global_var" (global $imported i32))
+
 ;; Immutable global
 (global $pi f64 (f64.const 3.14159))
 
 ;; Mutable global
 (global $counter (mut i32) (i32.const 0))
-
-;; Import global
-(import "env" "global_var" (global $imported i32))
+# )
 ```
 
 ---

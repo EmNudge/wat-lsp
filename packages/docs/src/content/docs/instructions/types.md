@@ -197,9 +197,11 @@ Reference type for external (host) values. Can be null.
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 (table $objects 10 externref)
-(func $process (param $obj externref) ...)
+(func $process (param $obj externref))
+# )
 ```
 
 ---
@@ -210,9 +212,11 @@ Reference type that can hold any reference (GC proposal). Equivalent to `(ref nu
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
 (global $obj anyref (ref.null any))
-(func $store (param $val anyref) ...)
+(func $store (param $val anyref))
+# )
 ```
 
 ---
@@ -256,9 +260,12 @@ Reference type that can hold any struct reference (GC proposal). Equivalent to `
 
 **Example:**
 
-```wat-snippet
-(func $get_struct (result structref) ...)
-(func $process (param $s structref) ...)
+```wat
+# (module
+(func $get_struct (result structref)
+  (ref.null struct))
+(func $process (param $s structref))
+# )
 ```
 
 ---
@@ -269,9 +276,12 @@ Reference type that can hold any array reference (GC proposal). Equivalent to `(
 
 **Example:**
 
-```wat-snippet
-(func $get_array (result arrayref) ...)
-(func $process (param $arr arrayref) ...)
+```wat
+# (module
+(func $get_array (result arrayref)
+  (ref.null array))
+(func $process (param $arr arrayref))
+# )
 ```
 
 ---

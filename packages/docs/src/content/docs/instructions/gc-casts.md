@@ -49,8 +49,12 @@ Cast a reference to a specific type (returns null on failure).
 
 **Example:**
 
-```wat-snippet
-(ref.cast_null (ref null $type) (local.get $ref))
+```wat
+# (module
+# (type $type (struct (field i32)))
+# (func (param $ref (ref null $type)) (result (ref null $type))
+(ref.cast (ref null $type) (local.get $ref))
+# ))
 ```
 
 ---

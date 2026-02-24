@@ -49,10 +49,7 @@ export default defineConfig({
       },
       expressiveCode: {
         shiki: {
-          langs: [
-            { ...watGrammar, name: 'wat', aliases: ['wast'] },
-            { ...watGrammar, name: 'wat-snippet', aliases: [] },
-          ],
+          langs: [{ ...watGrammar, name: 'wat', aliases: ['wast'] }],
         },
       },
       sidebar: [

@@ -25,9 +25,7 @@ function finishBlock() {
     errors.push(`line ${currentStart}: "${currentName}" has no description`);
   }
   if (hasExample && !exampleHasFence) {
-    errors.push(
-      `line ${currentStart}: "${currentName}" has Example: but no \`\`\`wat or \`\`\`wat-snippet code fence`,
-    );
+    errors.push(`line ${currentStart}: "${currentName}" has Example: but no \`\`\`wat code fence`);
   }
 }
 
@@ -42,7 +40,7 @@ for (let i = 0; i < lines.length; i++) {
       inCodeBlock = true;
       // Check if this fence follows an Example: line (within the current block)
       if (currentName && hasExample && !exampleHasFence) {
-        if (trimmed === '```wat' || trimmed === '```wat-snippet') {
+        if (trimmed === '```wat') {
           exampleHasFence = true;
         }
       }

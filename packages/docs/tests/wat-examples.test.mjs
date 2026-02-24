@@ -35,7 +35,6 @@ const KNOWN_LSP_ISSUES = new Set([
  * Extract all ```wat code blocks from a markdown string.
  * Returns an array of { code, lineNumber } where lineNumber is 1-indexed.
  * Processes `# ` hidden lines: includes them with prefix stripped (Rust doc-test convention).
- * Skips ```wat-snippet blocks.
  */
 function extractWatBlocks(markdown) {
   const blocks = [];

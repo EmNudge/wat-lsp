@@ -41,7 +41,6 @@ struct WatBlock {
 
 /// Extract all ```wat code blocks from markdown content.
 /// Processes `# ` hidden lines (includes them with prefix stripped).
-/// Skips ```wat-snippet blocks.
 fn extract_wat_blocks(markdown: &str) -> Vec<WatBlock> {
     let mut blocks = Vec::new();
     let lines: Vec<&str> = markdown.lines().collect();
@@ -49,8 +48,10 @@ fn extract_wat_blocks(markdown: &str) -> Vec<WatBlock> {
 
     while i < lines.len() {
         let line = lines[i];
-        // Match ```wat but not ```wat-snippet or other variants
-        if line.starts_with("```wat") && !line.starts_with("```wat-") {
+        if line.starts_with("```wat")
+            && !line.starts_with("```wat-")
+            && !line.starts_with("```wast")
+        {
             let block_start = i + 1; // 0-indexed line after the fence
             let mut block_lines = Vec::new();
             i += 1;
@@ -124,13 +125,15 @@ fn doc_samples_have_no_errors() {
 
         for block in &blocks {
             // Every `wat` block must have module context (visible or hidden).
-            // Use ```wat-snippet for syntax-only demos that don't need validation.
             assert!(
                 block.code.contains("(module"),
-                "Unannotated wat block at {}:{} — add hidden `# (module` context or use ```wat-snippet\n  Code:\n{}",
+                "Unannotated wat block at {}:{} — add hidden `# (module` context\n  Code:\n{}",
                 rel_path.display(),
                 block.line_number,
-                block.code.lines().enumerate()
+                block
+                    .code
+                    .lines()
+                    .enumerate()
                     .map(|(i, l)| format!("    {}: {}", i + 1, l))
                     .collect::<Vec<_>>()
                     .join("\n"),

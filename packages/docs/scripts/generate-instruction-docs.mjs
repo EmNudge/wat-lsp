@@ -231,12 +231,11 @@ function parseInstruction(block) {
   const descEnd = sigIdx > 0 ? sigIdx : exIdx > 0 ? exIdx : -1;
   const description = descEnd > 0 ? content.slice(0, descEnd).trim() : content.split('\n')[0];
 
-  // Parse example (supports both ```wat and ```wat-snippet)
-  const exampleMatch = content.match(/Example:\s*```(wat(?:-snippet)?)\n([\s\S]*?)```/);
-  const exampleLang = exampleMatch ? exampleMatch[1] : 'wat';
-  const example = exampleMatch ? exampleMatch[2].trim() : null;
+  // Parse example
+  const exampleMatch = content.match(/Example:\s*```wat\n([\s\S]*?)```/);
+  const example = exampleMatch ? exampleMatch[1].trim() : null;
 
-  return { name, description, signature, example, exampleLang, rawContent: content };
+  return { name, description, signature, example, rawContent: content };
 }
 
 // Categorize instruction - order matters! More specific matches first
@@ -318,7 +317,7 @@ description: ${cat.description}${sidebarYaml}
     }
 
     if (instr.example) {
-      content += `**Example:**\n\n\`\`\`${instr.exampleLang}\n${instr.example}\n\`\`\`\n\n`;
+      content += `**Example:**\n\n\`\`\`wat\n${instr.example}\n\`\`\`\n\n`;
     }
 
     content += '---\n\n';
