@@ -47,8 +47,17 @@ Rethrow an exception from a catch block.
 
 **Example:**
 
-```wat-snippet
-(rethrow $label)
+```wat
+# (module
+# (tag $error (param i32))
+# (func $may_throw)
+# (func
+# (block $catch (result exnref)
+# (try_table (catch_all_ref $catch)
+# (call $may_throw))
+# (return))
+(throw_ref)  ;; rethrow the caught exception
+# ))
 ```
 
 ---
@@ -93,21 +102,39 @@ Catches exceptions with a specific tag in a `try_table` block. Branches to a lab
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (tag $error_tag (param i32))
+# (func $may_throw)
+# (func (result i32)
 (block $handler (result i32)
-  (try_table (catch $error_tag $handler)
+  (try_table (result i32) (catch $error_tag $handler)
     (call $may_throw)
     (i32.const 0)  ;; No error
   )
 )
 ;; $handler receives the i32 payload from $error_tag
+# ))
+```
 
-;; Multiple catch clauses
+Multiple catch clauses:
+
+```wat
+# (module
+# (tag $error1)
+# (tag $error2)
+# (func $risky_operation)
+# (func
+# (block $handle_error1
+# (block $handle_error2
+# (block $handle_any
 (try_table
   (catch $error1 $handle_error1)
   (catch $error2 $handle_error2)
   (catch_all $handle_any)
   (call $risky_operation))
+# )))
+# ))
 ```
 
 ---

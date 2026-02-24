@@ -24,7 +24,7 @@ Line comments start with `;;` and run to the end of the line. Block comments use
 
 Names in WAT start with `$` followed by one or more printable ASCII characters (letters, digits, and the punctuation `!`, `#`, `$`, `%`, `&`, `'`, `*`, `+`, `-`, `.`, `/`, `:`, `<`, `=`, `>`, `?`, `@`, `\\`, `^`, `_`, `` ` ``, `|`, `~`).
 
-```wat-snippet
+```text
 $x
 $my_func
 $a.b.c
@@ -38,7 +38,7 @@ Identifiers are optional — you can refer to functions, locals, labels, etc. by
 
 Integers can be written in decimal or hexadecimal, with optional sign prefix and underscore separators.
 
-```wat-snippet
+```text
 42          ;; decimal
 -1          ;; signed
 0xFF        ;; hexadecimal
@@ -59,7 +59,7 @@ The `i32.const` and `i64.const` instructions accept both signed and unsigned val
 
 Floats support decimal notation, scientific notation, hexadecimal float notation, and special IEEE 754 values.
 
-```wat-snippet
+```text
 1.5         ;; decimal float
 1.5e10      ;; scientific notation
 0x1.0p10    ;; hex float: 1.0 * 2^10 = 1024.0

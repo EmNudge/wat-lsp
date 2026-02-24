@@ -27,12 +27,14 @@ Packed types are valid as storage types inside `field` and `array` definitions:
 
 Using `i8` or `i16` as value types in parameters, results, locals, or globals is an error:
 
-```wat-snippet
-;; All of these are invalid:
-(func (param i8))        ;; error: i8 is not a value type
-(func (result i16))      ;; error: i16 is not a value type
-(local $x i8)            ;; error: i8 is not a value type
-(global $g i16 ...)      ;; error: i16 is not a value type
+```wat
+(module
+  ;; All of these are invalid:
+  ;; (func (param i8))              ;; i8 is not a value type
+  ;; (func (result i16))            ;; i16 is not a value type
+  ;; (func (local $x i8))           ;; i8 is not a value type
+  ;; (global $g i16 (i16.const 0))  ;; i16 is not a value type
+)
 ```
 
 The LSP reports: _"i8 is a packed storage type and can only be used in struct/array field definitions"_.

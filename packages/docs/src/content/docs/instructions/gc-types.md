@@ -140,17 +140,19 @@ Heap type representing the null reference. Used in type annotations to indicate 
 
 **Example:**
 
-```wat-snippet
+```wat
+# (module
+# (type $my_struct (struct (field i32)))
+# (type $my_type (struct (field i32)))
+# (func (param $obj (ref null $my_struct))
 ;; Nullable reference to a function type
 (local $callback (ref null func))
 
-;; Nullable reference to a struct type
-(param $obj (ref null $my_struct))
-
 ;; Create a null reference
-(ref.null func)
-(ref.null extern)
-(ref.null $my_type)
+(drop (ref.null func))
+(drop (ref.null extern))
+(drop (ref.null $my_type))
+# ))
 ```
 
 ---
@@ -161,13 +163,10 @@ Declares a reference type, optionally nullable. Used in type annotations for par
 
 **Example:**
 
-```wat-snippet
-;; Non-nullable reference to a struct type
-(param $p (ref $my_struct))
-
-;; Nullable reference
-(local $obj (ref null $my_struct))
-
+```wat
+# (module
+# (type $callback_type (func (param i32)))
+# (type $shape (struct (field i32)))
 ;; Reference to a function type
 (global $callback (ref null $callback_type) (ref.null $callback_type))
 
@@ -176,6 +175,7 @@ Declares a reference type, optionally nullable. Used in type annotations for par
 
 ;; In an array type declaration
 (type $shape_array (array (mut (ref null $shape))))
+# )
 ```
 
 ---
