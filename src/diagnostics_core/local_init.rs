@@ -213,21 +213,8 @@ fn walk_node(
             }
             initialized.copy_from_slice(&saved);
         }
-        "block_block" | "block_loop" | "block_try_table" | "block_try" => {
-            let saved = initialized.clone();
-            walk_body(
-                node,
-                source,
-                func,
-                non_defaultable,
-                initialized,
-                diagnostics,
-            );
-            initialized.copy_from_slice(&saved);
-        }
-
-        // Folded block/loop
-        "expr1_block" | "expr1_loop" | "expr1_try_table" => {
+        "block_block" | "block_loop" | "block_try_table" | "block_try" | "expr1_block"
+        | "expr1_loop" | "expr1_try_table" => {
             let saved = initialized.clone();
             walk_body(
                 node,
@@ -241,20 +228,7 @@ fn walk_node(
         }
 
         // If: save/restore same as block (control flow doesn't contribute to init)
-        "instr_if" | "expr1_if" => {
-            let saved = initialized.clone();
-            walk_if_body(
-                node,
-                source,
-                func,
-                non_defaultable,
-                initialized,
-                diagnostics,
-                &saved,
-            );
-            initialized.copy_from_slice(&saved);
-        }
-        "block_if" | "if_block" => {
+        "instr_if" | "expr1_if" | "block_if" | "if_block" => {
             let saved = initialized.clone();
             walk_if_body(
                 node,
