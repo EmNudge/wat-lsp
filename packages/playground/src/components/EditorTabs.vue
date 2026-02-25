@@ -7,12 +7,16 @@ function handleClose(e: MouseEvent, id: string) {
   e.stopPropagation();
   store.closeFile(id);
 }
+
+function resetWat() {
+  store.resetWatCode();
+}
 </script>
 
 <template>
   <div class="editor-tabs">
-    <div 
-      v-for="file in store.openFiles" 
+    <div
+      v-for="file in store.openFiles"
       :key="file.id"
       class="tab"
       :class="{ active: file.id === store.activeFileId, dirty: file.isDirty }"
@@ -27,12 +31,22 @@ function handleClose(e: MouseEvent, id: string) {
         <span v-else class="dirty-indicator">●</span>
       </button>
     </div>
+    <div class="tabs-spacer"></div>
+    <button
+      v-if="store.currentFile?.isDirty"
+      class="btn-reset"
+      @click="resetWat"
+      title="Reset to original example code"
+    >
+      Reset
+    </button>
   </div>
 </template>
 
 <style scoped>
 .editor-tabs {
   display: flex;
+  align-items: center;
   background-color: var(--bg-soft);
   border-bottom: 1px solid var(--border-color);
   overflow-x: auto;
@@ -86,6 +100,10 @@ function handleClose(e: MouseEvent, id: string) {
   flex: 1;
 }
 
+.tabs-spacer {
+  flex: 1;
+}
+
 .close-btn {
   display: flex;
   align-items: center;
@@ -109,5 +127,25 @@ function handleClose(e: MouseEvent, id: string) {
 .dirty-indicator {
   font-size: 8px;
   color: var(--warning-color);
+}
+
+.btn-reset {
+  padding: 0.15rem 0.5rem;
+  margin-right: 0.5rem;
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--fg-muted);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.btn-reset:hover {
+  background-color: var(--bg-soft);
+  color: var(--fg-color);
+  border-color: var(--fg-muted);
 }
 </style>
