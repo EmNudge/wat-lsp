@@ -2519,6 +2519,30 @@ Example:
 
 ---
 
+## end
+
+Terminates a `block`, `loop`, or `if` construct in the linear (non-folded) text format. In the folded S-expression format, closing parentheses serve this purpose instead.
+
+Example:
+
+```wat
+;; Linear format uses end to close blocks
+block $my_block
+  i32.const 42
+  br $my_block
+end
+
+;; Linear if/else also uses end
+i32.const 1
+if (result i32)
+  i32.const 10
+else
+  i32.const 20
+end
+```
+
+---
+
 ## br
 
 Unconditional branch to a label. Exits blocks/loops.
@@ -3174,6 +3198,47 @@ Example:
 
 ---
 
+## offset
+
+Specifies a byte offset for memory load/store instructions, or the initialization offset for active data and element segments. Defaults to 0 if omitted.
+
+Example:
+
+```wat
+;; Memory load with offset
+(i32.load offset=8 (i32.const 0))    ;; loads from address 0+8
+
+;; Memory store with offset
+(i32.store offset=4 (i32.const 0) (i32.const 42))
+
+;; Active data segment with explicit offset
+(data (offset (i32.const 100)) "hello")
+
+;; Active element segment with offset
+(elem (table $t) (offset (i32.const 0)) func $f)
+```
+
+---
+
+## align
+
+Specifies the expected alignment hint for memory load/store instructions as a power of 2 in bytes. This is a performance hint to the engine — unaligned accesses are still valid but may be slower. The alignment must not exceed the natural alignment of the operation.
+
+Example:
+
+```wat
+;; Natural alignment (4 bytes for i32)
+(i32.load align=4 (i32.const 0))
+
+;; Unaligned access (1-byte alignment)
+(i32.load align=1 (i32.const 3))
+
+;; Combined with offset
+(f64.load offset=16 align=8 (i32.const 0))
+```
+
+---
+
 ## import
 
 Imports an external resource (function, global, table, or memory).
@@ -3369,6 +3434,23 @@ Example:
 
 ;; Declarative (just for ref.func)
 (elem declare func $helper)
+```
+
+---
+
+## declare
+
+Element segment mode that declares function references without initializing them into a table. Required for functions used only with `ref.func` that aren't placed in any table.
+
+Example:
+
+```wat
+;; Declare functions for use with ref.func
+(elem declare func $callback $handler)
+
+;; Now ref.func can reference these functions
+(func $get_callback (result funcref)
+  (ref.func $callback))
 ```
 
 ---
@@ -3686,6 +3768,148 @@ Example:
 
 ```wat
 (global $no_exn nullexnref (ref.null noexn))
+```
+
+---
+
+## any
+
+Abstract heap type representing any reference value (GC proposal). Used in `ref` type annotations. The abbreviated form `anyref` is equivalent to `(ref null any)`.
+
+Example:
+
+```wat
+;; Non-nullable reference to any value
+(param $val (ref any))
+
+;; Nullable reference (same as anyref)
+(local $obj (ref null any))
+
+;; Null reference of type any
+(ref.null any)
+```
+
+---
+
+## eq
+
+Abstract heap type for values that support structural equality (GC proposal). Subtype of `any`. Used in `ref` type annotations. The abbreviated form `eqref` is equivalent to `(ref null eq)`.
+
+Example:
+
+```wat
+;; Non-nullable eq reference
+(param $val (ref eq))
+
+;; Nullable (same as eqref)
+(local $item (ref null eq))
+
+;; Compare two eq references
+(ref.eq (local.get $a) (local.get $b))
+```
+
+---
+
+## extern
+
+Abstract heap type for external (host) references (GC proposal). Used in `ref` type annotations. The abbreviated form `externref` is equivalent to `(ref null extern)`.
+
+Example:
+
+```wat
+;; Non-nullable external reference
+(param $obj (ref extern))
+
+;; Nullable (same as externref)
+(local $host_val (ref null extern))
+
+;; Convert between any and extern
+(extern.convert_any (local.get $val))
+(any.convert_extern (local.get $ext))
+```
+
+---
+
+## i31
+
+Heap type for 31-bit integers packed into a reference (GC proposal). Subtype of `eq`. Used in `ref` type annotations. The abbreviated form `i31ref` is equivalent to `(ref null i31)`.
+
+Example:
+
+```wat
+;; Non-nullable i31 reference
+(param $num (ref i31))
+
+;; Nullable (same as i31ref)
+(local $boxed (ref null i31))
+
+;; Pack and unpack i31 values
+(ref.i31 (i32.const 42))
+(i31.get_s (local.get $boxed))
+```
+
+---
+
+## none
+
+Bottom heap type for the `any` hierarchy (GC proposal). The only value of type `(ref null none)` is null. The abbreviated form `nullref` is equivalent to `(ref null none)`.
+
+Example:
+
+```wat
+;; The null reference type
+(global $empty (ref null none) (ref.null none))
+
+;; Subtype of all reference types in the any hierarchy
+;; none <: i31, struct, array, eq, any
+```
+
+---
+
+## nofunc
+
+Bottom heap type for the `func` hierarchy (GC proposal). The only value of type `(ref null nofunc)` is null. The abbreviated form `nullfuncref` is equivalent to `(ref null nofunc)`.
+
+Example:
+
+```wat
+;; The null function reference type
+(global $no_fn (ref null nofunc) (ref.null nofunc))
+
+;; Subtype of all function reference types
+;; nofunc <: func
+```
+
+---
+
+## noexn
+
+Bottom heap type for the `exn` hierarchy (exception handling proposal). The only value of type `(ref null noexn)` is null. The abbreviated form `nullexnref` is equivalent to `(ref null noexn)`.
+
+Example:
+
+```wat
+;; The null exception reference type
+(global $no_exn (ref null noexn) (ref.null noexn))
+
+;; Subtype of all exception reference types
+;; noexn <: exn
+```
+
+---
+
+## noextern
+
+Bottom heap type for the `extern` hierarchy (GC proposal). The only value of type `(ref null noextern)` is null. The abbreviated form `nullexternref` is equivalent to `(ref null noextern)`.
+
+Example:
+
+```wat
+;; The null external reference type
+(global $no_ext (ref null noextern) (ref.null noextern))
+
+;; Subtype of all external reference types
+;; noextern <: extern
 ```
 
 ---
@@ -4315,6 +4539,34 @@ Example:
 ```wat
 (tag $error (param i32))
 (tag $complex_error (param i32 i32 f64))
+```
+
+---
+
+## try
+
+Define a block with exception handling (legacy syntax, replaced by `try_table` in the current spec). Contains a `do` block for the main body and `catch`/`catch_all` clauses for exception handlers.
+
+Example:
+
+```wat
+(try
+  (do (call $may_throw))
+  (catch $error (drop)))
+```
+
+---
+
+## do
+
+Mark the main body inside a `try` block (legacy exception handling syntax). The `do` clause contains the instructions that may throw exceptions.
+
+Example:
+
+```wat
+(try
+  (do (nop))
+  (catch_all (nop)))
 ```
 
 ---

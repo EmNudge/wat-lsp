@@ -38,6 +38,11 @@ name = "wast-runner"
 path = "src/bin/wast-runner.rs"
 required-features = ["native"]
 
+[[bin]]
+name = "wat-hover-coverage"
+path = "src/bin/wat-hover-coverage.rs"
+required-features = ["native"]
+
 [features]
 default = ["native"]
 native = [
