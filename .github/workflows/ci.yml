@@ -145,6 +145,9 @@ jobs:
         run: |
           npx tsx scripts/check-linearized-examples.ts
 
+      - name: Check hover documentation coverage
+        run: cargo run --features native --release --bin wat-hover-coverage
+
   validate-wasm-tools:
     name: Validate Examples (wasm-tools)
     needs: changes
