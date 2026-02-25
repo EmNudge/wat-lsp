@@ -447,6 +447,21 @@ watch(() => store.activeFileId, (newId, oldId) => {
   isUpdatingFromStore = false;
 });
 
+// Watch for code changes from store (e.g., reset)
+watch(
+  () => store.currentFile?.code,
+  (newCode) => {
+    if (!editor || newCode === undefined) return;
+    const model = editor.getModel();
+    if (!model || model.getValue() === newCode) return;
+    isUpdatingFromStore = true;
+    model.setValue(newCode);
+    updateDiagnostics(newCode);
+    updateSymbols(newCode);
+    isUpdatingFromStore = false;
+  }
+);
+
 // Watch for closed files to cleanup models
 watch(() => store.openFiles.length, () => {
   const openIds = new Set(store.openFiles.map(f => f.id));

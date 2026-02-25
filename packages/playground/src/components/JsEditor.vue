@@ -117,15 +117,29 @@ watch(
 function regenerate() {
   store.generateHost();
 }
+
+function resetHost() {
+  store.resetHostCode();
+}
 </script>
 
 <template>
   <div class="js-editor-view">
     <div class="js-editor-header">
       <span class="js-filename">host.js</span>
-      <button class="btn-small" @click="regenerate" title="Regenerate host code from WAT source">
-        Regenerate
-      </button>
+      <div class="js-editor-actions">
+        <button
+          v-if="store.currentFile?.hostDirty"
+          class="btn-small"
+          @click="resetHost"
+          title="Reset to auto-generated host code"
+        >
+          Reset
+        </button>
+        <button class="btn-small" @click="regenerate" title="Regenerate host code from WAT source">
+          Regenerate
+        </button>
+      </div>
     </div>
     <div class="js-editor-container" ref="editorContainer"></div>
   </div>
@@ -153,6 +167,11 @@ function regenerate() {
   font-size: 0.8rem;
   color: var(--fg-muted);
   font-family: var(--font-mono);
+}
+
+.js-editor-actions {
+  display: flex;
+  gap: 0.25rem;
 }
 
 .btn-small {

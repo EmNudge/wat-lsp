@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { examples, getDefaultExample } from '../../examples';
+import type { ExampleDefinition } from '../../examples';
 import init, { parseWat } from 'js-wasm-tools';
 import { extractWatTypes, generateHostCode } from '../codegen';
 import { runHostCode } from '../runner/hostRunner';
 import type { ConsoleLine } from '../runner/hostRunner';
+import { hashContent, saveEdit, loadEdit, clearEdit } from './persistence';
 
 export interface OpenFile {
     id: string;
@@ -13,6 +15,8 @@ export interface OpenFile {
     isDirty: boolean;
     hostCode: string;
     hostDirty: boolean;
+    originalCodeHash: string;
+    originalHostHash: string;
 }
 
 export const usePlaygroundStore = defineStore('playground', () => {
@@ -45,17 +49,48 @@ export const usePlaygroundStore = defineStore('playground', () => {
         openFiles.value.find(f => f.id === activeFileId.value)
     );
 
+    function createOpenFile(example: ExampleDefinition): OpenFile {
+        const codeHash = hashContent(example.code);
+        const info = extractWatTypes(example.code);
+        const originalHost = generateHostCode(info, example.filename);
+        const hostHash = hashContent(originalHost);
+
+        const savedCode = loadEdit(example.id, 'wat', codeHash);
+        const savedHost = loadEdit(example.id, 'host', hostHash);
+
+        const code = savedCode ?? example.code;
+        const isDirty = code !== example.code;
+
+        let hostCode: string;
+        let hostDirty: boolean;
+        if (savedHost !== null) {
+            hostCode = savedHost;
+            hostDirty = true;
+        } else if (isDirty) {
+            // WAT restored — regenerate host from restored WAT
+            const restoredInfo = extractWatTypes(code);
+            hostCode = generateHostCode(restoredInfo, example.filename);
+            hostDirty = false;
+        } else {
+            hostCode = originalHost;
+            hostDirty = false;
+        }
+
+        return {
+            id: example.id,
+            filename: example.filename,
+            code,
+            isDirty,
+            hostCode,
+            hostDirty,
+            originalCodeHash: codeHash,
+            originalHostHash: hostHash,
+        };
+    }
+
     // Initial load
     const defaultEx = getDefaultExample();
-    const defaultInfo = extractWatTypes(defaultEx.code);
-    openFiles.value = [{
-        id: defaultEx.id,
-        filename: defaultEx.filename,
-        code: defaultEx.code,
-        isDirty: false,
-        hostCode: generateHostCode(defaultInfo, defaultEx.filename),
-        hostDirty: false
-    }];
+    openFiles.value = [createOpenFile(defaultEx)];
     activeFileId.value = defaultEx.id;
     recentlyUsedIds.value = [defaultEx.id];
 
@@ -80,36 +115,21 @@ export const usePlaygroundStore = defineStore('playground', () => {
 
         const example = examples.find(ex => ex.id === id);
         if (example) {
-            const info = extractWatTypes(example.code);
-            const hostCode = generateHostCode(info, example.filename);
+            const file = createOpenFile(example);
 
             const current = currentFile.value;
             if (current && !current.isDirty) {
                 // Replace current unedited tab
                 const index = openFiles.value.findIndex(f => f.id === current.id);
                 if (index !== -1) {
-                    openFiles.value[index] = {
-                        id: example.id,
-                        filename: example.filename,
-                        code: example.code,
-                        isDirty: false,
-                        hostCode,
-                        hostDirty: false
-                    };
+                    openFiles.value[index] = file;
                     activeFileId.value = id;
                     return;
                 }
             }
 
             // Otherwise add new tab
-            openFiles.value.push({
-                id: example.id,
-                filename: example.filename,
-                code: example.code,
-                isDirty: false,
-                hostCode,
-                hostDirty: false
-            });
+            openFiles.value.push(file);
             activeFileId.value = id;
         }
 
@@ -138,6 +158,11 @@ export const usePlaygroundStore = defineStore('playground', () => {
             currentFile.value.code = newCode;
             if (original) {
                 currentFile.value.isDirty = newCode !== original.code;
+                if (currentFile.value.isDirty) {
+                    saveEdit(currentFile.value.id, 'wat', newCode, currentFile.value.originalCodeHash);
+                } else {
+                    clearEdit(currentFile.value.id, 'wat');
+                }
             }
         }
     }
@@ -149,6 +174,7 @@ export const usePlaygroundStore = defineStore('playground', () => {
         const info = extractWatTypes(file.code);
         file.hostCode = generateHostCode(info, file.filename);
         file.hostDirty = false;
+        clearEdit(file.id, 'host');
     }
 
     function generateHost() {
@@ -160,7 +186,26 @@ export const usePlaygroundStore = defineStore('playground', () => {
         if (currentFile.value) {
             currentFile.value.hostCode = code;
             currentFile.value.hostDirty = true;
+            saveEdit(currentFile.value.id, 'host', code, currentFile.value.originalHostHash);
         }
+    }
+
+    function resetWatCode() {
+        if (!currentFile.value) return;
+        const original = examples.find(ex => ex.id === currentFile.value?.id);
+        if (!original) return;
+        currentFile.value.code = original.code;
+        currentFile.value.isDirty = false;
+        clearEdit(currentFile.value.id, 'wat');
+        // If host wasn't manually edited, regenerate for the original WAT
+        if (!currentFile.value.hostDirty) {
+            generateHostForFile(currentFile.value);
+        }
+    }
+
+    function resetHostCode() {
+        if (!currentFile.value) return;
+        generateHostForFile(currentFile.value);
     }
 
     async function compile() {
@@ -250,6 +295,8 @@ export const usePlaygroundStore = defineStore('playground', () => {
         updateCode,
         updateHostCode,
         generateHost,
+        resetWatCode,
+        resetHostCode,
         compile,
         runHost,
         setSymbols,
