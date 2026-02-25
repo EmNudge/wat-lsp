@@ -582,8 +582,8 @@ jobs:
       - name: Run WASM E2E tests
         run: pnpm --filter @emnudge/wat-lsp test
 
-  playground:
-    name: Playground
+  playground-build:
+    name: Playground Build
     needs: [changes, build-npm-package]
     # Run if playground changed, OR if rust changed (and build-npm-package ran)
     # The 'always()' allows this to run even if build-npm-package was skipped
@@ -650,6 +650,43 @@ jobs:
         working-directory: packages/playground
         run: pnpm run build
 
+      - name: Upload playground build
+        uses: actions/upload-artifact@v6
+        with:
+          name: playground-dist
+          path: packages/playground/dist/
+
+  playground-test:
+    name: Playground Test
+    needs: [changes, playground-build]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      (needs.changes.outputs.playground == 'true' || needs.changes.outputs.rust == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - name: Download playground build
+        uses: actions/download-artifact@v7
+        with:
+          name: playground-dist
+          path: packages/playground/dist/
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Install Playwright browsers
         working-directory: packages/playground
         run: pnpm exec playwright install --with-deps chromium
@@ -666,15 +703,9 @@ jobs:
           path: packages/playground/playwright-report/
           retention-days: 7
 
-      - name: Upload playground build
-        uses: actions/upload-artifact@v6
-        with:
-          name: playground-dist
-          path: packages/playground/dist/
-
   deploy-pages:
     name: Deploy to Cloudflare Pages
-    needs: playground
+    needs: playground-build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -771,7 +802,7 @@ jobs:
 
   docs-build:
     name: Docs Build
-    needs: [changes, build-npm-package, playground]
+    needs: [changes, build-npm-package, playground-build]
     if: |
       always() &&
       !failure() &&
@@ -803,7 +834,7 @@ jobs:
       - run: pnpm --filter wat-docs run build
 
       - name: Download playground build
-        if: needs.playground.result == 'success'
+        if: needs.playground-build.result == 'success'
         uses: actions/download-artifact@v7
         with:
           name: playground-dist

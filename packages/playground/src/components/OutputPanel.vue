@@ -45,6 +45,13 @@ const hexView = computed(() => {
       </button>
       <div class="tabs-spacer"></div>
       <button
+        class="btn btn-success run-btn"
+        @click="store.runHost()"
+        :disabled="!store.wasmBytes || store.isRunning"
+      >
+        {{ store.isRunning ? 'Running...' : 'Run' }}
+      </button>
+      <button
         class="btn btn-primary compile-btn"
         @click="store.compile()"
         :disabled="store.isCompiling"
@@ -157,11 +164,36 @@ const hexView = computed(() => {
   flex: 1;
 }
 
-.compile-btn {
+.compile-btn,
+.run-btn {
   margin: 0.25rem 0.5rem;
   padding: 0.25rem 0.75rem;
   font-size: 0.8rem;
   flex-shrink: 0;
+}
+
+.btn-success {
+  background-color: var(--success-color);
+  color: white;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-success:hover:not(:disabled) {
+  background-color: #9aad4a;
+  transform: translateY(-1px);
+}
+
+.btn-success:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.run-btn {
+  margin-right: 0;
 }
 
 .tab-content {
