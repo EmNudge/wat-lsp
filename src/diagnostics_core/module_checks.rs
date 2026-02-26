@@ -306,14 +306,18 @@ fn check_export_name<'a>(
     seen: &mut HashMap<&'a str, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    use std::collections::hash_map::Entry;
     let range = node_to_range(node);
-    if seen.contains_key(name) {
-        diagnostics.push(Diagnostic::error(
-            range,
-            format!("Duplicate export name \"{}\"", name),
-        ));
-    } else {
-        seen.insert(name, range);
+    match seen.entry(name) {
+        Entry::Occupied(_) => {
+            diagnostics.push(Diagnostic::error(
+                range,
+                format!("Duplicate export name \"{}\"", name),
+            ));
+        }
+        Entry::Vacant(e) => {
+            e.insert(range);
+        }
     }
 }
 
@@ -390,65 +394,68 @@ pub(super) fn has_inline_import(node: &Node) -> bool {
 // 6. Duplicate identifiers
 // ============================================================================
 
+/// Tracks seen identifiers per index space for duplicate detection.
+struct IdentifierMaps<'a> {
+    func: HashMap<&'a str, Range>,
+    global: HashMap<&'a str, Range>,
+    table: HashMap<&'a str, Range>,
+    memory: HashMap<&'a str, Range>,
+    r#type: HashMap<&'a str, Range>,
+    tag: HashMap<&'a str, Range>,
+}
+
+impl<'a> IdentifierMaps<'a> {
+    fn new() -> Self {
+        Self {
+            func: HashMap::new(),
+            global: HashMap::new(),
+            table: HashMap::new(),
+            memory: HashMap::new(),
+            r#type: HashMap::new(),
+            tag: HashMap::new(),
+        }
+    }
+}
+
 fn check_duplicate_identifiers(module: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut seen_func: HashMap<&str, Range> = HashMap::new();
-    let mut seen_global: HashMap<&str, Range> = HashMap::new();
-    let mut seen_table: HashMap<&str, Range> = HashMap::new();
-    let mut seen_memory: HashMap<&str, Range> = HashMap::new();
-    let mut seen_type: HashMap<&str, Range> = HashMap::new();
-    let mut seen_tag: HashMap<&str, Range> = HashMap::new();
+    let mut ids = IdentifierMaps::new();
 
     for_each_module_field(module, |field| {
         node_kind!(fk = field);
 
         match fk {
             "module_field_func" => {
-                check_identifier_dup(field, source, &mut seen_func, "func", diagnostics);
+                check_identifier_dup(field, source, &mut ids.func, "func", diagnostics);
             }
             "module_field_global" => {
-                check_identifier_dup(field, source, &mut seen_global, "global", diagnostics);
+                check_identifier_dup(field, source, &mut ids.global, "global", diagnostics);
             }
             "module_field_table" => {
-                check_identifier_dup(field, source, &mut seen_table, "table", diagnostics);
+                check_identifier_dup(field, source, &mut ids.table, "table", diagnostics);
             }
             "module_field_memory" => {
-                check_identifier_dup(field, source, &mut seen_memory, "memory", diagnostics);
+                check_identifier_dup(field, source, &mut ids.memory, "memory", diagnostics);
             }
             "module_field_type" => {
-                check_identifier_dup(field, source, &mut seen_type, "type", diagnostics);
+                check_identifier_dup(field, source, &mut ids.r#type, "type", diagnostics);
                 check_duplicate_struct_fields(field, source, diagnostics);
             }
             "module_field_tag" => {
-                check_identifier_dup(field, source, &mut seen_tag, "tag", diagnostics);
+                check_identifier_dup(field, source, &mut ids.tag, "tag", diagnostics);
                 check_tag_no_results(field, source, diagnostics);
             }
             "module_field_rec" => {
-                // Types inside rec groups share the type index space
                 let mut cursor = field.walk();
                 for child in field.children(&mut cursor) {
-                    // Inside rec, look for type definitions. The grammar defines rec as:
-                    // (rec (type $id? type_field) ...)
-                    // But the inner nodes are anonymous sequences, so we look for identifier
-                    // children or children that look like type definitions.
                     node_kind!(ck = child);
                     if ck == "module_field_type" {
-                        check_identifier_dup(&child, source, &mut seen_type, "type", diagnostics);
+                        check_identifier_dup(&child, source, &mut ids.r#type, "type", diagnostics);
                         check_duplicate_struct_fields(&child, source, diagnostics);
                     }
                 }
             }
             "module_field_import" => {
-                // Import descriptors declare identifiers in their respective namespaces
-                check_import_identifier_dup(
-                    field,
-                    source,
-                    &mut seen_func,
-                    &mut seen_global,
-                    &mut seen_table,
-                    &mut seen_memory,
-                    &mut seen_tag,
-                    diagnostics,
-                );
+                check_import_identifier_dup(field, source, &mut ids, diagnostics);
             }
             _ => {}
         }
@@ -462,31 +469,30 @@ fn check_identifier_dup<'a>(
     kind_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    use std::collections::hash_map::Entry;
     if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
         let name = node_text(&id_node, source);
         if name.starts_with('$') {
             let range = node_to_range(&id_node);
-            if seen.contains_key(name) {
-                diagnostics.push(Diagnostic::error(
-                    range,
-                    format!("Duplicate {} identifier {}", kind_name, name),
-                ));
-            } else {
-                seen.insert(name, range);
+            match seen.entry(name) {
+                Entry::Occupied(_) => {
+                    diagnostics.push(Diagnostic::error(
+                        range,
+                        format!("Duplicate {} identifier {}", kind_name, name),
+                    ));
+                }
+                Entry::Vacant(e) => {
+                    e.insert(range);
+                }
             }
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn check_import_identifier_dup<'a>(
     import_node: &Node,
     source: &'a str,
-    seen_func: &mut HashMap<&'a str, Range>,
-    seen_global: &mut HashMap<&'a str, Range>,
-    seen_table: &mut HashMap<&'a str, Range>,
-    seen_memory: &mut HashMap<&'a str, Range>,
-    seen_tag: &mut HashMap<&'a str, Range>,
+    ids: &mut IdentifierMaps<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut cursor = import_node.walk();
@@ -498,19 +504,19 @@ fn check_import_identifier_dup<'a>(
                 node_kind!(dk = desc);
                 match dk {
                     "import_desc_func_type" | "import_desc_type_use" => {
-                        check_identifier_dup(&desc, source, seen_func, "func", diagnostics);
+                        check_identifier_dup(&desc, source, &mut ids.func, "func", diagnostics);
                     }
                     "import_desc_global_type" => {
-                        check_identifier_dup(&desc, source, seen_global, "global", diagnostics);
+                        check_identifier_dup(&desc, source, &mut ids.global, "global", diagnostics);
                     }
                     "import_desc_table_type" => {
-                        check_identifier_dup(&desc, source, seen_table, "table", diagnostics);
+                        check_identifier_dup(&desc, source, &mut ids.table, "table", diagnostics);
                     }
                     "import_desc_memory_type" => {
-                        check_identifier_dup(&desc, source, seen_memory, "memory", diagnostics);
+                        check_identifier_dup(&desc, source, &mut ids.memory, "memory", diagnostics);
                     }
                     "import_desc_tag_type" => {
-                        check_identifier_dup(&desc, source, seen_tag, "tag", diagnostics);
+                        check_identifier_dup(&desc, source, &mut ids.tag, "tag", diagnostics);
                         check_tag_no_results(&desc, source, diagnostics);
                     }
                     _ => {}
@@ -578,6 +584,7 @@ fn collect_struct_field_names<'a>(
     seen: &mut HashMap<&'a str, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    use std::collections::hash_map::Entry;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         let kind = child.kind();
@@ -588,13 +595,16 @@ fn collect_struct_field_names<'a>(
                 if inner_child.kind() == "identifier" {
                     let name = node_text(&inner_child, source);
                     let range = node_to_range(&inner_child);
-                    if seen.contains_key(name) {
-                        diagnostics.push(Diagnostic::error(
-                            range,
-                            format!("duplicate field {}", name),
-                        ));
-                    } else {
-                        seen.insert(name, range);
+                    match seen.entry(name) {
+                        Entry::Occupied(_) => {
+                            diagnostics.push(Diagnostic::error(
+                                range,
+                                format!("duplicate field {}", name),
+                            ));
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert(range);
+                        }
                     }
                 }
             }
@@ -712,34 +722,37 @@ fn resolve_type_use<'a>(
 // 8. Constant expression validation
 // ============================================================================
 
-const CONST_INSTRUCTIONS: &[&str] = &[
-    "i32.const",
-    "i64.const",
-    "f32.const",
-    "f64.const",
-    "v128.const",
-    "ref.null",
-    "ref.func",
-    "global.get",
-    // GC proposal const instructions
-    "struct.new",
-    "struct.new_default",
-    "array.new",
-    "array.new_default",
-    "array.new_fixed",
-    "any.convert_extern",
-    "extern.convert_any",
-    "ref.i31",
-    "i31.get_s",
-    "i31.get_u",
-    // Extended constant expressions proposal
-    "i32.add",
-    "i32.sub",
-    "i32.mul",
-    "i64.add",
-    "i64.sub",
-    "i64.mul",
-];
+fn is_const_instruction(name: &str) -> bool {
+    matches!(
+        name,
+        "i32.const"
+            | "i64.const"
+            | "f32.const"
+            | "f64.const"
+            | "v128.const"
+            | "ref.null"
+            | "ref.func"
+            | "global.get"
+            // GC proposal const instructions
+            | "struct.new"
+            | "struct.new_default"
+            | "array.new"
+            | "array.new_default"
+            | "array.new_fixed"
+            | "any.convert_extern"
+            | "extern.convert_any"
+            | "ref.i31"
+            | "i31.get_s"
+            | "i31.get_u"
+            // Extended constant expressions proposal
+            | "i32.add"
+            | "i32.sub"
+            | "i32.mul"
+            | "i64.add"
+            | "i64.sub"
+            | "i64.mul"
+    )
+}
 
 fn check_constant_expressions(
     module: &Node,
@@ -865,6 +878,27 @@ fn check_table_init_expr(
     }
 }
 
+/// Validate a single instr_plain node as a constant expression opcode.
+fn validate_const_instr(
+    instr_node: &Node,
+    report_node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    max_allowed_global: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let text = node_text(instr_node, source);
+    let first_token = text.split_whitespace().next().unwrap_or("");
+    if !is_const_instruction(first_token) {
+        diagnostics.push(Diagnostic::error(
+            node_to_range(report_node),
+            format!("Constant expression required, but found '{}'", first_token),
+        ));
+    } else if first_token == "global.get" {
+        check_global_get_in_const(instr_node, source, symbols, max_allowed_global, diagnostics);
+    }
+}
+
 /// Recursively check that all instructions in a tree are constant expressions.
 /// `max_allowed_global`: maximum global index that can be referenced by global.get.
 fn check_const_instruction_tree(
@@ -878,43 +912,23 @@ fn check_const_instruction_tree(
 
     match kind {
         "instr_plain" => {
-            // Linear-form instruction: check the opcode directly
-            let text = node_text(node, source);
-            let first_token = text.split_whitespace().next().unwrap_or("");
-            if !CONST_INSTRUCTIONS.contains(&first_token) {
-                diagnostics.push(Diagnostic::error(
-                    node_to_range(node),
-                    format!("Constant expression required, but found '{}'", first_token),
-                ));
-            } else if first_token == "global.get" {
-                check_global_get_in_const(node, source, symbols, max_allowed_global, diagnostics);
-            }
+            validate_const_instr(node, node, source, symbols, max_allowed_global, diagnostics);
             return;
         }
         "expr1_plain" => {
-            // Folded expression: first child is instr_plain, check its opcode
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 node_kind!(ck = child);
                 if ck == "instr_plain" {
-                    let text = node_text(&child, source);
-                    let first_token = text.split_whitespace().next().unwrap_or("");
-                    if !CONST_INSTRUCTIONS.contains(&first_token) {
-                        diagnostics.push(Diagnostic::error(
-                            node_to_range(node),
-                            format!("Constant expression required, but found '{}'", first_token),
-                        ));
-                    } else if first_token == "global.get" {
-                        check_global_get_in_const(
-                            &child,
-                            source,
-                            symbols,
-                            max_allowed_global,
-                            diagnostics,
-                        );
-                    }
+                    validate_const_instr(
+                        &child,
+                        node,
+                        source,
+                        symbols,
+                        max_allowed_global,
+                        diagnostics,
+                    );
                 } else if ck == "expr" {
-                    // Check nested expressions for constness too
                     check_const_instruction_tree(
                         &child,
                         source,
