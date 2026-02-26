@@ -15,6 +15,9 @@ use tree_sitter::{Node, Tree};
 use crate::ts_facade::{Node, Tree};
 
 use crate::core::types::{Position, Range};
+use crate::symbol_lookup::{
+    find_block_in_function, find_local_in_function, find_param_in_function,
+};
 use crate::symbols::*;
 use crate::utils::{
     determine_context_from_line, determine_instruction_context_at_node, find_child_by_kind,
@@ -232,36 +235,30 @@ fn identify_named_symbol(
         }
         InstructionContext::Local => {
             if let Some(func) = find_containing_function(symbols, position) {
-                for param in &func.parameters {
-                    if param.name.as_deref() == Some(word) {
-                        return Some(ReferenceTarget::Parameter {
-                            name: Some(word.to_string()),
-                            index: param.index,
-                            function_start_byte: func.start_byte,
-                        });
-                    }
+                if let Some(param) = find_param_in_function(word, func) {
+                    return Some(ReferenceTarget::Parameter {
+                        name: Some(word.to_string()),
+                        index: param.index,
+                        function_start_byte: func.start_byte,
+                    });
                 }
-                for local in &func.locals {
-                    if local.name.as_deref() == Some(word) {
-                        return Some(ReferenceTarget::Local {
-                            name: Some(word.to_string()),
-                            index: local.index + func.parameters.len(),
-                            function_start_byte: func.start_byte,
-                        });
-                    }
+                if let Some(local) = find_local_in_function(word, func) {
+                    return Some(ReferenceTarget::Local {
+                        name: Some(word.to_string()),
+                        index: local.index + func.parameters.len(),
+                        function_start_byte: func.start_byte,
+                    });
                 }
             }
         }
         InstructionContext::Branch | InstructionContext::Block => {
             if let Some(func) = find_containing_function(symbols, position) {
-                for block in &func.blocks {
-                    if block.label == word {
-                        return Some(ReferenceTarget::BlockLabel {
-                            label: word.to_string(),
-                            function_start_byte: func.start_byte,
-                            line: block.line,
-                        });
-                    }
+                if let Some(block) = find_block_in_function(word, func) {
+                    return Some(ReferenceTarget::BlockLabel {
+                        label: word.to_string(),
+                        function_start_byte: func.start_byte,
+                        line: block.line,
+                    });
                 }
             }
         }
@@ -274,33 +271,26 @@ fn identify_named_symbol(
             }
 
             if let Some(func) = find_containing_function(symbols, position) {
-                for param in &func.parameters {
-                    if param.name.as_deref() == Some(word) {
-                        return Some(ReferenceTarget::Parameter {
-                            name: Some(word.to_string()),
-                            index: param.index,
-                            function_start_byte: func.start_byte,
-                        });
-                    }
+                if let Some(param) = find_param_in_function(word, func) {
+                    return Some(ReferenceTarget::Parameter {
+                        name: Some(word.to_string()),
+                        index: param.index,
+                        function_start_byte: func.start_byte,
+                    });
                 }
-                for local in &func.locals {
-                    if local.name.as_deref() == Some(word) {
-                        return Some(ReferenceTarget::Local {
-                            name: Some(word.to_string()),
-                            index: local.index + func.parameters.len(),
-                            function_start_byte: func.start_byte,
-                        });
-                    }
+                if let Some(local) = find_local_in_function(word, func) {
+                    return Some(ReferenceTarget::Local {
+                        name: Some(word.to_string()),
+                        index: local.index + func.parameters.len(),
+                        function_start_byte: func.start_byte,
+                    });
                 }
-
-                for block in &func.blocks {
-                    if block.label == word {
-                        return Some(ReferenceTarget::BlockLabel {
-                            label: word.to_string(),
-                            function_start_byte: func.start_byte,
-                            line: block.line,
-                        });
-                    }
+                if let Some(block) = find_block_in_function(word, func) {
+                    return Some(ReferenceTarget::BlockLabel {
+                        label: word.to_string(),
+                        function_start_byte: func.start_byte,
+                        line: block.line,
+                    });
                 }
             }
 

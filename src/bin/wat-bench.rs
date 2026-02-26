@@ -293,7 +293,7 @@ fn benchmark_parse(
         times.push(start.elapsed());
     }
 
-    create_timing_result("parse", file_name, lines, times)
+    create_timing_result("parse", file_name, lines, &times)
 }
 
 fn benchmark_symbols(
@@ -310,7 +310,7 @@ fn benchmark_symbols(
         times.push(start.elapsed());
     }
 
-    create_timing_result("symbols", file_name, lines, times)
+    create_timing_result("symbols", file_name, lines, &times)
 }
 
 fn benchmark_diagnostics(
@@ -330,7 +330,7 @@ fn benchmark_diagnostics(
         times.push(start.elapsed());
     }
 
-    create_timing_result("diagnostics", file_name, lines, times)
+    create_timing_result("diagnostics", file_name, lines, &times)
 }
 
 fn benchmark_hover(
@@ -354,7 +354,7 @@ fn benchmark_hover(
         times.push(start.elapsed());
     }
 
-    create_timing_result("hover", file_name, lines, times)
+    create_timing_result("hover", file_name, lines, &times)
 }
 
 fn benchmark_completion(
@@ -380,7 +380,7 @@ fn benchmark_completion(
         times.push(start.elapsed());
     }
 
-    create_timing_result("completion", file_name, lines, times)
+    create_timing_result("completion", file_name, lines, &times)
 }
 
 fn benchmark_definition(
@@ -404,7 +404,7 @@ fn benchmark_definition(
         times.push(start.elapsed());
     }
 
-    create_timing_result("definition", file_name, lines, times)
+    create_timing_result("definition", file_name, lines, &times)
 }
 
 fn benchmark_references(
@@ -428,7 +428,7 @@ fn benchmark_references(
         times.push(start.elapsed());
     }
 
-    create_timing_result("references", file_name, lines, times)
+    create_timing_result("references", file_name, lines, &times)
 }
 
 fn generate_test_positions(lines: usize, count: usize) -> Vec<Position> {
@@ -443,12 +443,7 @@ fn generate_test_positions(lines: usize, count: usize) -> Vec<Position> {
     positions
 }
 
-fn create_timing_result(
-    name: &str,
-    file: &str,
-    lines: usize,
-    times: Vec<Duration>,
-) -> TimingResult {
+fn create_timing_result(name: &str, file: &str, lines: usize, times: &[Duration]) -> TimingResult {
     let total: Duration = times.iter().sum();
     let min = *times.iter().min().unwrap_or(&Duration::ZERO);
     let max = *times.iter().max().unwrap_or(&Duration::ZERO);

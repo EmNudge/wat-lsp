@@ -1,8 +1,6 @@
 use crate::core::types::Range;
 use crate::symbols::*;
-use crate::utils::{
-    block_type_from_kind, node_text, node_to_range, BLOCK_KINDS_EXPR, BLOCK_KINDS_STATEMENT,
-};
+use crate::utils::{block_type_from_kind, node_text, node_to_range};
 
 // Use the appropriate tree-sitter types based on feature
 #[cfg(feature = "native")]
@@ -1165,7 +1163,19 @@ fn visit_node_for_blocks(node: &Node, source: &str, blocks: &mut Vec<BlockLabel>
     node_kind!(kind_str = node);
 
     // Check both statement form (block_block) and expression form (expr1_block)
-    if BLOCK_KINDS_STATEMENT.contains(&kind_str) || BLOCK_KINDS_EXPR.contains(&kind_str) {
+    if matches!(
+        kind_str,
+        "block_block"
+            | "block_loop"
+            | "block_if"
+            | "block_try"
+            | "block_try_table"
+            | "expr1_block"
+            | "expr1_loop"
+            | "expr1_if"
+            | "expr1_try"
+            | "expr1_try_table"
+    ) {
         // Check if it has a label
         if let Some(id_node) = crate::utils::find_child_by_kind(node, "identifier") {
             let label = normalize_identifier(node_text(&id_node, source));

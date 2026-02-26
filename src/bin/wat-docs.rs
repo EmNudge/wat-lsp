@@ -350,7 +350,7 @@ fn main() -> ExitCode {
     let args = Args::parse();
 
     match args.command {
-        Command::List { filter } => cmd_list(filter),
+        Command::List { filter } => cmd_list(filter.as_deref()),
         Command::Show {
             instruction,
             raw,
@@ -368,8 +368,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn cmd_list(filter: Option<String>) -> ExitCode {
-    let names = match &filter {
+fn cmd_list(filter: Option<&str>) -> ExitCode {
+    let names = match filter {
         Some(pattern) => docs::search_instruction_names(pattern),
         None => docs::instruction_names(),
     };

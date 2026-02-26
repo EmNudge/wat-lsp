@@ -9,31 +9,6 @@ use tree_sitter::{Node, Tree};
 use crate::ts_facade::{Node, Tree};
 
 // ============================================================================
-// Block type constants - centralized to prevent sync issues
-// ============================================================================
-
-/// All block-related node kinds (statement form)
-pub const BLOCK_KINDS_STATEMENT: &[&str] = &[
-    "block_block",
-    "block_loop",
-    "block_if",
-    "block_try",
-    "block_try_table",
-];
-
-/// All block-related node kinds (expression form)
-pub const BLOCK_KINDS_EXPR: &[&str] = &[
-    "expr1_block",
-    "expr1_loop",
-    "expr1_if",
-    "expr1_try",
-    "expr1_try_table",
-];
-
-/// All block-related node kinds (instruction form used in some contexts)
-pub const BLOCK_KINDS_INSTR: &[&str] = &["instr_block", "instr_loop"];
-
-// ============================================================================
 // Struct operation constants - used for hover and diagnostics
 // ============================================================================
 
@@ -42,9 +17,21 @@ pub const STRUCT_OPS: &[&str] = &["struct.get", "struct.set", "struct.get_s", "s
 
 /// Check if a kind represents any block structure (statement, expression, or instruction form)
 pub fn is_block_kind(kind: &str) -> bool {
-    BLOCK_KINDS_STATEMENT.contains(&kind)
-        || BLOCK_KINDS_EXPR.contains(&kind)
-        || BLOCK_KINDS_INSTR.contains(&kind)
+    matches!(
+        kind,
+        "block_block"
+            | "block_loop"
+            | "block_if"
+            | "block_try"
+            | "block_try_table"
+            | "expr1_block"
+            | "expr1_loop"
+            | "expr1_if"
+            | "expr1_try"
+            | "expr1_try_table"
+            | "instr_block"
+            | "instr_loop"
+    )
 }
 
 /// Check if a kind represents a labeled block structure (block, loop, if - not try)
