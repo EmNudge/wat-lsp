@@ -478,7 +478,7 @@ jobs:
       # If cache miss and build-npm-package ran, download the artifact
       - name: Download NPM package artifact
         if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -566,7 +566,7 @@ jobs:
 
       - name: Download NPM package artifact
         if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -623,7 +623,7 @@ jobs:
       # If cache miss and build-npm-package ran, download the artifact
       - name: Download NPM package artifact
         if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -682,7 +682,7 @@ jobs:
           cache: pnpm
 
       - name: Download playground build
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: playground-dist
           path: packages/playground/dist/
@@ -715,7 +715,7 @@ jobs:
       deployments: write
     steps:
       - name: Download playground build
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: playground-dist
           path: dist
@@ -796,7 +796,7 @@ jobs:
           key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
       - name: Download NPM package artifact
         if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -829,7 +829,7 @@ jobs:
           key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
       - name: Download NPM package artifact
         if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -838,7 +838,7 @@ jobs:
 
       - name: Download playground build
         if: needs.playground-build.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: playground-dist
           path: packages/docs/dist/playground/
@@ -875,7 +875,7 @@ jobs:
           key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
       - name: Download NPM package artifact
         if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -908,7 +908,7 @@ jobs:
           key: npm-package-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'grammars/tree-sitter-wat/**', 'packages/wat-lsp/src/**') }}
       - name: Download NPM package artifact
         if: steps.cache-restore.outputs.cache-hit != 'true' && needs.build-npm-package.result == 'success'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -926,7 +926,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Download docs build
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: docs-dist
           path: dist
