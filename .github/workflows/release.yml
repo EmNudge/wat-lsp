@@ -174,7 +174,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload binary artifact for extension
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: server-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
@@ -204,25 +204,25 @@ jobs:
           GH_REPO: ${{ github.repository }}
 
       - name: Upload Linux binary artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: server-x86_64-unknown-linux-gnu
           path: binaries/wat-lsp-rust-linux-x86_64
 
       - name: Upload Windows binary artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: server-x86_64-pc-windows-msvc
           path: binaries/wat-lsp-rust-windows-x86_64.exe
 
       - name: Upload macOS x86_64 binary artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: server-x86_64-apple-darwin
           path: binaries/wat-lsp-rust-macos-x86_64
 
       - name: Upload macOS ARM64 binary artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: server-aarch64-apple-darwin
           path: binaries/wat-lsp-rust-macos-aarch64

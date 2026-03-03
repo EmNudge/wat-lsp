@@ -291,7 +291,7 @@ jobs:
         run: cargo build --features native --release --target ${{ matrix.target }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: wat-lsp-${{ matrix.target }}
           path: |
@@ -336,7 +336,7 @@ jobs:
         run: wasm-pack build --target web --no-pack -- --features wasm --no-default-features
 
       - name: Upload WASM artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: wat-lsp-wasm
           path: |
@@ -401,7 +401,7 @@ jobs:
           pnpm run build:assets
 
       - name: Upload NPM package artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: emnudge-wat-lsp
           path: packages/wat-lsp/dist
@@ -654,7 +654,7 @@ jobs:
         run: pnpm run build
 
       - name: Upload playground build
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: playground-dist
           path: packages/playground/dist/
@@ -699,7 +699,7 @@ jobs:
         run: pnpm test
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
@@ -844,7 +844,7 @@ jobs:
           path: packages/docs/dist/playground/
 
       - name: Upload docs site
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: docs-dist
           path: packages/docs/dist/
