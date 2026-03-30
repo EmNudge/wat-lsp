@@ -9,8 +9,10 @@
 use std::path::Path;
 use tree_sitter::{Node, Tree};
 use wat_lsp_rust::{
-    core::types::Position, features::definition_core::provide_definition_core,
-    parser::parse_document, tree_sitter_bindings::create_parser,
+    core::types::Position,
+    features::definition_core::provide_definition_core,
+    parser::{parse_document, parse_modules_from_tree, ModuleInfo},
+    tree_sitter_bindings::create_parser,
 };
 
 // =============================================================================
@@ -47,6 +49,8 @@ const EXPECTED_FAILURES: &[(&str, &str, u32)] = &[
     ("tables.wat", "$unary_ops", 152),
     ("tables.wat", "$unary_ops", 153),
     ("tail_calls.wat", "$ops", 98),
+    // Multi-module example: table operand in call_indirect (same as above)
+    ("multi_module_types.wat", "$fns", 17),
 ];
 
 // =============================================================================
@@ -76,8 +80,22 @@ fn load_playground_examples() -> Vec<(String, String)> {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
 
-        // Skip the invalid/ subdirectory
+        // Skip subdirectories (except wast/)
         if path.is_dir() {
+            // Also load .wat files from the wast/ subdirectory (multi-module examples)
+            if path.file_name().and_then(|n| n.to_str()) == Some("wast") {
+                for wast_entry in std::fs::read_dir(&path).expect("Failed to read wast directory") {
+                    let wast_entry = wast_entry.expect("Failed to read wast entry");
+                    let wast_path = wast_entry.path();
+                    if wast_path.extension().and_then(|e| e.to_str()) == Some("wat") {
+                        let filename = wast_path.file_name().unwrap().to_str().unwrap().to_string();
+                        let content = std::fs::read_to_string(&wast_path).unwrap_or_else(|e| {
+                            panic!("Failed to read {}: {}", wast_path.display(), e)
+                        });
+                        files.push((filename, content));
+                    }
+                }
+            }
             continue;
         }
 
@@ -161,13 +179,20 @@ fn test_all_identifiers_resolve_to_definition() {
             continue;
         }
 
-        // Parse the document into a symbol table; skip if parsing fails
-        let symbols = match parse_document(content) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let tree = parse_tree(content);
+
+        // Parse into per-module symbol tables (multi-module aware)
+        let modules: Vec<ModuleInfo> = match parse_modules_from_tree(&tree, content) {
+            Ok(m) => m,
+            Err(_) => match parse_document(content) {
+                Ok(s) => vec![ModuleInfo {
+                    range: wat_lsp_rust::core::types::Range::default(),
+                    symbols: s,
+                }],
+                Err(_) => continue,
+            },
         };
 
-        let tree = parse_tree(content);
         let identifiers = collect_identifiers(&tree, content);
 
         if identifiers.is_empty() {
@@ -178,7 +203,24 @@ fn test_all_identifiers_resolve_to_definition() {
         total_identifiers += identifiers.len() as u32;
 
         for (position, ident_text) in &identifiers {
-            let result = provide_definition_core(content, &symbols, &tree, *position);
+            // Find the module containing this identifier's position
+            let symbols = if modules.len() > 1 {
+                modules
+                    .iter()
+                    .find(|m| {
+                        let s = &m.range.start;
+                        let e = &m.range.end;
+                        (position.line > s.line
+                            || (position.line == s.line && position.character >= s.character))
+                            && (position.line < e.line
+                                || (position.line == e.line && position.character <= e.character))
+                    })
+                    .map(|m| &m.symbols)
+                    .unwrap_or(&modules[0].symbols)
+            } else {
+                &modules[0].symbols
+            };
+            let result = provide_definition_core(content, symbols, &tree, *position);
 
             if result.is_none() {
                 if is_expected_failure(filename, ident_text, position.line) {

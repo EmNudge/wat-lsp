@@ -122,6 +122,19 @@ pub fn provide_references_core(
     position: Position,
     include_declaration: bool,
 ) -> Vec<Range> {
+    provide_references_core_scoped(document, symbols, tree, position, include_declaration, None)
+}
+
+/// Find all references, optionally scoped to a specific module range.
+/// When `module_range` is provided, only references within that range are returned.
+pub fn provide_references_core_scoped(
+    document: &str,
+    symbols: &SymbolTable,
+    tree: &Tree,
+    position: Position,
+    include_declaration: bool,
+    module_range: Option<Range>,
+) -> Vec<Range> {
     let target = match identify_symbol_at_position(document, symbols, tree, position) {
         Some(t) => t,
         None => return vec![],
@@ -129,9 +142,30 @@ pub fn provide_references_core(
 
     let mut references = find_all_references(&target, tree, document, symbols);
 
+    // Filter to module scope if provided
+    if let Some(scope) = module_range {
+        references.retain(|r| {
+            (r.start.line > scope.start.line
+                || (r.start.line == scope.start.line && r.start.character >= scope.start.character))
+                && (r.end.line < scope.end.line
+                    || (r.end.line == scope.end.line && r.end.character <= scope.end.character))
+        });
+    }
+
     if include_declaration {
         if let Some(def_range) = get_definition_range(&target, symbols) {
-            references.insert(0, def_range);
+            // Only include declaration if it's within scope
+            let in_scope = module_range.is_none_or(|scope| {
+                (def_range.start.line > scope.start.line
+                    || (def_range.start.line == scope.start.line
+                        && def_range.start.character >= scope.start.character))
+                    && (def_range.end.line < scope.end.line
+                        || (def_range.end.line == scope.end.line
+                            && def_range.end.character <= scope.end.character))
+            });
+            if in_scope {
+                references.insert(0, def_range);
+            }
         }
     }
 
@@ -1104,4 +1138,151 @@ fn is_in_same_function_by_line(
     symbols
         .find_function_containing_line(line)
         .is_some_and(|func| func.start_byte == target_function_start_byte)
+}
+
+#[cfg(all(test, feature = "native"))]
+mod tests {
+    use super::*;
+    use crate::features::definition_core::provide_definition_core;
+    use crate::parser::parse_modules_from_tree;
+    use crate::tree_sitter_bindings::create_parser;
+
+    #[test]
+    fn test_references_recursive_call_single_module() {
+        let source = r#"(module
+  (func $apply (param i64) (result i64)
+    (if (result i64) (i64.le_u (local.get 0) (i64.const 1))
+      (then (i64.const 1))
+      (else
+        (i64.mul
+          (local.get 0)
+          (call $apply (i64.sub (local.get 0) (i64.const 1)))))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let modules = parse_modules_from_tree(&tree, source).unwrap();
+        let module = &modules[0];
+
+        // $apply is at line 1, col 8
+        let pos = Position::new(1, 8);
+
+        // Check definition works
+        let def = provide_definition_core(source, &module.symbols, &tree, pos);
+        assert!(def.is_some(), "Definition should resolve for $apply");
+
+        // Check references (include declaration)
+        let refs = provide_references_core_scoped(source, &module.symbols, &tree, pos, true, None);
+        assert!(
+            refs.len() >= 2,
+            "Should find at least 2 refs (declaration + recursive call), got {}",
+            refs.len(),
+        );
+    }
+
+    #[test]
+    fn test_references_apply_in_multi_module_types_file() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/playground/examples/wast/multi_module_types.wat"
+        ))
+        .unwrap();
+
+        let mut parser = create_parser();
+        let tree = parser.parse(&source, None).unwrap();
+        let modules = parse_modules_from_tree(&tree, &source).unwrap();
+        assert_eq!(modules.len(), 3);
+
+        let module_a = &modules[0];
+        let pos = Position::new(7, 8); // $apply definition in Module A
+
+        let refs = provide_references_core_scoped(
+            &source,
+            &module_a.symbols,
+            &tree,
+            pos,
+            true,
+            Some(module_a.range),
+        );
+        assert!(
+            refs.len() >= 2,
+            "Module A $apply should have refs (decl + call at line 12), got {}",
+            refs.len(),
+        );
+
+        // Module C: $apply at line 43, recursive call at line 49
+        let module_c = &modules[2];
+        let pos_c = Position::new(43, 8);
+        let refs_c = provide_references_core_scoped(
+            &source,
+            &module_c.symbols,
+            &tree,
+            pos_c,
+            true,
+            Some(module_c.range),
+        );
+        assert!(
+            refs_c.len() >= 2,
+            "Module C $apply should have at least 2 refs (decl + recursive call), got {}",
+            refs_c.len(),
+        );
+    }
+
+    #[test]
+    fn test_references_recursive_call_multi_module() {
+        let source = r#"(module
+  (func $apply (result i32) (i32.const 1))
+)
+(module
+  (func $apply (param i64) (result i64)
+    (if (result i64) (i64.le_u (local.get 0) (i64.const 1))
+      (then (i64.const 1))
+      (else
+        (i64.mul
+          (local.get 0)
+          (call $apply (i64.sub (local.get 0) (i64.const 1)))))))
+)"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let modules = parse_modules_from_tree(&tree, source).unwrap();
+        assert_eq!(modules.len(), 2);
+
+        // $apply in second module is at line 4, col 8
+        let pos = Position::new(4, 8);
+        let module = &modules[1];
+
+        // Check definition works
+        let def = provide_definition_core(source, &module.symbols, &tree, pos);
+        assert!(
+            def.is_some(),
+            "Definition should resolve for $apply in module 2"
+        );
+
+        // Check references with module scope
+        let refs = provide_references_core_scoped(
+            source,
+            &module.symbols,
+            &tree,
+            pos,
+            true,
+            Some(module.range),
+        );
+        assert!(
+            refs.len() >= 2,
+            "Should find at least 2 refs (declaration + recursive call) in module 2, got {}",
+            refs.len(),
+        );
+
+        // Verify no refs leak to module 1
+        for r in &refs {
+            assert!(
+                r.start.line >= module.range.start.line && r.end.line <= module.range.end.line,
+                "Reference at line {} should be within module 2 range ({}-{})",
+                r.start.line,
+                module.range.start.line,
+                module.range.end.line,
+            );
+        }
+    }
 }

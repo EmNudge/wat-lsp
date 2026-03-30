@@ -25,6 +25,16 @@ const invalidExampleModules = import.meta.glob<string>(
   }
 );
 
+// Import WAST examples (multi-module) from examples/wast
+const wastExampleModules = import.meta.glob<string>(
+  './examples/wast/*.wat',
+  {
+    eager: true,
+    query: '?raw',
+    import: 'default',
+  }
+);
+
 // Extract a human-readable label from the file content
 // Looks for a comment on the first line like: ";; Exception Handling Proposal"
 function extractLabel(code: string, filename: string): string {
@@ -69,7 +79,17 @@ const invalidExamples = Object.entries(invalidExampleModules).map(
   }
 );
 
-export const examples: ExampleDefinition[] = [...validExamples, ...invalidExamples].sort(
+// Build WAST examples with "WAST - " prefix
+const wastExamples = Object.entries(wastExampleModules).map(
+  ([path, code]) => {
+    const filename = path.split('/').pop() || '';
+    const id = `wast_${filenameToId(path)}`;
+    const label = 'WAST - ' + extractLabel(code, id);
+    return { id, label, filename, code };
+  }
+);
+
+export const examples: ExampleDefinition[] = [...validExamples, ...invalidExamples, ...wastExamples].sort(
   (a, b) => a.label.localeCompare(b.label)
 );
 

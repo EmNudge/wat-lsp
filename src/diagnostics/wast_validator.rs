@@ -1,6 +1,8 @@
 use tower_lsp::lsp_types::*;
 
-/// Validate WAT text using the wast crate for semantic errors
+/// Validate WAT text using the wast crate for semantic errors.
+/// Tries single-module WAT parsing first, then falls back to WAST script format
+/// for multi-module documents.
 pub fn validate_wat(source: &str) -> Vec<Diagnostic> {
     if source.trim().is_empty() {
         return vec![];
@@ -12,8 +14,19 @@ pub fn validate_wat(source: &str) -> Vec<Diagnostic> {
         Err(e) => return vec![wast_error_to_diagnostic(&e, source)],
     };
 
-    match wast::parser::parse::<wast::Wat>(&buf) {
-        Ok(_) => vec![], // Valid WAT
+    // Try single-module WAT first
+    if wast::parser::parse::<wast::Wat>(&buf).is_ok() {
+        return vec![];
+    }
+
+    // Fall back to WAST script format (multi-module)
+    let buf = match wast::parser::ParseBuffer::new(source) {
+        Ok(buf) => buf,
+        Err(e) => return vec![wast_error_to_diagnostic(&e, source)],
+    };
+
+    match wast::parser::parse::<wast::Wast>(&buf) {
+        Ok(_) => vec![], // Valid WAST script
         Err(e) => vec![wast_error_to_diagnostic(&e, source)],
     }
 }

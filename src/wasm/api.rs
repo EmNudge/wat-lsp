@@ -11,7 +11,7 @@ use crate::core::types::{
 };
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
-use crate::parser::parse_document_from_tree;
+use crate::parser::{parse_document_from_tree, parse_modules_from_tree, ModuleInfo};
 use crate::signature::call_info::{find_function_call, find_function_call_ast, CallType};
 use crate::signature::signature_core::{
     provide_call_ref_signature_core, provide_direct_call_signature_core,
@@ -35,6 +35,8 @@ pub fn init() {
 pub struct WatLSP {
     document: String,
     symbols: Option<SymbolTable>,
+    /// Per-module symbols for multi-module documents.
+    modules: Vec<ModuleInfo>,
     tree: Option<Tree>,
     parser: Option<Parser>,
     language: Option<Language>,
@@ -43,8 +45,42 @@ pub struct WatLSP {
 }
 
 impl WatLSP {
-    fn symbols_and_tree(&self) -> Option<(&SymbolTable, &Tree)> {
-        Some((self.symbols.as_ref()?, self.tree.as_ref()?))
+    /// Get the module range for a given position (for scoping references).
+    /// Returns None for single-module documents.
+    fn module_range_for_position(&self, position: Position) -> Option<Range> {
+        if self.modules.len() <= 1 {
+            return None;
+        }
+        let line = position.line;
+        let character = position.character;
+        for module in &self.modules {
+            let start = &module.range.start;
+            let end = &module.range.end;
+            if (line > start.line || (line == start.line && character >= start.character))
+                && (line < end.line || (line == end.line && character <= end.character))
+            {
+                return Some(module.range);
+            }
+        }
+        None
+    }
+
+    /// Get the SymbolTable for a given position (multi-module aware).
+    fn symbols_for_position(&self, position: Position) -> Option<&SymbolTable> {
+        if self.modules.len() > 1 {
+            let line = position.line;
+            let character = position.character;
+            for module in &self.modules {
+                let start = &module.range.start;
+                let end = &module.range.end;
+                if (line > start.line || (line == start.line && character >= start.character))
+                    && (line < end.line || (line == end.line && character <= end.character))
+                {
+                    return Some(&module.symbols);
+                }
+            }
+        }
+        self.symbols.as_ref()
     }
 }
 
@@ -56,6 +92,7 @@ impl WatLSP {
         Self {
             document: String::new(),
             symbols: None,
+            modules: Vec::new(),
             tree: None,
             parser: None,
             language: None,
@@ -112,23 +149,35 @@ impl WatLSP {
         // Parse with tree-sitter if parser is available
         if let Some(parser) = &mut self.parser {
             if let Some(tree) = parser.parse(document, None) {
-                // Extract symbols from tree
-                match parse_document_from_tree(&tree, document) {
-                    Ok(symbols) => {
-                        self.symbols = Some(symbols);
+                // Extract per-module symbols from tree
+                match parse_modules_from_tree(&tree, document) {
+                    Ok(modules) => {
+                        // Use first module's symbols as the default for non-position features
+                        self.symbols = modules.first().map(|m| m.symbols.clone());
+                        self.modules = modules;
                         self.tree = Some(tree);
                     }
                     Err(_) => {
-                        // Symbol extraction failed, but tree is still valid
-                        self.tree = Some(tree);
-                        if self.symbols.is_none() {
-                            self.symbols = Some(SymbolTable::new());
+                        // Module extraction failed, try single-table fallback
+                        self.modules.clear();
+                        match parse_document_from_tree(&tree, document) {
+                            Ok(symbols) => {
+                                self.symbols = Some(symbols);
+                                self.tree = Some(tree);
+                            }
+                            Err(_) => {
+                                self.tree = Some(tree);
+                                if self.symbols.is_none() {
+                                    self.symbols = Some(SymbolTable::new());
+                                }
+                            }
                         }
                     }
                 }
             } else {
                 // Parse failed
                 self.tree = None;
+                self.modules.clear();
                 if self.symbols.is_none() {
                     self.symbols = Some(SymbolTable::new());
                 }
@@ -141,7 +190,7 @@ impl WatLSP {
     pub fn provide_diagnostics(&self) -> JsValue {
         let js_array = js_sys::Array::new();
 
-        if let Some((symbols, tree)) = self.symbols_and_tree() {
+        if let Some(tree) = &self.tree {
             // Syntax errors from tree-sitter ERROR nodes
             let syntax_diagnostics =
                 crate::diagnostics_core::provide_tree_sitter_diagnostics(tree, &self.document);
@@ -149,15 +198,38 @@ impl WatLSP {
                 js_array.push(&core_diagnostic_to_js(&diag));
             }
 
-            // Semantic diagnostics via shared pipeline
-            let diagnostics = crate::diagnostics_core::collect_all_semantic_diagnostics(
-                tree.root_node(),
-                &self.document,
-                symbols,
-            );
-
-            for diag in diagnostics {
-                js_array.push(&core_diagnostic_to_js(&diag));
+            // Semantic diagnostics: run per-module for multi-module documents
+            if self.modules.len() > 1 {
+                let root = tree.root_node();
+                let mut module_nodes = Vec::new();
+                let mut cursor = root.walk();
+                for child in root.children(&mut cursor) {
+                    if child.kind() == "module" {
+                        module_nodes.push(child);
+                    }
+                }
+                for (i, module_info) in self.modules.iter().enumerate() {
+                    if let Some(module_node) = module_nodes.get(i) {
+                        let diagnostics = crate::diagnostics_core::collect_all_semantic_diagnostics(
+                            module_node.clone(),
+                            &self.document,
+                            &module_info.symbols,
+                        );
+                        for diag in diagnostics {
+                            js_array.push(&core_diagnostic_to_js(&diag));
+                        }
+                    }
+                }
+            } else if let Some(symbols) = &self.symbols {
+                // Single module: use original path
+                let diagnostics = crate::diagnostics_core::collect_all_semantic_diagnostics(
+                    tree.root_node(),
+                    &self.document,
+                    symbols,
+                );
+                for diag in diagnostics {
+                    js_array.push(&core_diagnostic_to_js(&diag));
+                }
             }
         }
 
@@ -167,10 +239,15 @@ impl WatLSP {
     /// Provide hover information at the given position (uses tree-sitter based hover)
     #[wasm_bindgen(js_name = provideHover)]
     pub fn provide_hover(&self, line: u32, col: u32) -> JsValue {
-        let Some((symbols, tree)) = self.symbols_and_tree() else {
-            return JsValue::NULL;
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return JsValue::NULL,
         };
         let position = Position::new(line, col);
+        let symbols = match self.symbols_for_position(position) {
+            Some(s) => s,
+            None => return JsValue::NULL,
+        };
         match provide_hover_core(&self.document, symbols, tree, position) {
             Some(hover) => hover_to_js(&hover),
             None => JsValue::NULL,
@@ -180,10 +257,15 @@ impl WatLSP {
     /// Provide go-to-definition at the given position
     #[wasm_bindgen(js_name = provideDefinition)]
     pub fn provide_definition(&self, line: u32, col: u32) -> JsValue {
-        let Some((symbols, tree)) = self.symbols_and_tree() else {
-            return JsValue::NULL;
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return JsValue::NULL,
         };
         let position = Position::new(line, col);
+        let symbols = match self.symbols_for_position(position) {
+            Some(s) => s,
+            None => return JsValue::NULL,
+        };
 
         match crate::features::definition_core::provide_definition_core(
             &self.document,
@@ -210,7 +292,7 @@ impl WatLSP {
         )
         .ok();
 
-        if let (Some(word), Some(symbols)) = (word, &self.symbols) {
+        if let (Some(word), Some(symbols)) = (word, self.symbols_for_position(position)) {
             let func = symbols.get_function_by_name(&word);
             let has_func = func.is_some();
             let func_range = func.and_then(|f| f.range);
@@ -237,16 +319,23 @@ impl WatLSP {
     /// Provide find-references at the given position
     #[wasm_bindgen(js_name = provideReferences)]
     pub fn provide_references(&self, line: u32, col: u32, include_declaration: bool) -> JsValue {
-        let Some((symbols, tree)) = self.symbols_and_tree() else {
-            return js_sys::Array::new().into();
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return js_sys::Array::new().into(),
         };
         let position = Position::new(line, col);
-        let refs = crate::features::references_core::provide_references_core(
+        let symbols = match self.symbols_for_position(position) {
+            Some(s) => s,
+            None => return js_sys::Array::new().into(),
+        };
+        let module_range = self.module_range_for_position(position);
+        let refs = crate::features::references_core::provide_references_core_scoped(
             &self.document,
             symbols,
             tree,
             position,
             include_declaration,
+            module_range,
         );
         let js_array = js_sys::Array::new();
         for range in refs {
@@ -259,10 +348,15 @@ impl WatLSP {
     /// Returns null if the symbol cannot be renamed, otherwise returns { range, placeholder }
     #[wasm_bindgen(js_name = prepareRename)]
     pub fn prepare_rename(&self, line: u32, col: u32) -> JsValue {
-        let Some((symbols, tree)) = self.symbols_and_tree() else {
-            return JsValue::NULL;
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return JsValue::NULL,
         };
         let position = Position::new(line, col);
+        let symbols = match self.symbols_for_position(position) {
+            Some(s) => s,
+            None => return JsValue::NULL,
+        };
 
         // Get word at position
         let word = match get_word_at_position(&self.document, position) {
@@ -310,8 +404,9 @@ impl WatLSP {
     /// Returns null if rename is not possible, otherwise returns { changes: [{ range, newText }] }
     #[wasm_bindgen(js_name = rename)]
     pub fn rename(&self, line: u32, col: u32, new_name: &str) -> JsValue {
-        let Some((symbols, tree)) = self.symbols_and_tree() else {
-            return JsValue::NULL;
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return JsValue::NULL,
         };
 
         // Validation: New name MUST start with $
@@ -327,6 +422,10 @@ impl WatLSP {
         }
 
         let position = Position::new(line, col);
+        let symbols = match self.symbols_for_position(position) {
+            Some(s) => s,
+            None => return JsValue::NULL,
+        };
 
         // Get word at position
         let word = match get_word_at_position(&self.document, position) {
@@ -339,13 +438,15 @@ impl WatLSP {
             return JsValue::NULL;
         }
 
-        // Find all references (including declaration) using the shared core
-        let refs = crate::features::references_core::provide_references_core(
+        // Find all references (including declaration) scoped to module
+        let module_range = self.module_range_for_position(position);
+        let refs = crate::features::references_core::provide_references_core_scoped(
             &self.document,
             symbols,
             tree,
             position,
             true, // include_declaration
+            module_range,
         );
 
         if refs.is_empty() {
@@ -369,53 +470,28 @@ impl WatLSP {
     /// Get symbol table as HTML for debugging
     #[wasm_bindgen(js_name = getSymbolTableHTML)]
     pub fn get_symbol_table_html(&self) -> String {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return "<p>No symbols</p>".to_string(),
-        };
-
-        let mut html = String::new();
-
-        // Functions
-        if !symbols.functions.is_empty() {
-            html.push_str("<h4>Functions</h4><ul>");
-            for func in &symbols.functions {
-                let name = func.name.as_deref().unwrap_or("(anonymous)");
-                let params: Vec<String> = func
-                    .parameters
-                    .iter()
-                    .map(|p| format!("{}", p.param_type))
-                    .collect();
-                let results: Vec<String> = func.results.iter().map(|r| format!("{}", r)).collect();
-                html.push_str(&format!(
-                    "<li>{} ({}): ({}) -> ({})</li>",
-                    name,
-                    func.index,
-                    params.join(", "),
-                    results.join(", ")
-                ));
+        if self.modules.len() > 1 {
+            let mut html = String::new();
+            for (i, module) in self.modules.iter().enumerate() {
+                html.push_str(&format!("<h3>Module {}</h3>", i + 1));
+                html.push_str(&symbol_table_to_html(&module.symbols));
             }
-            html.push_str("</ul>");
+            return if html.is_empty() {
+                "<p>No symbols</p>".to_string()
+            } else {
+                html
+            };
         }
-
-        // Globals
-        if !symbols.globals.is_empty() {
-            html.push_str("<h4>Globals</h4><ul>");
-            for global in &symbols.globals {
-                let name = global.name.as_deref().unwrap_or("(anonymous)");
-                let mutability = if global.is_mutable { "mut " } else { "" };
-                html.push_str(&format!(
-                    "<li>{} ({}): {}{}</li>",
-                    name, global.index, mutability, global.var_type
-                ));
+        match &self.symbols {
+            Some(s) => {
+                let html = symbol_table_to_html(s);
+                if html.is_empty() {
+                    "<p>No symbols found</p>".to_string()
+                } else {
+                    html
+                }
             }
-            html.push_str("</ul>");
-        }
-
-        if html.is_empty() {
-            "<p>No symbols found</p>".to_string()
-        } else {
-            html
+            None => "<p>No symbols</p>".to_string(),
         }
     }
 
@@ -513,16 +589,24 @@ impl WatLSP {
     /// Returns a hierarchical array of symbols matching the LSP DocumentSymbol structure
     #[wasm_bindgen(js_name = provideDocumentSymbols)]
     pub fn provide_document_symbols(&self) -> JsValue {
-        let symbols = match &self.symbols {
-            Some(s) => s,
-            None => return js_sys::Array::new().into(),
-        };
-
-        let core_symbols =
-            crate::features::document_symbols_core::provide_document_symbols_core(symbols);
         let result = js_sys::Array::new();
-        for sym in core_symbols {
-            result.push(&document_symbol_info_to_js(&sym));
+        if self.modules.len() > 1 {
+            // Aggregate symbols from all modules
+            for module in &self.modules {
+                let core_symbols =
+                    crate::features::document_symbols_core::provide_document_symbols_core(
+                        &module.symbols,
+                    );
+                for sym in core_symbols {
+                    result.push(&document_symbol_info_to_js(&sym));
+                }
+            }
+        } else if let Some(symbols) = &self.symbols {
+            let core_symbols =
+                crate::features::document_symbols_core::provide_document_symbols_core(symbols);
+            for sym in core_symbols {
+                result.push(&document_symbol_info_to_js(&sym));
+            }
         }
         result.into()
     }
@@ -562,8 +646,13 @@ impl WatLSP {
     /// Returns an array of folding range objects with startLine, endLine, and kind
     #[wasm_bindgen(js_name = provideFoldingRanges)]
     pub fn provide_folding_ranges(&self) -> JsValue {
-        let Some((symbols, tree)) = self.symbols_and_tree() else {
-            return js_sys::Array::new().into();
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return js_sys::Array::new().into(),
+        };
+        let symbols = match &self.symbols {
+            Some(s) => s,
+            None => return js_sys::Array::new().into(),
         };
         let ranges = provide_folding_ranges(&self.document, symbols, tree);
 
@@ -592,12 +681,11 @@ impl WatLSP {
     /// Returns an array of completion item objects
     #[wasm_bindgen(js_name = provideCompletion)]
     pub fn provide_completion(&self, line: u32, col: u32) -> JsValue {
-        let symbols = match &self.symbols {
+        let position = Position::new(line, col);
+        let symbols = match self.symbols_for_position(position) {
             Some(s) => s,
             None => return js_sys::Array::new().into(),
         };
-
-        let position = Position::new(line, col);
         let completions = provide_completion(&self.document, symbols, position);
 
         let js_array = js_sys::Array::new();
@@ -614,10 +702,15 @@ impl WatLSP {
     ///   activeSignature, activeParameter }
     #[wasm_bindgen(js_name = provideSignatureHelp)]
     pub fn provide_signature_help(&self, line: u32, col: u32) -> JsValue {
-        let Some((symbols, tree)) = self.symbols_and_tree() else {
-            return JsValue::NULL;
+        let tree = match &self.tree {
+            Some(t) => t,
+            None => return JsValue::NULL,
         };
         let position = Position::new(line, col);
+        let symbols = match self.symbols_for_position(position) {
+            Some(s) => s,
+            None => return JsValue::NULL,
+        };
 
         // Try AST-based approach first
         let call_info = if let Some(node) = node_at_position(tree, &self.document, position) {
@@ -885,4 +978,45 @@ fn document_symbol_info_to_js(sym: &DocumentSymbolInfo) -> JsValue {
         js_sys::Reflect::set(&obj, &"children".into(), &arr).ok();
     }
     obj.into()
+}
+
+/// Generate HTML for a single SymbolTable.
+fn symbol_table_to_html(symbols: &SymbolTable) -> String {
+    let mut html = String::new();
+
+    if !symbols.functions.is_empty() {
+        html.push_str("<h4>Functions</h4><ul>");
+        for func in &symbols.functions {
+            let name = func.name.as_deref().unwrap_or("(anonymous)");
+            let params: Vec<String> = func
+                .parameters
+                .iter()
+                .map(|p| format!("{}", p.param_type))
+                .collect();
+            let results: Vec<String> = func.results.iter().map(|r| format!("{}", r)).collect();
+            html.push_str(&format!(
+                "<li>{} ({}): ({}) -> ({})</li>",
+                name,
+                func.index,
+                params.join(", "),
+                results.join(", ")
+            ));
+        }
+        html.push_str("</ul>");
+    }
+
+    if !symbols.globals.is_empty() {
+        html.push_str("<h4>Globals</h4><ul>");
+        for global in &symbols.globals {
+            let name = global.name.as_deref().unwrap_or("(anonymous)");
+            let mutability = if global.is_mutable { "mut " } else { "" };
+            html.push_str(&format!(
+                "<li>{} ({}): {}{}</li>",
+                name, global.index, mutability, global.var_type
+            ));
+        }
+        html.push_str("</ul>");
+    }
+
+    html
 }

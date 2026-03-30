@@ -21,7 +21,7 @@ module.exports = grammar({
   conflicts: $ => [[$.op_let], [$.op_select]],
 
   rules: {
-    ROOT: $ => choice($.module, repeat($.module_field)),
+    ROOT: $ => choice(repeat1($.module), repeat($.module_field)),
 
     align_value: $ => seq("align", imm("="), $.align_offset_value),
 

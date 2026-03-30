@@ -12,10 +12,10 @@ use clap::{Parser, ValueEnum};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use wat_lsp_rust::diagnostics::{
-    merge_all_diagnostics, provide_semantic_diagnostics, provide_tree_sitter_diagnostics,
-    validate_wat,
+    merge_all_diagnostics, provide_semantic_diagnostics, provide_semantic_diagnostics_multi,
+    provide_tree_sitter_diagnostics, validate_wat,
 };
-use wat_lsp_rust::parser::parse_document;
+use wat_lsp_rust::parser::{parse_document, parse_modules_from_tree};
 use wat_lsp_rust::tree_sitter_bindings::create_parser;
 
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -127,10 +127,19 @@ fn check_file(
     let all_diags = match level {
         DiagnosticLevel::Syntax => syntax_diags,
         DiagnosticLevel::Semantic | DiagnosticLevel::Full => {
-            // Layer 2: Semantic diagnostics
-            let semantic_diags = match parse_document(source) {
-                Ok(symbols) => provide_semantic_diagnostics(&tree, source, &symbols),
-                Err(_) => vec![],
+            // Layer 2: Semantic diagnostics (multi-module aware)
+            let semantic_diags = match parse_modules_from_tree(&tree, source) {
+                Ok(modules) if modules.len() > 1 => {
+                    provide_semantic_diagnostics_multi(&tree, source, &modules)
+                }
+                Ok(modules) => modules
+                    .first()
+                    .map(|m| provide_semantic_diagnostics(&tree, source, &m.symbols))
+                    .unwrap_or_default(),
+                Err(_) => match parse_document(source) {
+                    Ok(symbols) => provide_semantic_diagnostics(&tree, source, &symbols),
+                    Err(_) => vec![],
+                },
             };
 
             if matches!(level, DiagnosticLevel::Full) {

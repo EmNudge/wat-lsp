@@ -3,6 +3,7 @@
 //! Extracted from `main.rs` so that integration tests can construct
 //! an `LspService` in-process without going through stdio.
 
+use crate::parser::ModuleInfo;
 use crate::{
     completion, definition, diagnostics, document_symbols, folding, hover, parser, references,
     signature, symbols, tree_sitter_bindings, utils,
@@ -22,7 +23,7 @@ pub const DEBOUNCE_DURATION_MS: u64 = 500;
 /// Type alias for document context references returned by `get_document_context`
 type DocumentContext<'a> = (
     dashmap::mapref::one::Ref<'a, String, String>,
-    dashmap::mapref::one::Ref<'a, String, symbols::SymbolTable>,
+    dashmap::mapref::one::Ref<'a, String, Vec<ModuleInfo>>,
     dashmap::mapref::one::Ref<'a, String, Tree>,
 );
 
@@ -31,9 +32,48 @@ type DocumentContext<'a> = (
 pub struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
-    symbol_map: DashMap<String, symbols::SymbolTable>,
+    symbol_map: DashMap<String, Vec<ModuleInfo>>,
     tree_map: DashMap<String, Tree>,
     validation_cancellation: DashMap<String, watch::Sender<bool>>,
+}
+
+/// Find the SymbolTable for a given position from a list of modules.
+/// Falls back to the first module if no module contains the position.
+fn symbols_for_position(modules: &[ModuleInfo], pos: Position) -> Option<&symbols::SymbolTable> {
+    let line = pos.line;
+    let character = pos.character;
+    for module in modules {
+        let start = &module.range.start;
+        let end = &module.range.end;
+        if (line > start.line || (line == start.line && character >= start.character))
+            && (line < end.line || (line == end.line && character <= end.character))
+        {
+            return Some(&module.symbols);
+        }
+    }
+    // Fall back to first module
+    modules.first().map(|m| &m.symbols)
+}
+
+/// Find the ModuleInfo for a given position (returns symbols + range).
+fn module_for_position(modules: &[ModuleInfo], pos: Position) -> Option<&ModuleInfo> {
+    let line = pos.line;
+    let character = pos.character;
+    for module in modules {
+        let start = &module.range.start;
+        let end = &module.range.end;
+        if (line > start.line || (line == start.line && character >= start.character))
+            && (line < end.line || (line == end.line && character <= end.character))
+        {
+            return Some(module);
+        }
+    }
+    modules.first()
+}
+
+/// Get the first (or only) SymbolTable from a module list.
+fn first_symbols(modules: &[ModuleInfo]) -> Option<&symbols::SymbolTable> {
+    modules.first().map(|m| &m.symbols)
 }
 
 impl Backend {
@@ -66,16 +106,25 @@ impl Backend {
         text: &str,
         old_tree: Option<&Tree>,
     ) -> Option<Tree> {
-        let mut parser = tree_sitter_bindings::create_parser();
-        let tree = parser.parse(text, old_tree)?;
+        let mut ts_parser = tree_sitter_bindings::create_parser();
+        let tree = ts_parser.parse(text, old_tree)?;
 
         // Generate IMMEDIATE syntax diagnostics
         let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, text);
 
-        // Extract symbols and generate semantic diagnostics
-        let semantic_diagnostics = if let Ok(symbol_table) = parser::parse_document(text) {
-            let diags = diagnostics::provide_semantic_diagnostics(&tree, text, &symbol_table);
-            self.symbol_map.insert(uri.to_string(), symbol_table);
+        // Extract symbols and generate semantic diagnostics (per-module)
+        let semantic_diagnostics = if let Ok(modules) = parser::parse_modules_from_tree(&tree, text)
+        {
+            let diags = if modules.len() <= 1 {
+                // Single module: use original path for backward compatibility
+                let syms = modules.first().map(|m| &m.symbols);
+                syms.map(|s| diagnostics::provide_semantic_diagnostics(&tree, text, s))
+                    .unwrap_or_default()
+            } else {
+                // Multi-module: run diagnostics per module
+                diagnostics::provide_semantic_diagnostics_multi(&tree, text, &modules)
+            };
+            self.symbol_map.insert(uri.to_string(), modules);
             diags
         } else {
             vec![]
@@ -162,8 +211,17 @@ impl Backend {
             // Get semantic diagnostics (undefined label references)
             // Use cached symbols instead of re-parsing
             let semantic_diags = match (tree_map.get(&uri), symbol_map.get(&uri)) {
-                (Some(tree), Some(symbols)) => {
-                    diagnostics::provide_semantic_diagnostics(&tree, &text, &symbols)
+                (Some(tree), Some(modules)) => {
+                    if modules.len() <= 1 {
+                        modules
+                            .first()
+                            .map(|m| {
+                                diagnostics::provide_semantic_diagnostics(&tree, &text, &m.symbols)
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        diagnostics::provide_semantic_diagnostics_multi(&tree, &text, &modules)
+                    }
                 }
                 _ => vec![],
             };
@@ -349,8 +407,10 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
-            return Ok(hover::provide_hover(&doc, &syms, &tree, position));
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            if let Some(syms) = symbols_for_position(&modules, position) {
+                return Ok(hover::provide_hover(&doc, syms, &tree, position));
+            }
         }
 
         Ok(None)
@@ -360,11 +420,13 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
 
-        if let Some((doc, syms, _tree)) = self.get_document_context(&uri) {
-            let completions = completion::provide_completion(&doc, &syms, position.into());
-            return Ok(Some(CompletionResponse::Array(
-                completions.into_iter().map(|c| c.into()).collect(),
-            )));
+        if let Some((doc, modules, _tree)) = self.get_document_context(&uri) {
+            if let Some(syms) = symbols_for_position(&modules, position) {
+                let completions = completion::provide_completion(&doc, syms, position.into());
+                return Ok(Some(CompletionResponse::Array(
+                    completions.into_iter().map(|c| c.into()).collect(),
+                )));
+            }
         }
 
         Ok(None)
@@ -378,10 +440,12 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
-            return Ok(signature::provide_signature_help(
-                &doc, &syms, &tree, position,
-            ));
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            if let Some(syms) = symbols_for_position(&modules, position) {
+                return Ok(signature::provide_signature_help(
+                    &doc, syms, &tree, position,
+                ));
+            }
         }
 
         Ok(None)
@@ -398,11 +462,13 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
-            if let Some(location) =
-                definition::provide_definition(&doc, &syms, &tree, position, &uri)
-            {
-                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            if let Some(syms) = symbols_for_position(&modules, position) {
+                if let Some(location) =
+                    definition::provide_definition(&doc, syms, &tree, position, &uri)
+                {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                }
             }
         }
 
@@ -424,24 +490,33 @@ impl LanguageServer for Backend {
             )
             .await;
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
-            let refs = references::provide_references(
-                &doc,
-                &syms,
-                &tree,
-                position,
-                &uri,
-                include_declaration,
-            );
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            if let Some(module) = module_for_position(&modules, position) {
+                // For multi-module docs, scope references to the containing module
+                let module_scope = if modules.len() > 1 {
+                    Some(module.range)
+                } else {
+                    None
+                };
+                let refs = references::provide_references_scoped(
+                    &doc,
+                    &module.symbols,
+                    &tree,
+                    position,
+                    &uri,
+                    include_declaration,
+                    module_scope,
+                );
 
-            self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!("Found {} references", refs.len()),
-                )
-                .await;
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("Found {} references", refs.len()),
+                    )
+                    .await;
 
-            return Ok(Some(refs));
+                return Ok(Some(refs));
+            }
         }
 
         self.client
@@ -457,9 +532,13 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri.to_string();
 
-        if let Some(syms) = self.symbol_map.get(&uri) {
-            let symbols = document_symbols::provide_document_symbols(&syms);
-            return Ok(Some(DocumentSymbolResponse::Nested(symbols)));
+        if let Some(modules) = self.symbol_map.get(&uri) {
+            // Aggregate document symbols from all modules
+            let mut all_symbols = Vec::new();
+            for module in modules.iter() {
+                all_symbols.extend(document_symbols::provide_document_symbols(&module.symbols));
+            }
+            return Ok(Some(DocumentSymbolResponse::Nested(all_symbols)));
         }
 
         Ok(None)
@@ -472,8 +551,12 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
-            if references::identify_symbol_at_position(&doc, &syms, &tree, position).is_some() {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            let syms = match symbols_for_position(&modules, position) {
+                Some(s) => s,
+                None => return Ok(None),
+            };
+            if references::identify_symbol_at_position(&doc, syms, &tree, position).is_some() {
                 // The symbol logic deems this a valid symbol.
                 // Now find the range to select.
                 if let Some(node) = utils::node_at_position(&tree, &doc, position.into()) {
@@ -536,10 +619,19 @@ impl LanguageServer for Backend {
             )
             .await;
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            let module = match module_for_position(&modules, position) {
+                Some(m) => m,
+                None => return Ok(None),
+            };
+            let module_scope = if modules.len() > 1 {
+                Some(module.range)
+            } else {
+                None
+            };
             // Identify the symbol we are renaming
             if let Some(target) =
-                references::identify_symbol_at_position(&doc, &syms, &tree, position)
+                references::identify_symbol_at_position(&doc, &module.symbols, &tree, position)
             {
                 if !target.has_name() {
                     self.client
@@ -548,9 +640,15 @@ impl LanguageServer for Backend {
                     return Ok(None);
                 }
 
-                // Find all references
-                let refs = references::provide_references(
-                    &doc, &syms, &tree, position, &uri, true, // include declaration
+                // Find all references (scoped to module for multi-module docs)
+                let refs = references::provide_references_scoped(
+                    &doc,
+                    &module.symbols,
+                    &tree,
+                    position,
+                    &uri,
+                    true, // include declaration
+                    module_scope,
                 );
 
                 if refs.is_empty() {
@@ -589,10 +687,10 @@ impl LanguageServer for Backend {
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri.to_string();
 
-        if let Some((doc, syms, tree)) = self.get_document_context(&uri) {
-            return Ok(Some(folding::provide_folding_ranges_lsp(
-                &doc, &syms, &tree,
-            )));
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            if let Some(syms) = first_symbols(&modules) {
+                return Ok(Some(folding::provide_folding_ranges_lsp(&doc, syms, &tree)));
+            }
         }
 
         Ok(None)
