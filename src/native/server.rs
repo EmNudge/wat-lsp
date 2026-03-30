@@ -55,6 +55,22 @@ fn symbols_for_position(modules: &[ModuleInfo], pos: Position) -> Option<&symbol
     modules.first().map(|m| &m.symbols)
 }
 
+/// Find the ModuleInfo for a given position (returns symbols + range).
+fn module_for_position(modules: &[ModuleInfo], pos: Position) -> Option<&ModuleInfo> {
+    let line = pos.line;
+    let character = pos.character;
+    for module in modules {
+        let start = &module.range.start;
+        let end = &module.range.end;
+        if (line > start.line || (line == start.line && character >= start.character))
+            && (line < end.line || (line == end.line && character <= end.character))
+        {
+            return Some(module);
+        }
+    }
+    modules.first()
+}
+
 /// Get the first (or only) SymbolTable from a module list.
 fn first_symbols(modules: &[ModuleInfo]) -> Option<&symbols::SymbolTable> {
     modules.first().map(|m| &m.symbols)
@@ -475,14 +491,21 @@ impl LanguageServer for Backend {
             .await;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
-            if let Some(syms) = symbols_for_position(&modules, position) {
-                let refs = references::provide_references(
+            if let Some(module) = module_for_position(&modules, position) {
+                // For multi-module docs, scope references to the containing module
+                let module_scope = if modules.len() > 1 {
+                    Some(module.range)
+                } else {
+                    None
+                };
+                let refs = references::provide_references_scoped(
                     &doc,
-                    syms,
+                    &module.symbols,
                     &tree,
                     position,
                     &uri,
                     include_declaration,
+                    module_scope,
                 );
 
                 self.client
@@ -597,13 +620,18 @@ impl LanguageServer for Backend {
             .await;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
-            let syms = match symbols_for_position(&modules, position) {
-                Some(s) => s,
+            let module = match module_for_position(&modules, position) {
+                Some(m) => m,
                 None => return Ok(None),
+            };
+            let module_scope = if modules.len() > 1 {
+                Some(module.range)
+            } else {
+                None
             };
             // Identify the symbol we are renaming
             if let Some(target) =
-                references::identify_symbol_at_position(&doc, syms, &tree, position)
+                references::identify_symbol_at_position(&doc, &module.symbols, &tree, position)
             {
                 if !target.has_name() {
                     self.client
@@ -612,9 +640,15 @@ impl LanguageServer for Backend {
                     return Ok(None);
                 }
 
-                // Find all references
-                let refs = references::provide_references(
-                    &doc, syms, &tree, position, &uri, true, // include declaration
+                // Find all references (scoped to module for multi-module docs)
+                let refs = references::provide_references_scoped(
+                    &doc,
+                    &module.symbols,
+                    &tree,
+                    position,
+                    &uri,
+                    true, // include declaration
+                    module_scope,
                 );
 
                 if refs.is_empty() {

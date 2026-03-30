@@ -49,6 +49,26 @@ impl WatLSP {
         Some((self.symbols.as_ref()?, self.tree.as_ref()?))
     }
 
+    /// Get the module range for a given position (for scoping references).
+    /// Returns None for single-module documents.
+    fn module_range_for_position(&self, position: Position) -> Option<Range> {
+        if self.modules.len() <= 1 {
+            return None;
+        }
+        let line = position.line;
+        let character = position.character;
+        for module in &self.modules {
+            let start = &module.range.start;
+            let end = &module.range.end;
+            if (line > start.line || (line == start.line && character >= start.character))
+                && (line < end.line || (line == end.line && character <= end.character))
+            {
+                return Some(module.range);
+            }
+        }
+        None
+    }
+
     /// Get the SymbolTable for a given position (multi-module aware).
     fn symbols_for_position(&self, position: Position) -> Option<&SymbolTable> {
         if self.modules.len() > 1 {
@@ -312,12 +332,14 @@ impl WatLSP {
             Some(s) => s,
             None => return js_sys::Array::new().into(),
         };
-        let refs = crate::features::references_core::provide_references_core(
+        let module_range = self.module_range_for_position(position);
+        let refs = crate::features::references_core::provide_references_core_scoped(
             &self.document,
             symbols,
             tree,
             position,
             include_declaration,
+            module_range,
         );
         let js_array = js_sys::Array::new();
         for range in refs {
@@ -420,13 +442,15 @@ impl WatLSP {
             return JsValue::NULL;
         }
 
-        // Find all references (including declaration) using the shared core
-        let refs = crate::features::references_core::provide_references_core(
+        // Find all references (including declaration) scoped to module
+        let module_range = self.module_range_for_position(position);
+        let refs = crate::features::references_core::provide_references_core_scoped(
             &self.document,
             symbols,
             tree,
             position,
             true, // include_declaration
+            module_range,
         );
 
         if refs.is_empty() {

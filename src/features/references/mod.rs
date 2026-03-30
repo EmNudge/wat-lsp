@@ -35,12 +35,34 @@ pub fn provide_references(
     uri: &str,
     include_declaration: bool,
 ) -> Vec<Location> {
-    let ranges = crate::features::references_core::provide_references_core(
+    provide_references_scoped(
+        document,
+        symbols,
+        tree,
+        position,
+        uri,
+        include_declaration,
+        None,
+    )
+}
+
+/// Find references scoped to a module range (for multi-module documents).
+pub fn provide_references_scoped(
+    document: &str,
+    symbols: &crate::symbols::SymbolTable,
+    tree: &Tree,
+    position: Position,
+    uri: &str,
+    include_declaration: bool,
+    module_range: Option<crate::core::types::Range>,
+) -> Vec<Location> {
+    let ranges = crate::features::references_core::provide_references_core_scoped(
         document,
         symbols,
         tree,
         position.into(),
         include_declaration,
+        module_range,
     );
 
     let lsp_uri = match Url::parse(uri) {

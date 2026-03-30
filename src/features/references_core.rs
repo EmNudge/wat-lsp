@@ -122,6 +122,19 @@ pub fn provide_references_core(
     position: Position,
     include_declaration: bool,
 ) -> Vec<Range> {
+    provide_references_core_scoped(document, symbols, tree, position, include_declaration, None)
+}
+
+/// Find all references, optionally scoped to a specific module range.
+/// When `module_range` is provided, only references within that range are returned.
+pub fn provide_references_core_scoped(
+    document: &str,
+    symbols: &SymbolTable,
+    tree: &Tree,
+    position: Position,
+    include_declaration: bool,
+    module_range: Option<Range>,
+) -> Vec<Range> {
     let target = match identify_symbol_at_position(document, symbols, tree, position) {
         Some(t) => t,
         None => return vec![],
@@ -129,9 +142,30 @@ pub fn provide_references_core(
 
     let mut references = find_all_references(&target, tree, document, symbols);
 
+    // Filter to module scope if provided
+    if let Some(scope) = module_range {
+        references.retain(|r| {
+            (r.start.line > scope.start.line
+                || (r.start.line == scope.start.line && r.start.character >= scope.start.character))
+                && (r.end.line < scope.end.line
+                    || (r.end.line == scope.end.line && r.end.character <= scope.end.character))
+        });
+    }
+
     if include_declaration {
         if let Some(def_range) = get_definition_range(&target, symbols) {
-            references.insert(0, def_range);
+            // Only include declaration if it's within scope
+            let in_scope = module_range.map_or(true, |scope| {
+                (def_range.start.line > scope.start.line
+                    || (def_range.start.line == scope.start.line
+                        && def_range.start.character >= scope.start.character))
+                    && (def_range.end.line < scope.end.line
+                        || (def_range.end.line == scope.end.line
+                            && def_range.end.character <= scope.end.character))
+            });
+            if in_scope {
+                references.insert(0, def_range);
+            }
         }
     }
 
