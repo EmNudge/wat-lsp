@@ -155,7 +155,7 @@ pub fn provide_references_core_scoped(
     if include_declaration {
         if let Some(def_range) = get_definition_range(&target, symbols) {
             // Only include declaration if it's within scope
-            let in_scope = module_range.map_or(true, |scope| {
+            let in_scope = module_range.is_none_or(|scope| {
                 (def_range.start.line > scope.start.line
                     || (def_range.start.line == scope.start.line
                         && def_range.start.character >= scope.start.character))
