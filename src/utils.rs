@@ -200,6 +200,25 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
         return context;
     }
 
+    // Identifier at a definition site (e.g., $name in (func $name ...)):
+    // Return Function context so the line-based fallback won't misidentify it.
+    if kind == "identifier" {
+        if let Some(parent) = node.parent() {
+            let pk = parent.kind();
+            if pk == "module_field_func"
+                || pk == "module_field_global"
+                || pk == "module_field_table"
+                || pk == "module_field_memory"
+                || pk == "module_field_type"
+                || pk == "module_field_tag"
+                || pk == "module_field_data"
+                || pk == "module_field_elem"
+            {
+                return InstructionContext::Function;
+            }
+        }
+    }
+
     InstructionContext::General
 }
 

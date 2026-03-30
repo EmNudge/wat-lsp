@@ -250,15 +250,20 @@ fn test_references_consistency_with_definitions() {
         panic!("{}", msg);
     }
 
-    // HEURISTIC: Definition-without-references is a known limitation for certain
-    // contexts (block labels at definition only, elem/data segment refs, etc.).
-    // We track the ratio and fail if it regresses significantly.
+    // STRICT: Reference gap count must not regress.
+    // Current baseline: 171 identifiers with definition but no references.
+    // These are pre-existing gaps: block labels at definition-only sites, elem segment
+    // function refs, data segment refs, and certain export descriptor contexts.
+    // If this number increases, a regression was introduced.
+    // If it decreases, update the baseline!
     let ref_empty_count = ref_empty_failures.len() as u32;
     let ref_coverage_pct = if total_checked > 0 {
         ((total_checked - ref_empty_count) as f64 / total_checked as f64) * 100.0
     } else {
         100.0
     };
+
+    const MAX_ALLOWED_GAPS: u32 = 171;
 
     eprintln!(
         "Reference coverage: {}/{} identifiers ({:.1}%) have refs across {} files",
@@ -267,21 +272,20 @@ fn test_references_consistency_with_definitions() {
         ref_coverage_pct,
         total_files,
     );
-    if !ref_empty_failures.is_empty() {
-        eprintln!(
-            "  {} identifiers with definition but no references (known gap)",
-            ref_empty_count,
-        );
-    }
+    eprintln!(
+        "  {} identifiers with definition but no references (baseline: {})",
+        ref_empty_count, MAX_ALLOWED_GAPS,
+    );
 
-    // Fail if reference coverage drops below 85% — a regression threshold.
-    // Current baseline is ~93% (174 gaps out of ~2500 checked).
     assert!(
-        ref_coverage_pct >= 85.0,
-        "Reference coverage dropped to {:.1}% (threshold: 85%). {} gaps out of {} checked.\nFirst 10 gaps:\n{}",
-        ref_coverage_pct,
+        ref_empty_count <= MAX_ALLOWED_GAPS,
+        "Reference gap count regressed: {} gaps (max allowed: {}). New failures:\n{}",
         ref_empty_count,
-        total_checked,
-        ref_empty_failures.iter().take(10).map(|f| format!("  {}\n", f)).collect::<String>(),
+        MAX_ALLOWED_GAPS,
+        ref_empty_failures
+            .iter()
+            .take(20)
+            .map(|f| format!("  {}\n", f))
+            .collect::<String>(),
     );
 }
