@@ -633,3 +633,164 @@ fn test_parse_nested_block_comment() {
     assert_eq!(func.results.len(), 1);
     assert_eq!(func.results[0], ValueType::I32);
 }
+
+// ===========================================================================
+// Multi-module WAST tests
+// ===========================================================================
+
+#[test]
+fn test_parse_multi_module_wast() {
+    let wast = r#"
+(module
+  (func $add (param $a i32) (param $b i32) (result i32)
+    (i32.add (local.get $a) (local.get $b)))
+)
+(module
+  (func $sub (param $a i32) (param $b i32) (result i32)
+    (i32.sub (local.get $a) (local.get $b)))
+)
+"#;
+
+    let modules = parse_document_modules(wast).unwrap();
+    assert_eq!(modules.len(), 2, "Should find two modules");
+
+    // First module
+    assert_eq!(modules[0].symbols.functions.len(), 1);
+    assert_eq!(
+        modules[0].symbols.functions[0].name,
+        Some("$add".to_string())
+    );
+
+    // Second module
+    assert_eq!(modules[1].symbols.functions.len(), 1);
+    assert_eq!(
+        modules[1].symbols.functions[0].name,
+        Some("$sub".to_string())
+    );
+}
+
+#[test]
+fn test_multi_module_duplicate_identifiers_no_clash() {
+    // Same identifier names in different modules should NOT conflict
+    let wast = r#"
+(module
+  (func $foo (result i32) (i32.const 1))
+  (global $bar (mut i32) (i32.const 0))
+)
+(module
+  (func $foo (result i32) (i32.const 2))
+  (global $bar (mut i32) (i32.const 0))
+)
+"#;
+
+    let modules = parse_document_modules(wast).unwrap();
+    assert_eq!(modules.len(), 2);
+
+    // Each module should have its own $foo and $bar without conflicts
+    assert_eq!(modules[0].symbols.functions.len(), 1);
+    assert_eq!(modules[0].symbols.globals.len(), 1);
+    assert_eq!(modules[1].symbols.functions.len(), 1);
+    assert_eq!(modules[1].symbols.globals.len(), 1);
+}
+
+#[test]
+fn test_multi_module_independent_indices() {
+    // Function indices should start from 0 in each module
+    let wast = r#"
+(module
+  (func $a (result i32) (i32.const 1))
+  (func $b (result i32) (i32.const 2))
+)
+(module
+  (func $c (result i32) (i32.const 3))
+)
+"#;
+
+    let modules = parse_document_modules(wast).unwrap();
+    assert_eq!(modules.len(), 2);
+
+    assert_eq!(modules[0].symbols.functions.len(), 2);
+    assert_eq!(modules[0].symbols.functions[0].index, 0);
+    assert_eq!(modules[0].symbols.functions[1].index, 1);
+
+    assert_eq!(modules[1].symbols.functions.len(), 1);
+    assert_eq!(modules[1].symbols.functions[0].index, 0);
+}
+
+#[test]
+fn test_multi_module_with_types_and_imports() {
+    let wast = r#"
+(module
+  (type $sig (func (param i32) (result i32)))
+  (import "env" "log" (func $log (type $sig)))
+  (func $main (result i32) (i32.const 42))
+)
+(module
+  (type $sig (func (param f64) (result f64)))
+  (func $calc (param f64) (result f64) (local.get 0))
+)
+"#;
+
+    let modules = parse_document_modules(wast).unwrap();
+    assert_eq!(modules.len(), 2);
+
+    // First module: 1 type, 1 import + 1 function = 2 functions
+    assert_eq!(modules[0].symbols.types.len(), 1);
+    assert_eq!(modules[0].symbols.functions.len(), 2);
+
+    // Second module: 1 type, 1 function (no conflicts with first module's $sig)
+    assert_eq!(modules[1].symbols.types.len(), 1);
+    assert_eq!(modules[1].symbols.functions.len(), 1);
+}
+
+#[test]
+fn test_single_module_still_works() {
+    let wat = r#"
+(module
+  (func $test (result i32) (i32.const 42))
+)
+"#;
+
+    let modules = parse_document_modules(wat).unwrap();
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules[0].symbols.functions.len(), 1);
+}
+
+#[test]
+fn test_bare_fields_still_works() {
+    // Bare module_field form (no module wrapper)
+    let wat = r#"(func $test (result i32) (i32.const 42))"#;
+
+    let modules = parse_document_modules(wat).unwrap();
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules[0].symbols.functions.len(), 1);
+}
+
+#[test]
+fn test_multi_module_with_memories_and_globals() {
+    let wast = r#"
+(module
+  (memory $mem 1)
+  (global $g1 (mut i32) (i32.const 0))
+  (func $f1 (result i32) (global.get $g1))
+)
+(module
+  (memory $mem 2)
+  (global $g1 (mut i64) (i64.const 0))
+  (func $f1 (result i64) (global.get $g1))
+)
+"#;
+
+    let modules = parse_document_modules(wast).unwrap();
+    assert_eq!(modules.len(), 2);
+
+    // First module
+    assert_eq!(modules[0].symbols.memories.len(), 1);
+    assert_eq!(modules[0].symbols.globals.len(), 1);
+    assert_eq!(modules[0].symbols.globals[0].var_type, ValueType::I32);
+
+    // Second module - same names but different types
+    assert_eq!(modules[1].symbols.memories.len(), 1);
+    assert_eq!(modules[1].symbols.globals.len(), 1);
+    assert_eq!(modules[1].symbols.globals[0].var_type, ValueType::I64);
+}

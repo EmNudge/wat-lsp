@@ -3,6 +3,7 @@ mod tree_sitter_diagnostics;
 mod wast_validator;
 
 pub use semantic_diagnostics::provide_semantic_diagnostics;
+pub use semantic_diagnostics::provide_semantic_diagnostics_multi;
 pub use tree_sitter_diagnostics::provide_tree_sitter_diagnostics;
 pub use wast_validator::validate_wat;
 

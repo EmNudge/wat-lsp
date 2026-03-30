@@ -1,4 +1,5 @@
 use crate::diagnostics_core::collect_all_semantic_diagnostics;
+use crate::parser::ModuleInfo;
 use crate::symbols::SymbolTable;
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
@@ -13,6 +14,37 @@ pub fn provide_semantic_diagnostics(
         .into_iter()
         .map(Into::into)
         .collect()
+}
+
+/// Provide semantic diagnostics for a multi-module document.
+/// Runs diagnostics per-module with each module's own SymbolTable.
+pub fn provide_semantic_diagnostics_multi(
+    tree: &Tree,
+    source: &str,
+    modules: &[ModuleInfo],
+) -> Vec<Diagnostic> {
+    let root = tree.root_node();
+    let mut all_diagnostics = Vec::new();
+
+    // Collect module nodes from the tree
+    let mut module_nodes = Vec::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "module" {
+            module_nodes.push(child);
+        }
+    }
+
+    // Run diagnostics per module, matching module nodes to ModuleInfo by index
+    for (i, module_info) in modules.iter().enumerate() {
+        if let Some(module_node) = module_nodes.get(i) {
+            let diags =
+                collect_all_semantic_diagnostics(*module_node, source, &module_info.symbols);
+            all_diagnostics.extend(diags.into_iter().map(Into::into));
+        }
+    }
+
+    all_diagnostics
 }
 
 #[cfg(test)]
@@ -3572,6 +3604,148 @@ mod tests {
             errors.is_empty(),
             "Function with (ref any) result should accept non-nullable anyref, got: {:?}",
             errors
+        );
+    }
+
+    // ========================================================================
+    // Multi-module WAST tests
+    // ========================================================================
+
+    #[test]
+    fn test_multi_module_no_false_duplicate_errors() {
+        // Two modules with the same function name should not produce duplicate identifier errors
+        let source = r#"
+(module
+  (func $foo (result i32) (i32.const 1))
+)
+(module
+  (func $foo (result i32) (i32.const 2))
+)
+"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let modules = crate::parser::parse_modules_from_tree(&tree, source).unwrap();
+        let diags = provide_semantic_diagnostics_multi(&tree, source, &modules);
+
+        let dup_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("Duplicate")
+                    && d.severity == Some(DiagnosticSeverity::ERROR)
+            })
+            .collect();
+        assert!(
+            dup_errors.is_empty(),
+            "Same names in different modules should NOT produce duplicate errors, got: {:?}",
+            dup_errors
+        );
+    }
+
+    #[test]
+    fn test_multi_module_no_syntax_errors() {
+        // Multiple modules should parse without syntax errors
+        let source = r#"
+(module
+  (func $add (param i32 i32) (result i32)
+    (i32.add (local.get 0) (local.get 1)))
+)
+(module
+  (func $sub (param i32 i32) (result i32)
+    (i32.sub (local.get 0) (local.get 1)))
+)
+"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let syntax_diags =
+            crate::diagnostics::provide_tree_sitter_diagnostics(&tree, source);
+        assert!(
+            syntax_diags.is_empty(),
+            "Multi-module WAST should have no syntax errors, got: {:?}",
+            syntax_diags
+        );
+    }
+
+    #[test]
+    fn test_multi_module_real_errors_still_caught() {
+        // Errors within a module should still be caught
+        let source = r#"
+(module
+  (func $foo (result i32) (i32.const 1))
+  (func $foo (result i32) (i32.const 2))
+)
+(module
+  (func $bar (result i32) (i32.const 3))
+)
+"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let modules = crate::parser::parse_modules_from_tree(&tree, source).unwrap();
+        let diags = provide_semantic_diagnostics_multi(&tree, source, &modules);
+
+        let dup_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Duplicate func identifier"))
+            .collect();
+        assert_eq!(
+            dup_errors.len(),
+            1,
+            "Duplicate within same module should be caught, got: {:?}",
+            dup_errors
+        );
+    }
+
+    #[test]
+    fn test_multi_module_shared_types_independent() {
+        // Each module should have its own type index space
+        let source = r#"
+(module
+  (type $sig (func (param i32) (result i32)))
+  (func $f1 (type $sig) (local.get 0))
+)
+(module
+  (type $sig (func (param f64) (result f64)))
+  (func $f2 (type $sig) (local.get 0))
+)
+"#;
+
+        let mut parser = create_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let modules = crate::parser::parse_modules_from_tree(&tree, source).unwrap();
+        let diags = provide_semantic_diagnostics_multi(&tree, source, &modules);
+
+        let type_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("Duplicate type")
+                    && d.severity == Some(DiagnosticSeverity::ERROR)
+            })
+            .collect();
+        assert!(
+            type_errors.is_empty(),
+            "Same type name in different modules should not conflict, got: {:?}",
+            type_errors
+        );
+    }
+
+    #[test]
+    fn test_multi_module_wast_validator() {
+        // The wast validator should also handle multi-module WAST files
+        let source = r#"
+(module
+  (func $foo (result i32) (i32.const 1))
+)
+(module
+  (func $foo (result i32) (i32.const 2))
+)
+"#;
+        let diags = crate::diagnostics::validate_wat(source);
+        assert!(
+            diags.is_empty(),
+            "Multi-module WAST should validate without errors, got: {:?}",
+            diags
         );
     }
 }

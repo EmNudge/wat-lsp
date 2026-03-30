@@ -16,6 +16,15 @@ use crate::ts_facade::{Node, Tree};
 #[cfg(all(test, feature = "native"))]
 mod tests;
 
+/// A module and its associated symbol table within a multi-module document.
+#[derive(Debug, Clone)]
+pub struct ModuleInfo {
+    /// Byte range of this module in the source text.
+    pub range: Range,
+    /// Symbols extracted from this module.
+    pub symbols: SymbolTable,
+}
+
 /// Parse a WAT document and extract symbols (PUBLIC API - unchanged)
 #[cfg(feature = "native")]
 pub fn parse_document(text: &str) -> Result<SymbolTable, String> {
@@ -30,6 +39,79 @@ pub fn parse_document(text: &str) -> Result<SymbolTable, String> {
 /// Parse a WAT document from a pre-parsed tree (works for both native and WASM)
 pub fn parse_document_from_tree(tree: &Tree, text: &str) -> Result<SymbolTable, String> {
     extract_symbols(tree, text)
+}
+
+/// Parse a multi-module document (e.g. .wast files) and return per-module symbols.
+/// If only one module (or bare fields) is found, returns a single entry.
+#[cfg(feature = "native")]
+pub fn parse_document_modules(text: &str) -> Result<Vec<ModuleInfo>, String> {
+    let mut parser = create_parser();
+    let tree = parser
+        .parse(text, None)
+        .ok_or_else(|| "Failed to parse document".to_string())?;
+
+    parse_modules_from_tree(&tree, text)
+}
+
+/// Parse multiple modules from a pre-parsed tree.
+pub fn parse_modules_from_tree(tree: &Tree, text: &str) -> Result<Vec<ModuleInfo>, String> {
+    let root = tree.root_node();
+    let module_nodes = collect_module_nodes(&root);
+
+    if module_nodes.is_empty() {
+        // Bare module_field form (no explicit module wrapper) — treat as single module
+        let symbols = extract_symbols(tree, text)?;
+        Ok(vec![ModuleInfo {
+            range: node_to_range(&root),
+            symbols,
+        }])
+    } else {
+        let mut modules = Vec::with_capacity(module_nodes.len());
+        for module_node in &module_nodes {
+            let symbols = extract_symbols_from_node(module_node, text);
+            modules.push(ModuleInfo {
+                range: node_to_range(module_node),
+                symbols,
+            });
+        }
+        Ok(modules)
+    }
+}
+
+/// Collect all top-level `module` nodes from the root.
+fn collect_module_nodes<'a>(root: &Node<'a>) -> Vec<Node<'a>> {
+    let mut modules = Vec::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        node_kind!(ck = child);
+        if ck == "module" {
+            modules.push(node_copy!(&child));
+        }
+    }
+    modules
+}
+
+/// Extract symbols from a single module node (used for multi-module documents).
+fn extract_symbols_from_node(module_node: &Node, source: &str) -> SymbolTable {
+    let mut symbol_table = SymbolTable::new();
+
+    extract_types(module_node, source, &mut symbol_table);
+
+    let import_counts = extract_imports(module_node, source, &mut symbol_table);
+    symbol_table.num_imported_globals = import_counts.globals;
+
+    extract_globals_with_offset(module_node, source, &mut symbol_table, import_counts.globals);
+    extract_tables_with_offset(module_node, source, &mut symbol_table, import_counts.tables);
+    extract_memories_with_offset(module_node, source, &mut symbol_table, import_counts.memories);
+    extract_tags_with_offset(module_node, source, &mut symbol_table, import_counts.tags);
+    extract_functions_with_offset(module_node, source, &mut symbol_table, import_counts.functions);
+
+    extract_data_segments(module_node, source, &mut symbol_table);
+    extract_elem_segments(module_node, source, &mut symbol_table);
+
+    resolve_implicit_function_types(&mut symbol_table);
+
+    symbol_table
 }
 
 /// Extract all symbols from the parse tree
