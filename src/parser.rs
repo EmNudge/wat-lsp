@@ -79,16 +79,28 @@ pub fn parse_modules_from_tree(tree: &Tree, text: &str) -> Result<Vec<ModuleInfo
 }
 
 /// Collect all top-level `module` nodes from the root.
-fn collect_module_nodes<'a>(root: &Node<'a>) -> Vec<Node<'a>> {
-    let mut modules = Vec::new();
-    let mut cursor = root.walk();
-    for child in root.children(&mut cursor) {
-        node_kind!(ck = child);
-        if ck == "module" {
-            modules.push(node_copy!(&child));
+macro_rules! collect_module_nodes_body {
+    ($root:ident) => {{
+        let mut modules = Vec::new();
+        let mut cursor = $root.walk();
+        for child in $root.children(&mut cursor) {
+            node_kind!(ck = child);
+            if ck == "module" {
+                modules.push(node_copy!(&child));
+            }
         }
-    }
-    modules
+        modules
+    }};
+}
+
+#[cfg(feature = "native")]
+fn collect_module_nodes<'a>(root: &Node<'a>) -> Vec<Node<'a>> {
+    collect_module_nodes_body!(root)
+}
+
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn collect_module_nodes(root: &Node) -> Vec<Node> {
+    collect_module_nodes_body!(root)
 }
 
 /// Extract symbols from a single module node (used for multi-module documents).
