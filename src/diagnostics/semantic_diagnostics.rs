@@ -3631,8 +3631,7 @@ mod tests {
         let dup_errors: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.message.contains("Duplicate")
-                    && d.severity == Some(DiagnosticSeverity::ERROR)
+                d.message.contains("Duplicate") && d.severity == Some(DiagnosticSeverity::ERROR)
             })
             .collect();
         assert!(
@@ -3658,8 +3657,7 @@ mod tests {
 
         let mut parser = create_parser();
         let tree = parser.parse(source, None).unwrap();
-        let syntax_diags =
-            crate::diagnostics::provide_tree_sitter_diagnostics(&tree, source);
+        let syntax_diags = crate::diagnostics::provide_tree_sitter_diagnostics(&tree, source);
         assert!(
             syntax_diags.is_empty(),
             "Multi-module WAST should have no syntax errors, got: {:?}",

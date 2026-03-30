@@ -112,11 +112,26 @@ fn extract_symbols_from_node(module_node: &Node, source: &str) -> SymbolTable {
     let import_counts = extract_imports(module_node, source, &mut symbol_table);
     symbol_table.num_imported_globals = import_counts.globals;
 
-    extract_globals_with_offset(module_node, source, &mut symbol_table, import_counts.globals);
+    extract_globals_with_offset(
+        module_node,
+        source,
+        &mut symbol_table,
+        import_counts.globals,
+    );
     extract_tables_with_offset(module_node, source, &mut symbol_table, import_counts.tables);
-    extract_memories_with_offset(module_node, source, &mut symbol_table, import_counts.memories);
+    extract_memories_with_offset(
+        module_node,
+        source,
+        &mut symbol_table,
+        import_counts.memories,
+    );
     extract_tags_with_offset(module_node, source, &mut symbol_table, import_counts.tags);
-    extract_functions_with_offset(module_node, source, &mut symbol_table, import_counts.functions);
+    extract_functions_with_offset(
+        module_node,
+        source,
+        &mut symbol_table,
+        import_counts.functions,
+    );
 
     extract_data_segments(module_node, source, &mut symbol_table);
     extract_elem_segments(module_node, source, &mut symbol_table);

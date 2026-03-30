@@ -9,7 +9,8 @@
 use std::path::Path;
 use tree_sitter::{Node, Tree};
 use wat_lsp_rust::{
-    core::types::Position, features::definition_core::provide_definition_core,
+    core::types::Position,
+    features::definition_core::provide_definition_core,
     parser::{parse_document, parse_modules_from_tree, ModuleInfo},
     tree_sitter_bindings::create_parser,
 };
@@ -79,8 +80,22 @@ fn load_playground_examples() -> Vec<(String, String)> {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
 
-        // Skip the invalid/ subdirectory
+        // Skip subdirectories (except wast/)
         if path.is_dir() {
+            // Also load .wat files from the wast/ subdirectory (multi-module examples)
+            if path.file_name().and_then(|n| n.to_str()) == Some("wast") {
+                for wast_entry in std::fs::read_dir(&path).expect("Failed to read wast directory") {
+                    let wast_entry = wast_entry.expect("Failed to read wast entry");
+                    let wast_path = wast_entry.path();
+                    if wast_path.extension().and_then(|e| e.to_str()) == Some("wat") {
+                        let filename = wast_path.file_name().unwrap().to_str().unwrap().to_string();
+                        let content = std::fs::read_to_string(&wast_path).unwrap_or_else(|e| {
+                            panic!("Failed to read {}: {}", wast_path.display(), e)
+                        });
+                        files.push((filename, content));
+                    }
+                }
+            }
             continue;
         }
 
@@ -196,11 +211,9 @@ fn test_all_identifiers_resolve_to_definition() {
                         let s = &m.range.start;
                         let e = &m.range.end;
                         (position.line > s.line
-                            || (position.line == s.line
-                                && position.character >= s.character))
+                            || (position.line == s.line && position.character >= s.character))
                             && (position.line < e.line
-                                || (position.line == e.line
-                                    && position.character <= e.character))
+                                || (position.line == e.line && position.character <= e.character))
                     })
                     .map(|m| &m.symbols)
                     .unwrap_or(&modules[0].symbols)

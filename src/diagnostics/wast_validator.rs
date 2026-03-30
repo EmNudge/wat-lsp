@@ -15,9 +15,8 @@ pub fn validate_wat(source: &str) -> Vec<Diagnostic> {
     };
 
     // Try single-module WAT first
-    match wast::parser::parse::<wast::Wat>(&buf) {
-        Ok(_) => return vec![], // Valid single-module WAT
-        Err(_) => {}
+    if wast::parser::parse::<wast::Wat>(&buf).is_ok() {
+        return vec![];
     }
 
     // Fall back to WAST script format (multi-module)

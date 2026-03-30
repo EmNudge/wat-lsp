@@ -132,12 +132,10 @@ fn check_file(
                 Ok(modules) if modules.len() > 1 => {
                     provide_semantic_diagnostics_multi(&tree, source, &modules)
                 }
-                Ok(modules) => {
-                    modules
-                        .first()
-                        .map(|m| provide_semantic_diagnostics(&tree, source, &m.symbols))
-                        .unwrap_or_default()
-                }
+                Ok(modules) => modules
+                    .first()
+                    .map(|m| provide_semantic_diagnostics(&tree, source, &m.symbols))
+                    .unwrap_or_default(),
                 Err(_) => match parse_document(source) {
                     Ok(symbols) => provide_semantic_diagnostics(&tree, source, &symbols),
                     Err(_) => vec![],

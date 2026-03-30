@@ -194,12 +194,11 @@ impl WatLSP {
                 }
                 for (i, module_info) in self.modules.iter().enumerate() {
                     if let Some(module_node) = module_nodes.get(i) {
-                        let diagnostics =
-                            crate::diagnostics_core::collect_all_semantic_diagnostics(
-                                module_node.clone(),
-                                &self.document,
-                                &module_info.symbols,
-                            );
+                        let diagnostics = crate::diagnostics_core::collect_all_semantic_diagnostics(
+                            module_node.clone(),
+                            &self.document,
+                            &module_info.symbols,
+                        );
                         for diag in diagnostics {
                             js_array.push(&core_diagnostic_to_js(&diag));
                         }

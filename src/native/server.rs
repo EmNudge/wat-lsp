@@ -3,11 +3,11 @@
 //! Extracted from `main.rs` so that integration tests can construct
 //! an `LspService` in-process without going through stdio.
 
+use crate::parser::ModuleInfo;
 use crate::{
     completion, definition, diagnostics, document_symbols, folding, hover, parser, references,
     signature, symbols, tree_sitter_bindings, utils,
 };
-use crate::parser::ModuleInfo;
 
 use dashmap::DashMap;
 use tokio::sync::watch;
@@ -97,22 +97,22 @@ impl Backend {
         let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, text);
 
         // Extract symbols and generate semantic diagnostics (per-module)
-        let semantic_diagnostics =
-            if let Ok(modules) = parser::parse_modules_from_tree(&tree, text) {
-                let diags = if modules.len() <= 1 {
-                    // Single module: use original path for backward compatibility
-                    let syms = modules.first().map(|m| &m.symbols);
-                    syms.map(|s| diagnostics::provide_semantic_diagnostics(&tree, text, s))
-                        .unwrap_or_default()
-                } else {
-                    // Multi-module: run diagnostics per module
-                    diagnostics::provide_semantic_diagnostics_multi(&tree, text, &modules)
-                };
-                self.symbol_map.insert(uri.to_string(), modules);
-                diags
+        let semantic_diagnostics = if let Ok(modules) = parser::parse_modules_from_tree(&tree, text)
+        {
+            let diags = if modules.len() <= 1 {
+                // Single module: use original path for backward compatibility
+                let syms = modules.first().map(|m| &m.symbols);
+                syms.map(|s| diagnostics::provide_semantic_diagnostics(&tree, text, s))
+                    .unwrap_or_default()
             } else {
-                vec![]
+                // Multi-module: run diagnostics per module
+                diagnostics::provide_semantic_diagnostics_multi(&tree, text, &modules)
             };
+            self.symbol_map.insert(uri.to_string(), modules);
+            diags
+        } else {
+            vec![]
+        };
 
         // Merge and publish diagnostics
         let mut combined = syntax_diagnostics;
@@ -200,11 +200,7 @@ impl Backend {
                         modules
                             .first()
                             .map(|m| {
-                                diagnostics::provide_semantic_diagnostics(
-                                    &tree,
-                                    &text,
-                                    &m.symbols,
-                                )
+                                diagnostics::provide_semantic_diagnostics(&tree, &text, &m.symbols)
                             })
                             .unwrap_or_default()
                     } else {
@@ -430,7 +426,9 @@ impl LanguageServer for Backend {
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
             if let Some(syms) = symbols_for_position(&modules, position) {
-                return Ok(signature::provide_signature_help(&doc, syms, &tree, position));
+                return Ok(signature::provide_signature_help(
+                    &doc, syms, &tree, position,
+                ));
             }
         }
 
