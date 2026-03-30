@@ -45,10 +45,6 @@ pub struct WatLSP {
 }
 
 impl WatLSP {
-    fn symbols_and_tree(&self) -> Option<(&SymbolTable, &Tree)> {
-        Some((self.symbols.as_ref()?, self.tree.as_ref()?))
-    }
-
     /// Get the module range for a given position (for scoping references).
     /// Returns None for single-module documents.
     fn module_range_for_position(&self, position: Position) -> Option<Range> {
