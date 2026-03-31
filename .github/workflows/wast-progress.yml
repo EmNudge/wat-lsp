@@ -149,7 +149,7 @@ jobs:
           clean: false
 
       - name: Post PR comment
-        uses: mskelton/omni-comment@v2.2.1
+        uses: mskelton/omni-comment@v2.2.2
         with:
           section: wast_progress
           title: WAST Spec Test Progress
