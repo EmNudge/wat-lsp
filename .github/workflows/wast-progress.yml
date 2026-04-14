@@ -71,7 +71,7 @@ jobs:
         run: ./target/release/wast-runner testsuite/*.wast --format json > /tmp/base-results.json
 
       - name: Generate comparison
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
