@@ -941,7 +941,7 @@ jobs:
 
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request'
-        uses: mskelton/omni-comment@v2.2.1
+        uses: mskelton/omni-comment@v2.3.0
         with:
           section: docs_preview
           title: Docs Preview
