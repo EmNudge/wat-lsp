@@ -17,7 +17,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -55,7 +55,7 @@ jobs:
         run: ./target/release/wast-runner testsuite/*.wast --format json > /tmp/pr-results.json
 
       - name: Checkout base branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           clean: false
@@ -144,7 +144,7 @@ jobs:
             fs.writeFileSync('/tmp/wast-comment.md', body);
 
       - name: Checkout PR branch (for omni-comment config)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           clean: false
 
