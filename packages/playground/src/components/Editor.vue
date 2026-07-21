@@ -138,11 +138,45 @@ async function initMonaco() {
     },
   });
 
-  // Set up theme
+  // Set up theme, pulling colors from the design tokens in design-tokens.css
+  // so the editor matches the rest of the site. The rules cover both the
+  // TextMate token names produced by scopeToToken and the semantic token types
+  // from the LSP legend — semantic token styles are resolved against these
+  // same rules, and any type without a rule would render in the plain default
+  // foreground.
+  const css = getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) =>
+    (css.getPropertyValue(name).trim() || fallback).replace('#', '');
+  const fg = token('--fg-color', '#cecdc3');
+  const fgMuted = token('--fg-muted', '#878580');
+  const primary = token('--primary-color', '#654ff0');
+  const info = token('--info-color', '#519fdf');
+  const warning = token('--warning-color', '#d0a215');
+  const error = token('--error-color', '#d14d41');
+
   monaco.editor.defineTheme('flexoki-dark', {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'comment', foreground: fgMuted, fontStyle: 'italic' },
+      { token: 'string', foreground: warning },
+      { token: 'string.escape', foreground: info },
+      { token: 'number', foreground: fg },
+      { token: 'keyword', foreground: info },
+      { token: 'keyword.control', foreground: info },
+      { token: 'operator', foreground: fgMuted },
+      { token: 'delimiter', foreground: fgMuted },
+      { token: 'attribute', foreground: fgMuted, fontStyle: 'italic' },
+      { token: 'type', foreground: warning },
+      // Semantic token types (symbol-resolved)
+      { token: 'function', foreground: primary },
+      { token: 'variable', foreground: fg },
+      { token: 'parameter', foreground: fg, fontStyle: 'italic' },
+      { token: 'property', foreground: warning },
+      { token: 'event', foreground: warning },
+      { token: 'namespace', foreground: fg, fontStyle: 'bold' },
+      { token: 'label', foreground: error },
+    ],
     colors: {
       'editor.background': '#10100e',
       'editor.foreground': '#cecdc3',
@@ -162,6 +196,7 @@ async function initMonaco() {
     tabSize: 2,
     scrollBeyondLastLine: false,
     lineNumbers: 'on',
+    'semanticHighlighting.enabled': true,
   });
 
   // Expose for Playwright tests
@@ -388,6 +423,19 @@ function registerLSPProviders() {
         )
       }));
     }
+  });
+
+  // Symbol-resolved highlighting layered over the TextMate base: functions,
+  // params, locals, globals, types, and labels each get their real
+  // classification instead of a generic identifier color.
+  const legend = watLSP.getSemanticTokensLegend();
+  monaco.languages.registerDocumentSemanticTokensProvider('wat', {
+    getLegend: () => legend,
+    provideDocumentSemanticTokens: (model) => {
+      watLSP.parse(model.getValue());
+      return { data: watLSP.provideSemanticTokens(), resultId: undefined };
+    },
+    releaseDocumentSemanticTokens: () => {},
   });
 
   monaco.languages.registerCompletionItemProvider('wat', {

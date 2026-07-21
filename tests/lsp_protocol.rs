@@ -165,6 +165,7 @@ async fn lifecycle_initialize_shutdown() {
     assert!(caps.get("referencesProvider").is_some());
     assert!(caps.get("renameProvider").is_some());
     assert!(caps.get("foldingRangeProvider").is_some());
+    assert!(caps.get("semanticTokensProvider").is_some());
 
     // Initialized notification
     let notif = Request::build("initialized")
@@ -487,4 +488,38 @@ async fn did_close_clears_diagnostics() {
         last.diagnostics.is_empty(),
         "closing document should clear diagnostics"
     );
+}
+
+#[tokio::test]
+async fn semantic_tokens_full() {
+    let (mut svc, _notifs) = create_service();
+    initialize(&mut svc).await;
+    open_document(&mut svc, TEST_URI, TEST_DOC).await;
+
+    let result = send_request(
+        &mut svc,
+        "textDocument/semanticTokens/full",
+        2,
+        json!({ "textDocument": { "uri": TEST_URI } }),
+    )
+    .await;
+
+    let data = result
+        .get("data")
+        .and_then(Value::as_array)
+        .expect("semantic tokens response should contain a data array");
+    assert!(
+        !data.is_empty() && data.len() % 5 == 0,
+        "token data must be non-empty groups of 5, got {} entries",
+        data.len()
+    );
+
+    // First token in TEST_DOC is the `$add` declaration on line 1, char 8:
+    // deltaLine=1, deltaStart=8, length=4, type=0 (function), modifiers has
+    // the declaration bit set.
+    assert_eq!(data[0].as_u64(), Some(1));
+    assert_eq!(data[1].as_u64(), Some(8));
+    assert_eq!(data[2].as_u64(), Some(4));
+    assert_eq!(data[3].as_u64(), Some(0));
+    assert_eq!(data[4].as_u64().unwrap() & 1, 1);
 }

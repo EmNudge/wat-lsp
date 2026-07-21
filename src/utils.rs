@@ -224,7 +224,7 @@ pub fn determine_instruction_context_at_node(node: &Node, document: &str) -> Ins
 
 /// Classify instruction text into an InstructionContext using first-word matching.
 /// Avoids repeated `.contains()` scans over the full text.
-fn context_from_instruction_text(instr_text: &str) -> Option<InstructionContext> {
+pub(crate) fn context_from_instruction_text(instr_text: &str) -> Option<InstructionContext> {
     let first_token = instr_text.split_whitespace().next().unwrap_or("");
 
     // Check data/elem segment operations BEFORE general memory/table
@@ -273,7 +273,10 @@ fn context_from_instruction_text(instr_text: &str) -> Option<InstructionContext>
 /// Determine the context for a node inside a catch_clause.
 /// For (catch $tag $label): first index is Tag, second is Branch
 /// For (catch_all $label): single index is Branch
-fn determine_catch_clause_context(node: &Node, document: &str) -> Option<InstructionContext> {
+pub(crate) fn determine_catch_clause_context(
+    node: &Node,
+    document: &str,
+) -> Option<InstructionContext> {
     // Walk up to find the catch_clause and track our position
     let mut current = node_copy!(node);
     let mut index_node: Option<Node> = None;
