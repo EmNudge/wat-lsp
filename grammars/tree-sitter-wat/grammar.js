@@ -585,17 +585,18 @@ module.exports = grammar({
                   ),
                   new RegExp(
                     [
-                      "a(nd|dd)",
+                      // proposal: wide-arithmetic (add128, sub128, mul_wide_s/u)
+                      "a(nd|dd(128)?)",
                       "c[lt]z",
                       "(div|g[et]|l[et]|rem|shr)_[su]",
                       "e(qz?|xtend(_i32_[su]|(8|16|32)_s))",
-                      "mul",
+                      "mul(_wide_[su])?",
                       "ne",
                       "or",
                       "rot[lr]",
                       "popcnt",
                       "reinterpret_f64",
-                      "s(hl|ub)",
+                      "s(hl|ub(128)?)",
                       "trunc(_sat)?_f(32|64)_[su]",
                       "xor",
                     ].join("|"),
@@ -742,10 +743,15 @@ module.exports = grammar({
 
     // proposal: memory64
     // Memory type can optionally include 'i64' keyword for 64-bit addressing
-    memory_type: $ => seq(optional($.memory64_type), $.limits),
+    // proposal: custom-page-sizes
+    // Memory type can optionally end with a (pagesize N) clause
+    memory_type: $ => seq(optional($.memory64_type), $.limits, optional($.page_size)),
 
     // proposal: memory64
     memory64_type: $ => "i64",
+
+    // proposal: custom-page-sizes
+    page_size: $ => seq("(", "pagesize", $.nat, ")"),
 
     memory_use: $ => seq("(", "memory", $.index, ")"),
 

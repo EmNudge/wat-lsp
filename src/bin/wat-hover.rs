@@ -142,7 +142,7 @@ fn main() -> ExitCode {
                 eprintln!(
                     "  {} -> {:?}",
                     current.kind(),
-                    &source[current.byte_range()]
+                    source[current.byte_range()]
                         .chars()
                         .take(50)
                         .collect::<String>()
@@ -175,7 +175,7 @@ fn main() -> ExitCode {
             eprintln!(
                 "  {:?}: {:?}",
                 data.name,
-                &data.content.chars().take(20).collect::<String>()
+                data.content.chars().take(20).collect::<String>()
             );
         }
         eprintln!("Elem segments ({}):", symbols.elem_segments.len());

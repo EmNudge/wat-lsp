@@ -10,7 +10,7 @@ A Language Server for WebAssembly Text Format (`.wat` files) written in Rust.
 
 Hover, completions, signature help, go to definition, find references, and rename.
 
-Supports WasmGC, Relaxed SIMD, Exception Handling, and Reference Types.
+Supports WasmGC, Relaxed SIMD, Exception Handling, Reference Types, Wide Arithmetic, and Custom Page Sizes.
 
 ## Install
 

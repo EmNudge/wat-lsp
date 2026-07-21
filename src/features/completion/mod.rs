@@ -517,6 +517,23 @@ fn get_type_completions(type_prefix: &str) -> Vec<CompletionItem> {
         for (name, desc) in int_ops {
             completions.push(make_completion(name, desc));
         }
+        if type_prefix.starts_with("i64") {
+            let wide_ops = vec![
+                ("add128", "128-bit addition (wide arithmetic)"),
+                ("sub128", "128-bit subtraction (wide arithmetic)"),
+                (
+                    "mul_wide_s",
+                    "Signed 64x64 to 128-bit multiply (wide arithmetic)",
+                ),
+                (
+                    "mul_wide_u",
+                    "Unsigned 64x64 to 128-bit multiply (wide arithmetic)",
+                ),
+            ];
+            for (name, desc) in wide_ops {
+                completions.push(make_completion(name, desc));
+            }
+        }
     } else {
         // Float-specific instructions
         let float_ops = vec![
