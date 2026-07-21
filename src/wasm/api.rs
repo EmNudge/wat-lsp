@@ -908,15 +908,18 @@ fn capture_name_to_token(name: &str) -> (u32, u32) {
 
         // Types
         "type" | "type.builtin" => (3, 0b10), // builtin modifier
+        "type.definition" => (3, 0b01),       // definition modifier
 
-        // Keywords
+        // Keywords, including instructions (i32.add, local.get, ...): they read
+        // as keywords visually, and mapping them to `function` would repaint
+        // every instruction in the function color.
         "keyword" => (4, 0),
-        "keyword.control" => (4, 0b100000), // control modifier
+        "keyword.control" => (4, 0b100000),   // control modifier
+        "function.instruction" => (4, 0b100), // instruction modifier
 
-        // Functions/Instructions
+        // Functions
         "function" => (5, 0),
         "function.definition" => (5, 0b01), // definition modifier
-        "function.instruction" => (5, 0b100), // instruction modifier
 
         // Variables
         "variable" => (6, 0),

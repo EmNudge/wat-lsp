@@ -138,11 +138,33 @@ async function initMonaco() {
     },
   });
 
-  // Set up theme
+  // Set up theme. The rules cover both the TextMate token names produced by
+  // scopeToToken and the semantic token types from the LSP legend — semantic
+  // token styles are resolved against these same rules, and any type without
+  // a rule would render in the plain default foreground.
   monaco.editor.defineTheme('flexoki-dark', {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'comment', foreground: '878580', fontStyle: 'italic' },
+      { token: 'string', foreground: '3aa99f' },
+      { token: 'string.escape', foreground: 'da702c' },
+      { token: 'number', foreground: '8b7ec8' },
+      { token: 'keyword', foreground: '879a39' },
+      { token: 'keyword.control', foreground: '879a39' },
+      { token: 'operator', foreground: '878580' },
+      { token: 'delimiter', foreground: '878580' },
+      { token: 'attribute', foreground: 'da702c' },
+      { token: 'type', foreground: 'd0a215' },
+      // Semantic token types (symbol-resolved)
+      { token: 'function', foreground: 'da702c' },
+      { token: 'variable', foreground: '4385be' },
+      { token: 'parameter', foreground: '4385be', fontStyle: 'italic' },
+      { token: 'property', foreground: 'ce5d97' },
+      { token: 'event', foreground: 'ce5d97' },
+      { token: 'namespace', foreground: 'd0a215' },
+      { token: 'label', foreground: 'd14d41' },
+    ],
     colors: {
       'editor.background': '#10100e',
       'editor.foreground': '#cecdc3',
