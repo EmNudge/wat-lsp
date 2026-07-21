@@ -1311,22 +1311,10 @@ fn derive_consumed_types_from_name(
         // br_on_null/br_on_non_null handled specially in process_instruction
 
         // Scalar binary operations — 2 operands of prefix type
-        name if is_binary_scalar(name) => {
-            if let Some(ty) = type_from_prefix(name) {
-                Some(Cow::Owned(vec![ty, ty]))
-            } else {
-                None
-            }
-        }
+        name if is_binary_scalar(name) => type_from_prefix(name).map(|ty| Cow::Owned(vec![ty, ty])),
 
         // Scalar unary operations — 1 operand of prefix type
-        name if is_unary_scalar(name) => {
-            if let Some(ty) = type_from_prefix(name) {
-                Some(Cow::Owned(vec![ty]))
-            } else {
-                None
-            }
-        }
+        name if is_unary_scalar(name) => type_from_prefix(name).map(|ty| Cow::Owned(vec![ty])),
 
         _ => None, // fall back to untyped count
     }
@@ -1537,13 +1525,7 @@ fn get_dynamic_operand_count(
             }
             0
         }
-        "br" | "br_if" => {
-            if instr_name == "br_if" {
-                1
-            } else {
-                0
-            }
-        }
+        "br_if" => 1,
         _ => 0,
     }
 }

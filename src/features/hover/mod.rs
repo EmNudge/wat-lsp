@@ -576,11 +576,7 @@ fn provide_annotation_hover(
             let after_prefix = &text[2..];
             let annotation_name = if let Some(stripped) = after_prefix.strip_prefix('"') {
                 // Quoted name: extract content between quotes
-                if let Some(end_quote) = stripped.find('"') {
-                    &stripped[..end_quote]
-                } else {
-                    return None;
-                }
+                &stripped[..stripped.find('"')?]
             } else {
                 // Unquoted name: read until whitespace or ')'
                 let end = after_prefix

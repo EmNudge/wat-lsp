@@ -118,6 +118,22 @@ fn test_i32_instruction_completion() {
     assert!(completions.iter().any(|c| c.label == "sub"));
     assert!(completions.iter().any(|c| c.label == "mul"));
     assert!(completions.iter().any(|c| c.label == "const"));
+
+    // Wide arithmetic is i64-only, so it should not appear for i32.
+    assert!(!completions.iter().any(|c| c.label == "add128"));
+}
+
+#[test]
+fn test_i64_wide_arithmetic_completion() {
+    let document = "i64.";
+    let symbols = create_test_symbols();
+    let position = Position::new(0, 4);
+
+    let completions = provide_completion(document, &symbols, position);
+    assert!(completions.iter().any(|c| c.label == "add128"));
+    assert!(completions.iter().any(|c| c.label == "sub128"));
+    assert!(completions.iter().any(|c| c.label == "mul_wide_s"));
+    assert!(completions.iter().any(|c| c.label == "mul_wide_u"));
 }
 
 #[test]

@@ -104,6 +104,14 @@ mod tests {
     }
 
     #[test]
+    fn test_get_instruction_doc_wide_arithmetic() {
+        assert!(get_instruction_doc("i64.add128").is_some());
+        assert!(get_instruction_doc("i64.sub128").is_some());
+        assert!(get_instruction_doc("i64.mul_wide_s").is_some());
+        assert!(get_instruction_doc("i64.mul_wide_u").is_some());
+    }
+
+    #[test]
     fn test_get_instruction_doc_not_exists() {
         // Test that non-existent instructions return None
         assert!(get_instruction_doc("not.an.instruction").is_none());

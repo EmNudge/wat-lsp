@@ -603,6 +603,64 @@ Example:
 
 ---
 
+## i64.add128
+
+Add two 128-bit values, each represented as a pair of i64 halves (low, high). Returns the 128-bit result as two i64 values. Part of the wide-arithmetic proposal.
+
+Signature: `(param i64 i64 i64 i64) (result i64 i64)`
+
+Example:
+
+```wat
+;; (lhs_lo, lhs_hi) + (rhs_lo, rhs_hi) -> (lo, hi)
+(i64.add128 (i64.const 1) (i64.const 0) (i64.const 2) (i64.const 0))
+```
+
+---
+
+## i64.sub128
+
+Subtract two 128-bit values, each represented as a pair of i64 halves (low, high). Returns the 128-bit result as two i64 values. Part of the wide-arithmetic proposal.
+
+Signature: `(param i64 i64 i64 i64) (result i64 i64)`
+
+Example:
+
+```wat
+;; (lhs_lo, lhs_hi) - (rhs_lo, rhs_hi) -> (lo, hi)
+(i64.sub128 (i64.const 5) (i64.const 0) (i64.const 2) (i64.const 0))
+```
+
+---
+
+## i64.mul_wide_s
+
+Multiply two signed i64 values, producing the full 128-bit result as two i64 values (low, high). Part of the wide-arithmetic proposal.
+
+Signature: `(param i64 i64) (result i64 i64)`
+
+Example:
+
+```wat
+(i64.mul_wide_s (i64.const -2) (i64.const 3))
+```
+
+---
+
+## i64.mul_wide_u
+
+Multiply two unsigned i64 values, producing the full 128-bit result as two i64 values (low, high). Part of the wide-arithmetic proposal.
+
+Signature: `(param i64 i64) (result i64 i64)`
+
+Example:
+
+```wat
+(i64.mul_wide_u (i64.const 2) (i64.const 3))
+```
+
+---
+
 ## i64.const
 
 Create a constant i64 value.

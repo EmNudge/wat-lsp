@@ -261,6 +261,11 @@ fn init_arity_table() -> Vec<(&'static str, InstructionArity)> {
         ("i64.shr_u", InstructionArity::binary_op()),
         ("i64.rotl", InstructionArity::binary_op()),
         ("i64.rotr", InstructionArity::binary_op()),
+        // i64 wide arithmetic (wide-arithmetic proposal)
+        ("i64.add128", InstructionArity::exact(0, "", 4, 2)),
+        ("i64.sub128", InstructionArity::exact(0, "", 4, 2)),
+        ("i64.mul_wide_s", InstructionArity::exact(0, "", 2, 2)),
+        ("i64.mul_wide_u", InstructionArity::exact(0, "", 2, 2)),
         // i64 comparison (binary)
         ("i64.eq", InstructionArity::binary_op()),
         ("i64.ne", InstructionArity::binary_op()),
@@ -1116,5 +1121,32 @@ mod tests {
         let notify = &map["memory.atomic.notify"];
         assert_eq!(notify.operand_mode, OperandMode::Fixed(2));
         assert_eq!(notify.produces, 1);
+    }
+
+    #[test]
+    fn test_wide_arithmetic_instruction_arity() {
+        let map = get_instruction_arity_map();
+
+        // add128/sub128: two 128-bit values as (lo, hi) i64 pairs → (lo, hi)
+        for instr in &["i64.add128", "i64.sub128"] {
+            let arity = &map[*instr];
+            assert_eq!(
+                arity.operand_mode,
+                OperandMode::Fixed(4),
+                "{instr} operands"
+            );
+            assert_eq!(arity.produces, 2, "{instr} produces");
+        }
+
+        // mul_wide: two i64 operands → full 128-bit product as (lo, hi)
+        for instr in &["i64.mul_wide_s", "i64.mul_wide_u"] {
+            let arity = &map[*instr];
+            assert_eq!(
+                arity.operand_mode,
+                OperandMode::Fixed(2),
+                "{instr} operands"
+            );
+            assert_eq!(arity.produces, 2, "{instr} produces");
+        }
     }
 }

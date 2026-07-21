@@ -331,4 +331,62 @@ mod grammar_tests {
         let errors = check_syntax(source);
         assert!(errors.is_empty(), "extending loads failed: {:?}", errors);
     }
+
+    // ========================================================================
+    // proposal: wide-arithmetic
+    // ========================================================================
+
+    #[test]
+    fn test_wide_arithmetic_add128_sub128() {
+        let source = r#"
+            (module
+                (func (param $a i64) (param $b i64) (result i64 i64)
+                    local.get $a
+                    i64.const 0
+                    local.get $b
+                    i64.const 0
+                    i64.add128
+                )
+                (func (result i64 i64)
+                    (i64.sub128 (i64.const 5) (i64.const 0) (i64.const 2) (i64.const 0))
+                )
+            )
+        "#;
+        let errors = check_syntax(source);
+        assert!(errors.is_empty(), "wide arithmetic failed: {:?}", errors);
+    }
+
+    #[test]
+    fn test_wide_arithmetic_mul_wide() {
+        let source = r#"
+            (module
+                (func (param $a i64) (param $b i64) (result i64 i64)
+                    (i64.mul_wide_s (local.get $a) (local.get $b))
+                )
+                (func (param $a i64) (param $b i64) (result i64 i64)
+                    (i64.mul_wide_u (local.get $a) (local.get $b))
+                )
+            )
+        "#;
+        let errors = check_syntax(source);
+        assert!(errors.is_empty(), "mul_wide failed: {:?}", errors);
+    }
+
+    // ========================================================================
+    // proposal: custom-page-sizes
+    // ========================================================================
+
+    #[test]
+    fn test_custom_page_sizes() {
+        let source = r#"
+            (module
+                (memory $one_byte_pages 1 2 (pagesize 1))
+                (memory $default_pages 1 (pagesize 65536))
+                (memory $mem64 i64 1 (pagesize 1))
+                (import "env" "mem" (memory $imported 0 (pagesize 1)))
+            )
+        "#;
+        let errors = check_syntax(source);
+        assert!(errors.is_empty(), "custom page sizes failed: {:?}", errors);
+    }
 }
