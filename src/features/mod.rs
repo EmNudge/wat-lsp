@@ -41,6 +41,10 @@ pub mod references_core;
 #[cfg(feature = "native")]
 pub mod references;
 
+// Semantic tokens - server-driven syntax highlighting classification
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod semantic_tokens;
+
 // Signature - signature help for function calls
 // The call_info submodule is shared; the LSP wrapper is native-only
 #[cfg(any(feature = "native", feature = "wasm"))]

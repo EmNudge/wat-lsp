@@ -12,6 +12,9 @@ use crate::core::types::{
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
 use crate::hover::provide_hover_core;
 use crate::parser::{parse_document_from_tree, parse_modules_from_tree, ModuleInfo};
+use crate::semantic_tokens::{
+    provide_semantic_tokens as provide_semantic_tokens_core, SemanticTokenInfo, SemanticTokenKind,
+};
 use crate::signature::call_info::{find_function_call, find_function_call_ast, CallType};
 use crate::signature::signature_core::{
     provide_call_ref_signature_core, provide_direct_call_signature_core,
@@ -498,6 +501,10 @@ impl WatLSP {
     /// Provide semantic tokens for syntax highlighting
     /// Returns a flat array of u32 values in Monaco's delta-encoded format:
     /// [deltaLine, deltaStartChar, length, tokenType, tokenModifiers, ...]
+    ///
+    /// Combines the syntactic base (highlights.scm query captures) with
+    /// symbol-resolved semantic classification of identifiers and indices.
+    /// Semantic tokens take precedence where both cover the same position.
     #[wasm_bindgen(js_name = provideSemanticTokens)]
     pub fn provide_semantic_tokens(&self) -> js_sys::Uint32Array {
         let empty = js_sys::Uint32Array::new_with_length(0);
@@ -507,44 +514,69 @@ impl WatLSP {
             None => return empty,
         };
 
-        let query = match &self.highlight_query {
-            Some(q) => q,
-            None => return empty,
-        };
-
-        // Run the query on the root node
-        let root = tree.root_node();
-        let captures = query.captures(&root);
-
-        // Collect all tokens with their positions
+        // Collect all tokens with their positions. Semantic tokens are pushed
+        // FIRST so the stable sort keeps them ahead of query captures at the
+        // same position, and the overlap-skip below drops the capture.
         let mut tokens: Vec<(u32, u32, u32, u32, u32)> = Vec::new();
 
-        for capture in captures {
-            let name = capture.name();
-            let node = capture.node();
-
-            let start_pos = node.start_position();
-            let end_pos = node.end_position();
-
-            // Calculate length (handle multi-line tokens)
-            let length = if start_pos.row == end_pos.row {
-                (end_pos.column - start_pos.column) as u32
-            } else {
-                // For multi-line tokens, just use the first line length
-                // This is a simplification; proper handling would split tokens
-                (node.end_byte() - node.start_byte()) as u32
-            };
-
-            // Map capture name to token type index
-            let (token_type, token_modifiers) = capture_name_to_token(&name);
-
+        // Symbol-resolved tokens; fall back to a synthetic whole-document
+        // module when per-module extraction failed but symbols exist.
+        let synthesized;
+        let modules: &[ModuleInfo] = if !self.modules.is_empty() {
+            &self.modules
+        } else if let Some(symbols) = &self.symbols {
+            let end_line = self.document.lines().count() as u32;
+            synthesized = [ModuleInfo {
+                range: Range::from_coords(0, 0, end_line, 0),
+                symbols: symbols.clone(),
+            }];
+            &synthesized
+        } else {
+            &[]
+        };
+        for token in provide_semantic_tokens_core(&self.document, modules, tree) {
+            let (token_type, token_modifiers) = semantic_token_to_legend(&token);
             tokens.push((
-                start_pos.row as u32,
-                start_pos.column as u32,
-                length,
+                token.line,
+                token.start_char,
+                token.length,
                 token_type,
                 token_modifiers,
             ));
+        }
+
+        // Syntactic base from the highlights.scm query
+        if let Some(query) = &self.highlight_query {
+            let root = tree.root_node();
+            let captures = query.captures(&root);
+
+            for capture in captures {
+                let name = capture.name();
+                let node = capture.node();
+
+                let start_pos = node.start_position();
+                let end_pos = node.end_position();
+
+                // Calculate length (handle multi-line tokens)
+                let length = if start_pos.row == end_pos.row {
+                    (end_pos.column - start_pos.column) as u32
+                } else {
+                    // For multi-line tokens, just use the first line length
+                    // This is a simplification; proper handling would split tokens
+                    (node.end_byte() - node.start_byte()) as u32
+                };
+
+                // Map capture name to token type index
+                let (token_type, token_modifiers) = capture_name_to_token(&name);
+
+                tokens.push((
+                    start_pos.row as u32,
+                    start_pos.column as u32,
+                    length,
+                    token_type,
+                    token_modifiers,
+                ));
+            }
         }
 
         // Sort tokens by position (line, then column)
@@ -617,6 +649,7 @@ impl WatLSP {
         let obj = js_sys::Object::new();
 
         // Token types - must match the indices used in capture_name_to_token
+        // and semantic_token_to_legend
         let types = js_sys::Array::new();
         types.push(&"comment".into()); // 0
         types.push(&"string".into()); // 1
@@ -626,6 +659,11 @@ impl WatLSP {
         types.push(&"function".into()); // 5
         types.push(&"variable".into()); // 6
         types.push(&"operator".into()); // 7
+        types.push(&"parameter".into()); // 8
+        types.push(&"property".into()); // 9: struct fields
+        types.push(&"event".into()); // 10: exception tags
+        types.push(&"namespace".into()); // 11: module names
+        types.push(&"label".into()); // 12: block labels
 
         // Token modifiers - bit flags
         let modifiers = js_sys::Array::new();
@@ -635,6 +673,8 @@ impl WatLSP {
         modifiers.push(&"parameter".into()); // bit 3
         modifiers.push(&"local".into()); // bit 4
         modifiers.push(&"control".into()); // bit 5
+        modifiers.push(&"readonly".into()); // bit 6: immutable globals
+        modifiers.push(&"static".into()); // bit 7: module-level entities
 
         js_sys::Reflect::set(&obj, &"tokenTypes".into(), &types).ok();
         js_sys::Reflect::set(&obj, &"tokenModifiers".into(), &modifiers).ok();
@@ -887,6 +927,46 @@ fn capture_name_to_token(name: &str) -> (u32, u32) {
         // Default to keyword for unknown captures
         _ => (4, 0),
     }
+}
+
+/// Map a symbol-resolved semantic token to (tokenType index, tokenModifiers
+/// bitmask) in the legend defined by get_semantic_tokens_legend.
+fn semantic_token_to_legend(token: &SemanticTokenInfo) -> (u32, u32) {
+    let token_type = match token.kind {
+        SemanticTokenKind::Function => 5,
+        SemanticTokenKind::Type => 3,
+        SemanticTokenKind::Local
+        | SemanticTokenKind::Global
+        | SemanticTokenKind::Table
+        | SemanticTokenKind::Memory
+        | SemanticTokenKind::Data
+        | SemanticTokenKind::Elem => 6,
+        SemanticTokenKind::Parameter => 8,
+        SemanticTokenKind::Property => 9,
+        SemanticTokenKind::Tag => 10,
+        SemanticTokenKind::Module => 11,
+        SemanticTokenKind::Label => 12,
+    };
+
+    let mut modifiers = 0u32;
+    if token.is_declaration {
+        modifiers |= 1 << 0; // definition
+    }
+    if token.is_readonly {
+        modifiers |= 1 << 6; // readonly
+    }
+    if matches!(
+        token.kind,
+        SemanticTokenKind::Global
+            | SemanticTokenKind::Table
+            | SemanticTokenKind::Memory
+            | SemanticTokenKind::Data
+            | SemanticTokenKind::Elem
+    ) {
+        modifiers |= 1 << 7; // static
+    }
+
+    (token_type, modifiers)
 }
 
 impl Default for WatLSP {

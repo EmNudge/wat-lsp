@@ -104,6 +104,9 @@ pub use features::document_symbols;
 pub use features::references;
 
 #[cfg(any(feature = "native", feature = "wasm"))]
+pub use features::semantic_tokens;
+
+#[cfg(any(feature = "native", feature = "wasm"))]
 pub use features::signature;
 
 #[cfg(any(feature = "native", feature = "wasm"))]

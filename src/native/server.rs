@@ -6,7 +6,7 @@
 use crate::parser::ModuleInfo;
 use crate::{
     completion, definition, diagnostics, document_symbols, folding, hover, parser, references,
-    signature, symbols, tree_sitter_bindings, utils,
+    semantic_tokens, signature, symbols, tree_sitter_bindings, utils,
 };
 
 use dashmap::DashMap;
@@ -277,6 +277,19 @@ impl LanguageServer for Backend {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: semantic_tokens::TOKEN_TYPES.to_vec(),
+                                token_modifiers: semantic_tokens::TOKEN_MODIFIERS.to_vec(),
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: Some(true),
+                            work_done_progress_options: WorkDoneProgressOptions::default(),
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
         })
@@ -679,6 +692,45 @@ impl LanguageServer for Backend {
                     .show_message(MessageType::WARNING, "No symbol found at position")
                     .await;
             }
+        }
+
+        Ok(None)
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri.to_string();
+
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            let data = semantic_tokens::provide_semantic_tokens_lsp(&doc, &modules, &tree);
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data,
+            })));
+        }
+
+        Ok(None)
+    }
+
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> Result<Option<SemanticTokensRangeResult>> {
+        let uri = params.text_document.uri.to_string();
+
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+            let data = semantic_tokens::provide_semantic_tokens_range_lsp(
+                &doc,
+                &modules,
+                &tree,
+                params.range,
+            );
+            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+                result_id: None,
+                data,
+            })));
         }
 
         Ok(None)

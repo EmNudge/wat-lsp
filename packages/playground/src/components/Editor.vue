@@ -162,6 +162,7 @@ async function initMonaco() {
     tabSize: 2,
     scrollBeyondLastLine: false,
     lineNumbers: 'on',
+    'semanticHighlighting.enabled': true,
   });
 
   // Expose for Playwright tests
@@ -388,6 +389,19 @@ function registerLSPProviders() {
         )
       }));
     }
+  });
+
+  // Symbol-resolved highlighting layered over the TextMate base: functions,
+  // params, locals, globals, types, and labels each get their real
+  // classification instead of a generic identifier color.
+  const legend = watLSP.getSemanticTokensLegend();
+  monaco.languages.registerDocumentSemanticTokensProvider('wat', {
+    getLegend: () => legend,
+    provideDocumentSemanticTokens: (model) => {
+      watLSP.parse(model.getValue());
+      return { data: watLSP.provideSemanticTokens(), resultId: undefined };
+    },
+    releaseDocumentSemanticTokens: () => {},
   });
 
   monaco.languages.registerCompletionItemProvider('wat', {

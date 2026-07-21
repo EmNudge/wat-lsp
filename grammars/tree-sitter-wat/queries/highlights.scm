@@ -213,12 +213,8 @@
   (identifier) @variable)
 
 ; Annotations (@name, @producers, @custom, etc.)
-(annotation
-  (identifier_pattern) @attribute)
-(annotation_part
-  (identifier) @variable)
-(annotation_part
-  (string) @string)
+; The annotation node is an external scanner token with no children.
+(annotation) @attribute
 
 ; Brackets - let TextMate handle these
 ; ["(" ")"] @punctuation.bracket
