@@ -138,32 +138,44 @@ async function initMonaco() {
     },
   });
 
-  // Set up theme. The rules cover both the TextMate token names produced by
-  // scopeToToken and the semantic token types from the LSP legend — semantic
-  // token styles are resolved against these same rules, and any type without
-  // a rule would render in the plain default foreground.
+  // Set up theme, pulling colors from the design tokens in design-tokens.css
+  // so the editor matches the rest of the site. The rules cover both the
+  // TextMate token names produced by scopeToToken and the semantic token types
+  // from the LSP legend — semantic token styles are resolved against these
+  // same rules, and any type without a rule would render in the plain default
+  // foreground.
+  const css = getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) =>
+    (css.getPropertyValue(name).trim() || fallback).replace('#', '');
+  const fg = token('--fg-color', '#cecdc3');
+  const fgMuted = token('--fg-muted', '#878580');
+  const primary = token('--primary-color', '#654ff0');
+  const info = token('--info-color', '#519fdf');
+  const warning = token('--warning-color', '#d0a215');
+  const error = token('--error-color', '#d14d41');
+
   monaco.editor.defineTheme('flexoki-dark', {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '878580', fontStyle: 'italic' },
-      { token: 'string', foreground: '3aa99f' },
-      { token: 'string.escape', foreground: 'da702c' },
-      { token: 'number', foreground: '8b7ec8' },
-      { token: 'keyword', foreground: '879a39' },
-      { token: 'keyword.control', foreground: '879a39' },
-      { token: 'operator', foreground: '878580' },
-      { token: 'delimiter', foreground: '878580' },
-      { token: 'attribute', foreground: 'da702c' },
-      { token: 'type', foreground: 'd0a215' },
+      { token: 'comment', foreground: fgMuted, fontStyle: 'italic' },
+      { token: 'string', foreground: warning },
+      { token: 'string.escape', foreground: info },
+      { token: 'number', foreground: fg },
+      { token: 'keyword', foreground: info },
+      { token: 'keyword.control', foreground: info },
+      { token: 'operator', foreground: fgMuted },
+      { token: 'delimiter', foreground: fgMuted },
+      { token: 'attribute', foreground: fgMuted, fontStyle: 'italic' },
+      { token: 'type', foreground: warning },
       // Semantic token types (symbol-resolved)
-      { token: 'function', foreground: 'da702c' },
-      { token: 'variable', foreground: '4385be' },
-      { token: 'parameter', foreground: '4385be', fontStyle: 'italic' },
-      { token: 'property', foreground: 'ce5d97' },
-      { token: 'event', foreground: 'ce5d97' },
-      { token: 'namespace', foreground: 'd0a215' },
-      { token: 'label', foreground: 'd14d41' },
+      { token: 'function', foreground: primary },
+      { token: 'variable', foreground: fg },
+      { token: 'parameter', foreground: fg, fontStyle: 'italic' },
+      { token: 'property', foreground: warning },
+      { token: 'event', foreground: warning },
+      { token: 'namespace', foreground: fg, fontStyle: 'bold' },
+      { token: 'label', foreground: error },
     ],
     colors: {
       'editor.background': '#10100e',
