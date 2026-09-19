@@ -1,0 +1,10 @@
+{
+  "description": "memory.init with no immediates is rejected (data index is required)",
+  "diagnostics": [
+    {
+      "line": 9,
+      "message_contains": "Missing",
+      "severity": 1
+    }
+  ]
+}

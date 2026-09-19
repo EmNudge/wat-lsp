@@ -1,0 +1,10 @@
+{
+  "description": "table.init with no immediates is rejected (elem index is required)",
+  "diagnostics": [
+    {
+      "line": 10,
+      "message_contains": "Syntax error",
+      "severity": 1
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "description": "memory.init with one or two immediates (data index required, memory index optional) is valid",
+  "diagnostics": []
+}

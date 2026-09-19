@@ -1,0 +1,10 @@
+{
+  "description": "memory.copy with three memory indices is rejected as a syntax error",
+  "diagnostics": [
+    {
+      "line": 8,
+      "message_contains": "Syntax error",
+      "severity": 1
+    }
+  ]
+}
