@@ -1,0 +1,10 @@
+{
+  "description": "memory.copy into a memory64 destination with an i32 address operand is a real type mismatch and must be reported",
+  "diagnostics": [
+    {
+      "line": 12,
+      "message_contains": "type mismatch",
+      "severity": 1
+    }
+  ]
+}

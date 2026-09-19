@@ -1,0 +1,4 @@
+{
+  "description": "Valid Unicode in name strings (export/import names, escapes) produces no diagnostics on the syntax + semantic path",
+  "diagnostics": []
+}

@@ -1219,8 +1219,17 @@ fn derive_consumed_types_from_name(
 
         // Bulk memory — addresses are i32/i64 depending on memory type
         "memory.copy" => {
-            let addr_type = get_memory_address_type(node, symbols, source);
-            Some(Cow::Owned(vec![addr_type, addr_type, addr_type]))
+            // memory.copy $dst $src: (d:dst_addr, s:src_addr, n:min(dst_addr, src_addr)).
+            // The two memories may have different index types (e.g. copying between a
+            // memory64 and a memory32), so each address operand is typed from its own
+            // memory. The count `n` is i64 only when both memories are i64.
+            let (dst_type, src_type) = resolve_memory_copy_addr_types(node, symbols, source);
+            let n_type = if dst_type == ValueType::I64 && src_type == ValueType::I64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            };
+            Some(Cow::Owned(vec![dst_type, src_type, n_type]))
         }
         "memory.fill" => {
             let addr_type = get_memory_address_type(node, symbols, source);
@@ -3428,6 +3437,49 @@ fn resolve_table_copy_addr_types(
     } else {
         let t = symbols.tables.first();
         (addr(t), addr(t))
+    }
+}
+
+/// Resolve address types for `memory.copy $dst $src`.
+///
+/// Returns `(dst_addr_type, src_addr_type)`, each i64 when its memory is
+/// memory64 and i32 otherwise. When fewer than two explicit indices are present
+/// (e.g. the abbreviated `memory.copy` referencing memory 0), both fall back to
+/// memory 0's index type. This mirrors `resolve_table_copy_addr_types` for
+/// tables and lets copies between memories with differing index types type-check
+/// correctly.
+fn resolve_memory_copy_addr_types(
+    node: &Node,
+    symbols: &SymbolTable,
+    source: &str,
+) -> (ValueType, ValueType) {
+    let mut indices = Vec::new();
+    collect_instruction_indices(node, source, &mut indices);
+
+    let addr = |m: Option<&Memory>| -> ValueType {
+        m.map(|m| {
+            if m.is_memory64 {
+                ValueType::I64
+            } else {
+                ValueType::I32
+            }
+        })
+        .unwrap_or(ValueType::I32)
+    };
+
+    if indices.len() >= 2 {
+        let dst = symbols
+            .get_memory_by_name(indices[0])
+            .or_else(|| parse_wat_nat(indices[0]).and_then(|i| symbols.memories.get(i as usize)));
+        let src = symbols
+            .get_memory_by_name(indices[1])
+            .or_else(|| parse_wat_nat(indices[1]).and_then(|i| symbols.memories.get(i as usize)));
+        (addr(dst), addr(src))
+    } else {
+        // Zero or one explicit index: both operands reference the same memory
+        // (memory 0 by default, or the single named memory).
+        let m = resolve_memory(node, symbols, source);
+        (addr(m), addr(m))
     }
 }
 
