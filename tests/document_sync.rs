@@ -547,6 +547,86 @@ fn oversized_and_reversed_edit_ranges_do_not_kill_or_wipe_the_document() {
 }
 
 #[test]
+fn wast_script_document_gets_no_wast_validator_errors() {
+    let mut server = Server::new();
+    let wast = "file:///script.wast";
+    // A multi-module script fragment that single-module `wast` validation
+    // misreports as an error. Under a `.wast` URI that validation is suppressed.
+    let script = "(module (func) (func) (module)\n";
+    server.open(wast, script, 1);
+    server.symbols(wast);
+    // Wait past the debounce so any (suppressed) background validation would land.
+    server.collect_for(Duration::from_millis(900));
+    for publication in server.diagnostics.iter().filter(|d| d["uri"] == wast) {
+        for diagnostic in publication["diagnostics"].as_array().unwrap() {
+            assert_ne!(
+                diagnostic["source"], "wast-validator",
+                "wast script must not receive single-module wast validation: {diagnostic}"
+            );
+        }
+    }
+
+    // The same input under a `.wat` URI DOES get a wast-validator error,
+    // confirming the gate is scheme-specific rather than globally disabling it.
+    let wat = "file:///script-as-wat.wat";
+    server.diagnostics.clear();
+    server.open(wat, script, 1);
+    server.symbols(wat);
+    server.collect_for(Duration::from_millis(900));
+    assert!(
+        server
+            .diagnostics
+            .iter()
+            .filter(|d| d["uri"] == wat)
+            .flat_map(|d| d["diagnostics"].as_array().unwrap())
+            .any(|d| d["source"] == "wast-validator"),
+        "expected a wast-validator error for the .wat document: {:?}",
+        server.diagnostics
+    );
+}
+
+#[test]
+fn deeply_nested_input_stays_responsive_with_a_fallback_notice() {
+    let mut server = Server::new();
+    // Deep nesting drives recursive traversals; the analysis budget must skip the
+    // semantic/`wast` passes and surface an informational fallback instead of
+    // hanging the request path.
+    let deep = format!("{}{}", "(".repeat(2000), ")".repeat(2000));
+    server.open(URI, &deep, 1);
+    // Requests must still return promptly while analysis is bounded.
+    server.symbols(URI);
+    server.collect_for(Duration::from_millis(900));
+    let published: Vec<_> = server
+        .diagnostics
+        .iter()
+        .filter(|d| d["uri"] == URI)
+        .collect();
+    assert!(!published.is_empty(), "expected a diagnostics publication");
+    assert!(
+        published.iter().all(|d| d["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|diag| diag["source"] != "wast-validator")),
+        "budget-exhausted input must not run wast validation: {published:?}"
+    );
+    assert!(
+        published.iter().any(
+            |d| d["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|diag| diag["severity"] == 3
+                    && diag["message"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains("nesting-depth"))
+        ),
+        "expected an informational fallback notice: {published:?}"
+    );
+}
+
+#[test]
 fn position_encoding_is_explicit_utf16() {
     let server = Server::new();
     assert_eq!(
