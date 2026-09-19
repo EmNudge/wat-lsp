@@ -1,0 +1,15 @@
+{
+  "description": "Atomic accesses that are over- or under-aligned relative to their natural alignment are errors",
+  "diagnostics": [
+    {
+      "line": 8,
+      "message_contains_all": ["atomic alignment", "natural"],
+      "severity": 1
+    },
+    {
+      "line": 12,
+      "message_contains_all": ["atomic alignment", "natural"],
+      "severity": 1
+    }
+  ]
+}

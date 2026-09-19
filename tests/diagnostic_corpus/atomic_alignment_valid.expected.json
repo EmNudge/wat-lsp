@@ -1,0 +1,4 @@
+{
+  "description": "Atomic accesses at their natural alignment produce no diagnostics",
+  "diagnostics": []
+}

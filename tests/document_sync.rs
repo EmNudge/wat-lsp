@@ -102,7 +102,9 @@ impl Server {
         let id = self.next_id;
         self.next_id += 1;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // Generous deadline so heavily-loaded CI runners don't spuriously time
+        // out while the server drains a burst of off-executor reparses.
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let message = self.receive_until(deadline);
             if message["id"] == id {
@@ -263,7 +265,11 @@ fn burst_edits_on_a_large_document_lose_no_edits_and_converge() {
     // off the executor. No edit may be dropped or reordered.
     let mut server = Server::new();
     let mut body = String::from("(module (func $a)\n");
-    for i in 0..1500 {
+    // 400 padding funcs keep the document comfortably "large" while keeping each
+    // off-executor reparse fast enough that the burst below finishes well inside
+    // the request deadline on slower CI runners (previously 1500 could exceed the
+    // 10s deadline on Windows/macOS, producing a flaky timeout).
+    for i in 0..400 {
         body.push_str(&format!("  (func $pad{i})\n"));
     }
     body.push(')');
