@@ -26,6 +26,7 @@ pub(crate) fn check_alignment(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut instr_name: Option<&str> = None;
+    let mut is_atomic = false;
     let mut align_node = None;
     let mut offset_node = None;
 
@@ -38,6 +39,10 @@ pub(crate) fn check_alignment(
             | "op_simd_offset_opt_align_opt"
             | "op_simd_lane_memarg" => {
                 instr_name = Some(&source[child.byte_range()]);
+            }
+            "op_atomic_offset_opt_align_opt" => {
+                instr_name = Some(&source[child.byte_range()]);
+                is_atomic = true;
             }
             "align_value" => {
                 align_node = Some(child);
@@ -84,6 +89,22 @@ pub(crate) fn check_alignment(
         return;
     }
 
+    if is_atomic {
+        // Atomic accesses (threads proposal) require *natural* alignment: the
+        // align= value must equal the access width exactly, not merely be <=
+        // the natural alignment. (Wasm spec: "the alignment of an atomic
+        // instruction must be equal to the natural alignment".)
+        if let Some(natural) = atomic_natural_alignment(instr) {
+            if align != natural as u64 {
+                diagnostics.push(Diagnostic::error(
+                    node_to_range(&align_nd),
+                    "atomic alignment must be the natural alignment",
+                ));
+            }
+        }
+        return;
+    }
+
     // Check against natural alignment
     if let Some(natural) = natural_alignment(instr) {
         if align > natural as u64 {
@@ -92,6 +113,47 @@ pub(crate) fn check_alignment(
                 "alignment must not be larger than natural",
             ));
         }
+    }
+}
+
+/// Natural (required) alignment in bytes for an atomic memory instruction.
+///
+/// Atomic accesses must be exactly naturally aligned, so this is both the
+/// maximum and the minimum permitted `align=` value. Returns `None` for
+/// instructions with no memarg (e.g. `atomic.fence`).
+fn atomic_natural_alignment(instr_name: &str) -> Option<u32> {
+    // memory.atomic.wait32/notify operate on 32-bit cells; wait64 on 64-bit.
+    if instr_name == "memory.atomic.wait64" {
+        return Some(8);
+    }
+    if instr_name == "memory.atomic.wait32" || instr_name == "memory.atomic.notify" {
+        return Some(4);
+    }
+
+    // i32.atomic.* / i64.atomic.*: the width is encoded by an optional sub-width
+    // suffix (8/16/32) on load/store, or on the rmw{8,16,32} family. When no
+    // sub-width is present the width is that of the value type (i32 -> 4,
+    // i64 -> 8).
+    let is_i64 = instr_name.starts_with("i64.");
+    let default_width = if is_i64 { 8 } else { 4 };
+
+    // rmw sub-width: e.g. i32.atomic.rmw8.add_u, i64.atomic.rmw32.xchg_u.
+    if let Some(pos) = instr_name.find(".rmw") {
+        let after = &instr_name[pos + 4..]; // skip ".rmw"
+        return match parse_leading_digits(after) {
+            Some(bits) => Some(bits / 8),
+            None => Some(default_width),
+        };
+    }
+
+    // load/store sub-width: e.g. i32.atomic.load8_u, i64.atomic.store32.
+    let after = instr_name
+        .find(".load")
+        .map(|i| &instr_name[i + 5..])
+        .or_else(|| instr_name.find(".store").map(|i| &instr_name[i + 6..]))?;
+    match parse_leading_digits(after) {
+        Some(bits) => Some(bits / 8),
+        None => Some(default_width),
     }
 }
 
@@ -327,6 +389,41 @@ mod tests {
     }
 
     #[test]
+    fn test_atomic_natural_alignment_loads_stores() {
+        assert_eq!(atomic_natural_alignment("i32.atomic.load"), Some(4));
+        assert_eq!(atomic_natural_alignment("i32.atomic.store"), Some(4));
+        assert_eq!(atomic_natural_alignment("i32.atomic.load8_u"), Some(1));
+        assert_eq!(atomic_natural_alignment("i32.atomic.load16_u"), Some(2));
+        assert_eq!(atomic_natural_alignment("i32.atomic.store8"), Some(1));
+        assert_eq!(atomic_natural_alignment("i32.atomic.store16"), Some(2));
+        assert_eq!(atomic_natural_alignment("i64.atomic.load"), Some(8));
+        assert_eq!(atomic_natural_alignment("i64.atomic.store"), Some(8));
+        assert_eq!(atomic_natural_alignment("i64.atomic.load8_u"), Some(1));
+        assert_eq!(atomic_natural_alignment("i64.atomic.load16_u"), Some(2));
+        assert_eq!(atomic_natural_alignment("i64.atomic.load32_u"), Some(4));
+        assert_eq!(atomic_natural_alignment("i64.atomic.store32"), Some(4));
+    }
+
+    #[test]
+    fn test_atomic_natural_alignment_rmw() {
+        assert_eq!(atomic_natural_alignment("i32.atomic.rmw.add"), Some(4));
+        assert_eq!(atomic_natural_alignment("i32.atomic.rmw.cmpxchg"), Some(4));
+        assert_eq!(atomic_natural_alignment("i32.atomic.rmw8.add_u"), Some(1));
+        assert_eq!(atomic_natural_alignment("i32.atomic.rmw16.xchg_u"), Some(2));
+        assert_eq!(atomic_natural_alignment("i64.atomic.rmw.add"), Some(8));
+        assert_eq!(atomic_natural_alignment("i64.atomic.rmw8.and_u"), Some(1));
+        assert_eq!(atomic_natural_alignment("i64.atomic.rmw16.or_u"), Some(2));
+        assert_eq!(atomic_natural_alignment("i64.atomic.rmw32.sub_u"), Some(4));
+    }
+
+    #[test]
+    fn test_atomic_natural_alignment_wait_notify() {
+        assert_eq!(atomic_natural_alignment("memory.atomic.notify"), Some(4));
+        assert_eq!(atomic_natural_alignment("memory.atomic.wait32"), Some(4));
+        assert_eq!(atomic_natural_alignment("memory.atomic.wait64"), Some(8));
+    }
+
+    #[test]
     fn test_parse_number_u64() {
         assert_eq!(parse_number_u64("1"), Some(1));
         assert_eq!(parse_number_u64("4"), Some(4));
@@ -352,6 +449,8 @@ mod tests {
                 .filter(|d| {
                     d.message.contains("alignment must not be larger")
                         || d.message.contains("alignment must be a power of 2")
+                        || d.message
+                            .contains("atomic alignment must be the natural alignment")
                 })
                 .map(|d| d.message.clone())
                 .collect()
@@ -482,6 +581,101 @@ mod tests {
             let diags = get_alignment_diagnostics(source);
             assert_eq!(diags.len(), 1);
             assert_eq!(diags[0], "alignment must not be larger than natural");
+        }
+
+        #[test]
+        fn test_atomic_valid_natural_alignment() {
+            // Every atomic form at exactly its natural alignment: no diagnostics.
+            let source = r#"(module
+                (memory 1 1 shared)
+                (func (param $a i32) (param $v i64)
+                    local.get $a
+                    i32.atomic.load align=4
+                    drop
+                    local.get $a
+                    i32.atomic.load8_u align=1
+                    drop
+                    local.get $a
+                    i32.atomic.load16_u align=2
+                    drop
+                    local.get $a
+                    local.get $v
+                    i64.atomic.store align=8
+                    local.get $a
+                    local.get $v
+                    i64.atomic.store32 align=4
+                    local.get $a
+                    i32.const 1
+                    i32.atomic.rmw8.add_u align=1
+                    drop
+                )
+            )"#;
+            assert!(get_alignment_diagnostics(source).is_empty());
+        }
+
+        #[test]
+        fn test_atomic_alignment_too_large() {
+            // align=8 exceeds the natural alignment (4) of i32.atomic.load.
+            let source = r#"(module
+                (memory 1 1 shared)
+                (func (param $a i32)
+                    local.get $a
+                    i32.atomic.load align=8
+                    drop
+                )
+            )"#;
+            let diags = get_alignment_diagnostics(source);
+            assert_eq!(diags.len(), 1);
+            assert_eq!(diags[0], "atomic alignment must be the natural alignment");
+        }
+
+        #[test]
+        fn test_atomic_alignment_too_small() {
+            // align=1 is smaller than the natural alignment (4) of i32.atomic.load;
+            // unlike plain loads, atomics reject under-alignment too.
+            let source = r#"(module
+                (memory 1 1 shared)
+                (func (param $a i32)
+                    local.get $a
+                    i32.atomic.load align=1
+                    drop
+                )
+            )"#;
+            let diags = get_alignment_diagnostics(source);
+            assert_eq!(diags.len(), 1);
+            assert_eq!(diags[0], "atomic alignment must be the natural alignment");
+        }
+
+        #[test]
+        fn test_atomic_rmw_wrong_alignment() {
+            let source = r#"(module
+                (memory 1 1 shared)
+                (func (param $a i32) (param $v i32) (result i32)
+                    local.get $a
+                    local.get $v
+                    i32.atomic.rmw16.add_u align=4
+                )
+            )"#;
+            let diags = get_alignment_diagnostics(source);
+            assert_eq!(diags.len(), 1);
+            assert_eq!(diags[0], "atomic alignment must be the natural alignment");
+        }
+
+        #[test]
+        fn test_atomic_wait_notify_alignment() {
+            // wait64 requires align=8; align=4 is wrong.
+            let source = r#"(module
+                (memory 1 1 shared)
+                (func (param $a i32) (param $e i64) (param $t i64) (result i32)
+                    local.get $a
+                    local.get $e
+                    local.get $t
+                    memory.atomic.wait64 align=4
+                )
+            )"#;
+            let diags = get_alignment_diagnostics(source);
+            assert_eq!(diags.len(), 1);
+            assert_eq!(diags[0], "atomic alignment must be the natural alignment");
         }
 
         #[test]
