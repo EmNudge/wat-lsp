@@ -1,13 +1,20 @@
 //! Per-URI document ownership. The queue serializes edits, reads, lifecycle events,
 //! and diagnostic publication without holding a cache lock across an await.
 //!
-//! Incremental parse and syntax/semantic diagnostics run synchronously so reads
-//! see a current snapshot and fast feedback publishes immediately. The heavier
-//! full `wast` validation runs off the async executor in a background task and
-//! returns its result through this queue, tagged with the document version and
-//! an open-session generation; the actor publishes it only if neither has moved
-//! on. That keeps the actor free to serve reads while validation runs, and means
-//! obsolete or post-close results are discarded instead of clobbering current
+//! An edit is split into two phases. The ordered, cheap text mutation (and the
+//! `Tree::edit` bookkeeping on a clone of the old tree) runs synchronously on the
+//! actor. The expensive tree-sitter reparse plus the syntax/semantic passes then
+//! run on a blocking thread (`spawn_blocking`) that the actor `await`s: the actor's
+//! executor worker thread is released for the duration, so a large or deeply
+//! nested edit no longer pins a runtime worker while it parses. Because the actor
+//! is a single task that owns the snapshot and processes commands serially, edits
+//! and reads stay strictly ordered — a read still observes every preceding edit's
+//! text and tree — and no mutation is ever dropped.
+//!
+//! The heavier full `wast` validation runs off the async executor in a background
+//! task and returns its result through this queue, tagged with the document version
+//! and an open-session generation; the actor publishes it only if neither has moved
+//! on. Obsolete or post-close results are discarded instead of clobbering current
 //! diagnostics — aborting a blocking task is never assumed to stop its work.
 
 use std::sync::Arc;
@@ -176,7 +183,16 @@ impl DocumentSnapshot {
         }
     }
 
-    fn changed(&self, version: i32, changes: Vec<TextDocumentContentChangeEvent>) -> Option<Self> {
+    /// Apply an ordered batch of changes to this snapshot's text, mirroring each
+    /// edit onto a clone of the old tree (the cheap `Tree::edit` bookkeeping, not
+    /// a reparse). Returns the mutated text plus the edited old tree so the caller
+    /// can run the expensive [`Self::parse`] off the async executor. Returns `None`
+    /// if any edit in the batch is invalid; the batch is then rejected atomically
+    /// and no mutation is committed.
+    fn apply_changes(
+        &self,
+        changes: Vec<TextDocumentContentChangeEvent>,
+    ) -> Option<(String, Option<Tree>)> {
         let mut text = (*self.text).clone();
         let mut old_tree = self.tree.clone();
         for change in changes {
@@ -211,6 +227,30 @@ impl DocumentSnapshot {
                 old_tree = None;
             }
         }
+        Some((text, old_tree))
+    }
+
+    /// Run the tree-sitter parse plus the syntax/semantic passes on a blocking
+    /// thread so the CPU-bound work stays off the async executor's worker threads.
+    /// The actor `await`s this: its own worker thread is released for the duration
+    /// (other documents' actors and reads keep running), and edits/reads for this
+    /// document stay strictly ordered because the actor processes them serially.
+    async fn parse_off_executor(
+        text: String,
+        version: i32,
+        old_tree: Option<Tree>,
+    ) -> Option<Self> {
+        // `spawn_blocking` only fails if the blocking closure panics or the runtime
+        // is shutting down. In either case we return `None` and leave the previously
+        // installed snapshot in place rather than committing empty text.
+        tokio::task::spawn_blocking(move || Self::parse(text, version, old_tree.as_ref()))
+            .await
+            .ok()
+    }
+
+    #[cfg(test)]
+    fn changed(&self, version: i32, changes: Vec<TextDocumentContentChangeEvent>) -> Option<Self> {
+        let (text, old_tree) = self.apply_changes(changes)?;
         Some(Self::parse(text, version, old_tree.as_ref()))
     }
 }
@@ -275,15 +315,36 @@ impl DocumentHandle {
                         match event {
                             DocumentEvent::Open { text, version } => {
                                 generation += 1;
-                                snapshot = Some(Arc::new(DocumentSnapshot::parse(text, version, None)));
-                                updated = true;
+                                // The parse runs off the executor; `await` releases
+                                // this worker thread while it runs. Only this task
+                                // mutates `snapshot`, and it is single-threaded across
+                                // awaits, so the install is race-free.
+                                if let Some(parsed) =
+                                    DocumentSnapshot::parse_off_executor(text, version, None).await
+                                {
+                                    snapshot = Some(Arc::new(parsed));
+                                    updated = true;
+                                }
                             }
                             DocumentEvent::Change { changes, version } => {
                                 if let Some(current) = &snapshot {
                                     if version > current.version {
-                                        if let Some(changed) = current.changed(version, changes) {
-                                            snapshot = Some(Arc::new(changed));
-                                            updated = true;
+                                        // Apply the cheap, ordered text/tree mutation
+                                        // synchronously, then run the expensive parse
+                                        // off the executor. The batch is rejected
+                                        // atomically if any edit is invalid.
+                                        if let Some((text, old_tree)) =
+                                            current.apply_changes(changes)
+                                        {
+                                            if let Some(parsed) =
+                                                DocumentSnapshot::parse_off_executor(
+                                                    text, version, old_tree,
+                                                )
+                                                .await
+                                            {
+                                                snapshot = Some(Arc::new(parsed));
+                                                updated = true;
+                                            }
                                         } else {
                                             client.log_message(MessageType::WARNING, format!(
                                                 "Ignoring didChange with a reversed range for {uri} at version {version}",
