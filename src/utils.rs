@@ -274,54 +274,46 @@ fn context_from_instruction_text(instr_text: &str) -> Option<InstructionContext>
 /// For (catch $tag $label): first index is Tag, second is Branch
 /// For (catch_all $label): single index is Branch
 fn determine_catch_clause_context(node: &Node, document: &str) -> Option<InstructionContext> {
-    // Walk up to find the catch_clause and track our position
-    let mut current = node_copy!(node);
-    let mut index_node: Option<Node> = None;
-
-    loop {
-        let kind = current.kind();
-
-        // Track if we pass through an index node
-        if kind == "index" {
-            index_node = Some(node_clone!(current));
-        }
-
-        if kind == "catch_clause" {
-            // Found the catch_clause, now determine position
-            let text = &document[current.byte_range()];
-
-            // Determine if this is catch/catch_ref (has tag) or catch_all/catch_all_ref (no tag)
-            let has_tag = text.contains("catch_ref")
-                || (text.contains("catch") && !text.contains("catch_all"));
-
-            if let Some(idx_node) = index_node {
-                // Find the position of this index among all index children (no Vec allocation)
-                let mut cursor = current.walk();
-                let mut index_count = 0;
-                for child in current.children(&mut cursor) {
-                    if child.kind() == "index" {
-                        if child.byte_range() == idx_node.byte_range() {
-                            // Found our index - first index in catch/catch_ref is tag, rest are labels
-                            return Some(if has_tag && index_count == 0 {
-                                InstructionContext::Tag
-                            } else {
-                                InstructionContext::Branch
-                            });
-                        }
-                        index_count += 1;
-                    }
-                }
-            }
-
-            // Inside catch_clause but not in an index - shouldn't happen for identifiers
+    // A catch_clause is `(catch $tag $label)` / `(catch_all $label)`: its only
+    // children are `index` nodes, and an `index` is `choice(nat, identifier)`.
+    // So a catch-clause index is at most two hops above the cursor node
+    // (identifier/nat -> index -> catch_clause). Locate that `index` directly
+    // instead of walking to the module root for every identifier in the file.
+    let index_node = if node.kind() == "index" {
+        node_copy!(node)
+    } else {
+        let parent = node.parent()?;
+        if parent.kind() == "index" {
+            parent
+        } else {
             return None;
         }
+    };
 
-        // Walk up the tree
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
+    let catch_clause = index_node.parent()?;
+    if catch_clause.kind() != "catch_clause" {
+        return None;
+    }
+
+    // catch/catch_ref carry a leading tag index; catch_all/catch_all_ref do not.
+    let text = &document[catch_clause.byte_range()];
+    let has_tag =
+        text.contains("catch_ref") || (text.contains("catch") && !text.contains("catch_all"));
+
+    // First index in catch/catch_ref is the tag, remaining indices are labels.
+    let index_start = index_node.byte_range().start;
+    let mut cursor = catch_clause.walk();
+    let mut index_count = 0;
+    for child in catch_clause.children(&mut cursor) {
+        if child.kind() == "index" {
+            if child.byte_range().start == index_start {
+                return Some(if has_tag && index_count == 0 {
+                    InstructionContext::Tag
+                } else {
+                    InstructionContext::Branch
+                });
+            }
+            index_count += 1;
         }
     }
 
@@ -870,5 +862,64 @@ mod tests {
 
         assert_eq!(node.kind(), "identifier");
         assert_eq!(&source[node.byte_range()], "$test");
+    }
+
+    #[test]
+    fn test_catch_clause_context_tag_then_label() {
+        use crate::tree_sitter_bindings;
+        let mut parser = tree_sitter_bindings::create_parser();
+        // In `(catch $e $l)` the first index is the tag, the second is the label.
+        let source =
+            "(module\n  (tag $e)\n  (func $f\n    block $l\n    try_table (catch $e $l)\n    end\n    end))";
+        let tree = parser.parse(source, None).unwrap();
+
+        let tag_node = node_at_position(&tree, source, Position::new(4, 22)).unwrap();
+        assert_eq!(&source[tag_node.byte_range()], "$e");
+        assert_eq!(
+            determine_instruction_context(tag_node, source),
+            InstructionContext::Tag
+        );
+
+        let label_node = node_at_position(&tree, source, Position::new(4, 25)).unwrap();
+        assert_eq!(&source[label_node.byte_range()], "$l");
+        assert_eq!(
+            determine_instruction_context(label_node, source),
+            InstructionContext::Branch
+        );
+    }
+
+    #[test]
+    fn test_catch_all_clause_context_is_branch() {
+        use crate::tree_sitter_bindings;
+        let mut parser = tree_sitter_bindings::create_parser();
+        // `(catch_all $l)` has no tag; its single index is the branch label.
+        let source =
+            "(module\n  (func $f\n    block $l\n    try_table (catch_all $l)\n    end\n    end))";
+        let tree = parser.parse(source, None).unwrap();
+
+        let label_node = node_at_position(&tree, source, Position::new(3, 26)).unwrap();
+        assert_eq!(&source[label_node.byte_range()], "$l");
+        assert_eq!(
+            determine_instruction_context(label_node, source),
+            InstructionContext::Branch
+        );
+    }
+
+    #[test]
+    fn test_non_catch_identifier_is_not_tag_or_branch() {
+        use crate::tree_sitter_bindings;
+        let mut parser = tree_sitter_bindings::create_parser();
+        // A local index outside any catch clause must not be classified via the
+        // catch-clause path (regression guard for the bounded ancestor lookup).
+        let source = "(module\n  (func $f (param $x i32)\n    local.get $x))";
+        let tree = parser.parse(source, None).unwrap();
+
+        let node = node_at_position(&tree, source, Position::new(2, 14)).unwrap();
+        assert_eq!(&source[node.byte_range()], "$x");
+        let ctx = determine_instruction_context(node, source);
+        assert!(
+            ctx != InstructionContext::Tag,
+            "local index must not be classified as a catch tag, got {ctx:?}"
+        );
     }
 }

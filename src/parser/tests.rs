@@ -634,6 +634,94 @@ fn test_parse_nested_block_comment() {
     assert_eq!(func.results[0], ValueType::I32);
 }
 
+#[test]
+fn test_doc_comment_not_inherited_across_functions() {
+    // A function preceded directly by another function (no comment run of its
+    // own) must not inherit the earlier function's doc comment.
+    let wat = r#"(module
+  ;; First function doc
+  (func $first (result i32)
+    (i32.const 1))
+  (func $second (result i32)
+    (i32.const 2))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+    let first = symbols
+        .functions
+        .iter()
+        .find(|f| f.name.as_deref() == Some("$first"))
+        .unwrap();
+    let second = symbols
+        .functions
+        .iter()
+        .find(|f| f.name.as_deref() == Some("$second"))
+        .unwrap();
+
+    assert!(first
+        .doc_comment
+        .as_deref()
+        .unwrap()
+        .contains("First function doc"));
+    assert!(
+        second.doc_comment.is_none(),
+        "second function must not inherit the first's doc comment, got {:?}",
+        second.doc_comment
+    );
+}
+
+#[test]
+fn test_doc_comment_each_function_gets_its_own() {
+    // Adjacent functions with their own comment runs each keep only their own.
+    let wat = r#"(module
+  ;; Doc for alpha
+  (func $alpha (result i32) (i32.const 1))
+  ;; Doc for beta
+  (func $beta (result i32) (i32.const 2))
+)"#;
+
+    let symbols = parse_document(wat).unwrap();
+    let alpha = symbols
+        .functions
+        .iter()
+        .find(|f| f.name.as_deref() == Some("$alpha"))
+        .unwrap();
+    let beta = symbols
+        .functions
+        .iter()
+        .find(|f| f.name.as_deref() == Some("$beta"))
+        .unwrap();
+
+    let a = alpha.doc_comment.as_deref().unwrap();
+    let b = beta.doc_comment.as_deref().unwrap();
+    assert!(
+        a.contains("alpha") && !a.contains("beta"),
+        "alpha doc: {a:?}"
+    );
+    assert!(
+        b.contains("beta") && !b.contains("alpha"),
+        "beta doc: {b:?}"
+    );
+}
+
+#[test]
+fn test_parse_function_comment_with_large_blank_gap_ignored() {
+    // More than one blank line between the comment and the function → not a doc
+    // comment (the ≤1 blank-line attachment rule must be preserved).
+    let wat =
+        "(module\n  ;; far away comment\n\n\n  (func $far (result i32)\n    (i32.const 0))\n)";
+
+    let symbols = parse_document(wat).unwrap();
+    let func = &symbols.functions[0];
+
+    assert_eq!(func.name, Some("$far".to_string()));
+    assert!(
+        func.doc_comment.is_none(),
+        "comment separated by >1 blank line should be ignored, got {:?}",
+        func.doc_comment
+    );
+}
+
 // ===========================================================================
 // Multi-module WAST tests
 // ===========================================================================

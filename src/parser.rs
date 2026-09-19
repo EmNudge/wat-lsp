@@ -777,27 +777,24 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
     }
 
     // module_field_func -> module_field -> module
-    // We need to find comments that are siblings of module_field (our grandparent)
+    // Comments are siblings of module_field under the module node. Walk backwards
+    // over the immediately-preceding siblings and collect the contiguous run of
+    // comments, stopping at the first non-comment (e.g. an earlier module field).
+    // Using prev_sibling keeps this O(preceding comments) instead of rescanning
+    // every preceding module field for each function in the module.
     let parent = node.parent()?; // module_field
-    let grandparent = parent.parent()?; // module
 
-    let parent_start_byte = parent.start_byte();
-
+    // Comments closest to the function come first (siblings walk backwards).
     let mut comments = Vec::new();
-    let mut cursor = grandparent.walk();
-
-    // Collect all comment nodes that appear before the module_field
-    for sibling in grandparent.children(&mut cursor) {
-        // Stop when we reach or pass our target node's parent
-        if sibling.start_byte() >= parent_start_byte {
-            break;
-        }
-
-        node_kind!(kind = sibling);
-
+    let mut sibling = parent.prev_sibling();
+    while let Some(current) = sibling {
+        node_kind!(kind = current);
         if kind == "comment_line" || kind == "comment_block" {
-            let comment_end_line = sibling.range().end_point.row;
-            comments.push((comment_end_line, node_text(&sibling, source)));
+            let comment_end_line = current.range().end_point.row;
+            comments.push((comment_end_line, node_text(&current, source)));
+            sibling = current.prev_sibling();
+        } else {
+            break;
         }
     }
 
@@ -809,8 +806,8 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
     let mut relevant_comments = Vec::new();
     let mut expected_line = node_start_line - 1;
 
-    // Process comments in reverse order (from closest to function to furthest)
-    for (end_line, text) in comments.into_iter().rev() {
+    // `comments` is already ordered closest-to-function first.
+    for (end_line, text) in comments {
         // Allow for blank lines between comments (up to 1 blank line)
         if end_line <= expected_line && expected_line - end_line <= 1 {
             relevant_comments.push(text);
