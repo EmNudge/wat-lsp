@@ -375,6 +375,59 @@ async fn incremental_edit_updates_diagnostics() {
     );
 }
 
+/// Burst typing must converge to the latest version and never regress: a
+/// background validation started for an earlier edit cannot clobber a newer
+/// edit's diagnostics (version/generation gating in the document actor).
+#[tokio::test]
+async fn burst_edits_converge_to_latest_version_without_regressing() {
+    let (mut svc, notifs) = create_service();
+    initialize(&mut svc).await;
+
+    open_document(&mut svc, TEST_URI, TEST_DOC).await;
+
+    let docs = [
+        "(module (func $a (result i32) (i32.const 1)))",
+        "(module (func $a (result i32) (i32.const 2)))",
+        "(module (func $a (result i32) (i32.const 3)))",
+        "(module (func $a (result i32) (i32.const 4)))",
+    ];
+    // Open is version 1; changes run 2..=5.
+    let final_version = 1 + docs.len() as i32;
+    for (i, doc) in docs.iter().enumerate() {
+        change_document(&mut svc, TEST_URI, doc, 2 + i as i32).await;
+    }
+
+    // Wait for the latest version (including the debounced background validation)
+    // to settle.
+    for _ in 0..100 {
+        if notifs
+            .lock()
+            .await
+            .diagnostics
+            .iter()
+            .any(|d| d.version == Some(final_version))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let store = notifs.lock().await;
+    let versions: Vec<i32> = store.diagnostics.iter().filter_map(|d| d.version).collect();
+    assert!(!versions.is_empty(), "expected versioned diagnostics");
+    for pair in versions.windows(2) {
+        assert!(
+            pair[1] >= pair[0],
+            "diagnostic versions regressed: {versions:?}"
+        );
+    }
+    assert_eq!(
+        *versions.last().unwrap(),
+        final_version,
+        "diagnostics did not converge to the latest version: {versions:?}"
+    );
+}
+
 #[tokio::test]
 async fn folding_ranges() {
     let (mut svc, _notifs) = create_service();

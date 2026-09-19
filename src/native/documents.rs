@@ -1,9 +1,14 @@
 //! Per-URI document ownership. The queue serializes edits, reads, lifecycle events,
 //! and diagnostic publication without holding a cache lock across an await.
 //!
-//! Analysis remains synchronous here; moving it to cancellable background workers
-//! is a separate change. Such workers must return results through this queue and
-//! check both document version and open-session identity before publishing.
+//! Incremental parse and syntax/semantic diagnostics run synchronously so reads
+//! see a current snapshot and fast feedback publishes immediately. The heavier
+//! full `wast` validation runs off the async executor in a background task and
+//! returns its result through this queue, tagged with the document version and
+//! an open-session generation; the actor publishes it only if neither has moved
+//! on. That keeps the actor free to serve reads while validation runs, and means
+//! obsolete or post-close results are discarded instead of clobbering current
+//! diagnostics — aborting a blocking task is never assumed to stop its work.
 
 use std::sync::Arc;
 
@@ -126,6 +131,13 @@ impl DocumentHandle {
         tokio::spawn(async move {
             let mut snapshot: Option<Arc<DocumentSnapshot>> = None;
             let mut validation_due = None;
+            // Bumped on every open/close so a background validation started for an
+            // earlier session cannot publish into a later one.
+            let mut generation: u64 = 0;
+            // Background validations return (generation, version, wast diagnostics)
+            // here. The actor holds a sender, so recv never spuriously closes.
+            let (validation_tx, mut validation_rx) =
+                mpsc::channel::<(u64, i32, Vec<Diagnostic>)>(8);
             loop {
                 // The disabled timer branch still needs an argument to construct
                 // its future; this deadline is never used when no work is due.
@@ -137,6 +149,7 @@ impl DocumentHandle {
                         let mut updated = false;
                         match event {
                             DocumentEvent::Open { text, version } => {
+                                generation += 1;
                                 snapshot = Some(Arc::new(DocumentSnapshot::parse(text, version, None)));
                                 updated = true;
                             }
@@ -166,6 +179,7 @@ impl DocumentHandle {
                                 }
                             }
                             DocumentEvent::Close => {
+                                generation += 1;
                                 snapshot = None;
                                 validation_due = None;
                                 client.publish_diagnostics(uri.clone(), vec![], None).await;
@@ -191,14 +205,41 @@ impl DocumentHandle {
                     _ = sleep_until(deadline), if validation_due.is_some() => {
                         validation_due = None;
                         if let Some(current) = &snapshot {
-                            let wast = diagnostics::validate_wat(&current.text);
-                            let mut combined = diagnostics::merge_all_diagnostics(
-                                current.syntax_diagnostics.clone(),
-                                current.semantic_diagnostics.clone(),
-                                wast,
-                            );
-                            super::positions::diagnostics(&current.text, &uri, &mut combined);
-                            client.publish_diagnostics(uri.clone(), combined, Some(current.version)).await;
+                            // Run the expensive full validation off the async executor.
+                            // Tag it with the version and generation it was started for;
+                            // the result is version/generation-gated on the way back so a
+                            // later edit or a close discards it instead of clobbering.
+                            let text = current.text.clone();
+                            let version = current.version;
+                            let started_generation = generation;
+                            let tx = validation_tx.clone();
+                            tokio::spawn(async move {
+                                let wast = tokio::task::spawn_blocking(move || {
+                                    diagnostics::validate_wat(&text)
+                                })
+                                .await
+                                .unwrap_or_default();
+                                let _ = tx.send((started_generation, version, wast)).await;
+                            });
+                        }
+                    }
+                    result = validation_rx.recv() => {
+                        // Only the current, still-open version may publish. A result for
+                        // a superseded edit or a closed session is dropped.
+                        if let Some((result_generation, result_version, wast)) = result {
+                            if result_generation == generation {
+                                if let Some(current) = &snapshot {
+                                    if current.version == result_version {
+                                        let mut combined = diagnostics::merge_all_diagnostics(
+                                            current.syntax_diagnostics.clone(),
+                                            current.semantic_diagnostics.clone(),
+                                            wast,
+                                        );
+                                        super::positions::diagnostics(&current.text, &uri, &mut combined);
+                                        client.publish_diagnostics(uri.clone(), combined, Some(current.version)).await;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
