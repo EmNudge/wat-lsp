@@ -1,0 +1,4 @@
+{
+  "description": "Atomic instructions on a memory64 module accept i64 addresses without diagnostics",
+  "diagnostics": []
+}

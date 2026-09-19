@@ -389,4 +389,80 @@ mod grammar_tests {
         let errors = check_syntax(source);
         assert!(errors.is_empty(), "custom page sizes failed: {:?}", errors);
     }
+
+    // ========================================================================
+    // Imported function typeuse (type + explicit params/results)
+    // ========================================================================
+
+    #[test]
+    fn test_import_func_explicit_typeuse() {
+        // An imported func may combine a `(type $t)` reference with explicit
+        // params/results, or use params/results alone, or the type ref alone.
+        let source = r#"
+            (module
+                (type $binop (func (param i32 i32) (result i32)))
+                (import "e" "add" (func $add (type $binop) (param i32 i32) (result i32)))
+                (import "e" "sub" (func $sub (param i32 i32) (result i32)))
+                (import "e" "id"  (func $id (type $binop)))
+            )
+        "#;
+        let errors = check_syntax(source);
+        assert!(
+            errors.is_empty(),
+            "import func typeuse failed: {:?}",
+            errors
+        );
+    }
+
+    // ========================================================================
+    // proposal: threads — atomic memory memargs
+    // ========================================================================
+
+    #[test]
+    fn test_atomic_memargs_parse() {
+        // Atomic loads/stores/rmw/wait/notify accept optional offset=/align= memargs.
+        let source = r#"
+            (module
+                (memory 1 1 shared)
+                (func (param $a i32) (param $v i64) (result i64)
+                    local.get $a
+                    i32.atomic.load offset=0 align=4
+                    drop
+                    local.get $a
+                    local.get $v
+                    i64.atomic.store offset=8 align=8
+                    local.get $a
+                    local.get $v
+                    i64.atomic.rmw.add offset=16 align=8
+                    drop
+                    local.get $a
+                    i32.const 0
+                    i64.const 0
+                    memory.atomic.wait32 offset=0 align=4
+                    drop
+                    local.get $a
+                    i64.atomic.load)
+            )
+        "#;
+        let errors = check_syntax(source);
+        assert!(errors.is_empty(), "atomic memargs failed: {:?}", errors);
+    }
+
+    #[test]
+    fn test_atomic_without_memargs_still_parses() {
+        // Regression guard: the bare atomic forms must keep parsing after being
+        // moved out of op_nullary into the memarg-bearing rule.
+        let source = r#"
+            (module
+                (memory 1 1 shared)
+                (func (param $a i32) (result i32)
+                    local.get $a
+                    i32.atomic.load)
+                (func
+                    atomic.fence)
+            )
+        "#;
+        let errors = check_syntax(source);
+        assert!(errors.is_empty(), "bare atomic failed: {:?}", errors);
+    }
 }

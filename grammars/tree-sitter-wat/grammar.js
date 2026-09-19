@@ -233,7 +233,6 @@ module.exports = grammar({
 
     import_desc: $ =>
       choice(
-        $.import_desc_type_use,
         $.import_desc_func_type,
         $.import_desc_table_type,
         $.import_desc_memory_type,
@@ -241,15 +240,17 @@ module.exports = grammar({
         $.import_desc_tag_type,
       ),
 
-    import_desc_func_type: $ => seq("(", "func", optional($.identifier), repeat($.func_type), ")"),
+    // An imported function carries a full typeuse: an optional `(type idx)`
+    // reference optionally followed by explicit params/results, e.g.
+    // `(func $f (type $t) (param i32) (result i32))`, `(func (type $t))`, or
+    // `(func (param i32) (result i32))`.
+    import_desc_func_type: $ => seq("(", "func", optional($.identifier), optional($.type_use), repeat($.func_type), ")"),
 
     import_desc_global_type: $ => seq("(", "global", optional($.identifier), $.global_type, ")"),
 
     import_desc_memory_type: $ => seq("(", "memory", optional($.identifier), $.memory_type, ")"),
 
     import_desc_table_type: $ => seq("(", "table", optional($.identifier), $.table_type, ")"),
-
-    import_desc_type_use: $ => seq("(", "func", optional($.identifier), $.type_use, ")"),
 
     import_desc_tag_type: $ => seq("(", "tag", optional($.identifier), optional($.type_use), repeat($.func_type_params), repeat($.func_type_results), ")"),
 
@@ -334,7 +335,11 @@ module.exports = grammar({
       ),
 
     _instruction_atomic: $ =>
-      "atomic.fence", // Note: Most atomics are currently in op_nullary or op_index_opt_...
+      choice(
+        "atomic.fence",
+        // Atomic memory access: optional memory index + optional offset=/align= memargs.
+        seq($.op_atomic_offset_opt_align_opt, optional($.index), optional($.offset_value), optional($.align_value)),
+      ),
 
     _instruction_gc: $ =>
       choice(
@@ -524,83 +529,48 @@ module.exports = grammar({
                 ),
               ),
               seq(imm("64x2."), imm(new RegExp(["add", "eq", "ext(end|mul)_(high|low)_i32x4_[su]", "[gl][et]_s", "mul", "ne", "s(h(l|r_[su])|ub)"].join("|")))),
+              // NOTE: atomic memory ops (i32/i64 .atomic.load/store/rmw*) are
+              // intentionally NOT here — they take an optional memory index and
+              // offset=/align= memargs and live in `op_atomic_offset_opt_align_opt`.
               seq(
                 imm("32."),
-                choice(
-                  seq(
-                    imm("atomic."),
-                    choice(
-                      new RegExp(["load((8|16)_u)?", "store(8|16)?"].join("|")),
-                      seq(
-                        imm("rmw"),
-                        choice(
-                          seq(imm("."), new RegExp(["a(dd|nd)", "cmpxchg", "or", "sub", "x(chg|or)"].join("|"))),
-                          seq(
-                            imm(/(8|16)\./),
-                            new RegExp(["a(dd|nd)", "cmpxchg", "or", "sub", "x(chg|or)"].join("|")),
-                            imm("_u"),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  new RegExp(
-                    [
-                      "a(nd|dd)",
-                      "c[lt]z",
-                      "(div|g[et]|l[et]|rem|shr)_[su]",
-                      "e(qz?|xtend(8|16)_s)",
-                      "mul",
-                      "ne",
-                      "or",
-                      "popcnt",
-                      "r(einterpret_f32|ot[lr])",
-                      "s(hl|ub)",
-                      "trunc(_sat)?_f(32|64)_[su]",
-                      "wrap_i64",
-                      "xor",
-                    ].join("|"),
-                  ),
+                new RegExp(
+                  [
+                    "a(nd|dd)",
+                    "c[lt]z",
+                    "(div|g[et]|l[et]|rem|shr)_[su]",
+                    "e(qz?|xtend(8|16)_s)",
+                    "mul",
+                    "ne",
+                    "or",
+                    "popcnt",
+                    "r(einterpret_f32|ot[lr])",
+                    "s(hl|ub)",
+                    "trunc(_sat)?_f(32|64)_[su]",
+                    "wrap_i64",
+                    "xor",
+                  ].join("|"),
                 ),
               ),
               seq(
                 imm("64."),
-                choice(
-                  seq(
-                    imm("atomic."),
-                    choice(
-                      new RegExp(["load((8|16|32)_u)?", "store(8|16|32)?"].join("|")),
-                      seq(
-                        imm("rmw"),
-                        choice(
-                          seq(imm("."), new RegExp(["a(dd|nd)", "cmpxchg", "or", "sub", "x(chg|or)"].join("|"))),
-                          seq(
-                            imm(/(8|16|32)\./),
-                            new RegExp(["a(dd|nd)", "cmpxchg", "or", "sub", "x(chg|or)"].join("|")),
-                            imm("_u"),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  new RegExp(
-                    [
-                      // proposal: wide-arithmetic (add128, sub128, mul_wide_s/u)
-                      "a(nd|dd(128)?)",
-                      "c[lt]z",
-                      "(div|g[et]|l[et]|rem|shr)_[su]",
-                      "e(qz?|xtend(_i32_[su]|(8|16|32)_s))",
-                      "mul(_wide_[su])?",
-                      "ne",
-                      "or",
-                      "rot[lr]",
-                      "popcnt",
-                      "reinterpret_f64",
-                      "s(hl|ub(128)?)",
-                      "trunc(_sat)?_f(32|64)_[su]",
-                      "xor",
-                    ].join("|"),
-                  ),
+                new RegExp(
+                  [
+                    // proposal: wide-arithmetic (add128, sub128, mul_wide_s/u)
+                    "a(nd|dd(128)?)",
+                    "c[lt]z",
+                    "(div|g[et]|l[et]|rem|shr)_[su]",
+                    "e(qz?|xtend(_i32_[su]|(8|16|32)_s))",
+                    "mul(_wide_[su])?",
+                    "ne",
+                    "or",
+                    "rot[lr]",
+                    "popcnt",
+                    "reinterpret_f64",
+                    "s(hl|ub(128)?)",
+                    "trunc(_sat)?_f(32|64)_[su]",
+                    "xor",
+                  ].join("|"),
                 ),
               ),
             ),
@@ -608,7 +578,9 @@ module.exports = grammar({
           new RegExp(
             [
               "drop",
-              "memory\\.(atomic\\.(notify|wait(32|64))|copy|fill)",
+              // memory.atomic.notify/wait32/wait64 take a memarg and are handled
+              // by `op_atomic_offset_opt_align_opt`; only copy/fill are nullary here.
+              "memory\\.(copy|fill)",
               "nop",
               "ref\\.(as_non_null|is_null)",
               "return",
@@ -647,6 +619,24 @@ module.exports = grammar({
           /f(32|64)\.(load|store)/,
           /i32\.(load((8|16)_[su])?|store(8|16)?)/,
           /i64\.(load((8|16|32)_[su])?|store(8|16|32)?)/,
+        ),
+      ),
+
+    // Atomic memory access instructions. Like the plain load/store family they
+    // accept an optional memory index and optional `offset=`/`align=` memargs.
+    // proposal: threads
+    op_atomic_offset_opt_align_opt: $ =>
+      token(
+        choice(
+          // i32/i64 atomic load/store (with optional sub-widths)
+          /i32\.atomic\.(load((8|16)_u)?|store(8|16)?)/,
+          /i64\.atomic\.(load((8|16|32)_u)?|store(8|16|32)?)/,
+          // i32/i64 atomic read-modify-write: full-width `rmw.<op>` and
+          // sub-width `rmw{8,16,32}.<op>_u` forms.
+          /i32\.atomic\.(rmw\.(add|and|cmpxchg|or|sub|xchg|xor)|rmw(8|16)\.(add|and|cmpxchg|or|sub|xchg|xor)_u)/,
+          /i64\.atomic\.(rmw\.(add|and|cmpxchg|or|sub|xchg|xor)|rmw(8|16|32)\.(add|and|cmpxchg|or|sub|xchg|xor)_u)/,
+          // wait/notify
+          /memory\.atomic\.(notify|wait(32|64))/,
         ),
       ),
 

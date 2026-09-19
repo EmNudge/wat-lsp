@@ -343,7 +343,7 @@ fn extract_single_import(
             for desc_child in child.children(&mut desc_cursor) {
                 node_kind!(kind = desc_child);
                 match kind {
-                    "import_desc_func_type" | "import_desc_type_use" => {
+                    "import_desc_func_type" => {
                         // Imported function: (func $name? ...)
                         if let Some(func) = extract_imported_function(
                             &desc_child,
