@@ -227,6 +227,70 @@ fn burst_edits_preserve_every_change_and_publish_matching_versions() {
 }
 
 #[test]
+fn reads_on_a_second_document_stay_responsive_during_a_large_edit() {
+    // The per-edit reparse now runs on a blocking thread the actor `await`s, so a
+    // large edit on one document releases the executor worker instead of pinning
+    // it. A read on a second, small document must therefore still return promptly
+    // and correctly while the large document is being (re)parsed.
+    let mut server = Server::new();
+    let big = "file:///big-document-sync.wat";
+    let small = "file:///small-document-sync.wat";
+    // A large body: many functions so tree-sitter + the semantic pass do real work.
+    let mut body = String::from("(module\n");
+    for i in 0..4000 {
+        body.push_str(&format!("  (func $f{i} (call $f{i}))\n"));
+    }
+    body.push(')');
+    server.open(big, &body, 1);
+    server.open(small, "(module (func $small))", 1);
+    // Fire an expensive edit on the big document, then immediately query the small
+    // one without waiting for the big reparse to publish.
+    server.change(big, 2, json!([insert(0, 0, ";; touch\n")]));
+    let symbols = server.symbols(small);
+    assert_eq!(symbols[0]["name"], "$small");
+    // The big document still converges to its edited state.
+    let big_symbols = server.symbols(big);
+    assert!(
+        big_symbols.as_array().unwrap().len() >= 4000,
+        "big document keeps all functions after the edit"
+    );
+}
+
+#[test]
+fn burst_edits_on_a_large_document_lose_no_edits_and_converge() {
+    // Burst typing into a large document: every ordered edit must be applied and
+    // the document must converge to the final text even though each reparse runs
+    // off the executor. No edit may be dropped or reordered.
+    let mut server = Server::new();
+    let mut body = String::from("(module (func $a)\n");
+    for i in 0..1500 {
+        body.push_str(&format!("  (func $pad{i})\n"));
+    }
+    body.push(')');
+    server.open(URI, &body, 1);
+    // The declaration `$a` sits on line 0 at a fixed column; grow it with a burst
+    // of single-character insertions and confirm the final name is exact.
+    let column = body.lines().next().unwrap().find("$a").unwrap() as u32 + 2;
+    let mut expected = "$a".to_owned();
+    for version in 2..=61 {
+        let ch = char::from(b'b' + (version % 24) as u8).to_string();
+        expected.insert_str(2, &ch);
+        server.change(URI, version, json!([insert(0, column, &ch)]));
+    }
+    let symbols = server.symbols(URI);
+    assert_eq!(symbols[0]["name"], expected);
+    server.collect_for(Duration::from_millis(750));
+    let versions: Vec<_> = server
+        .diagnostics
+        .iter()
+        .filter(|d| d["uri"] == URI)
+        .map(|d| d["version"].as_i64().expect("versioned diagnostics"))
+        .collect();
+    assert!(versions.windows(2).all(|v| v[0] <= v[1]), "{versions:?}");
+    assert_eq!(versions.last(), Some(&61));
+}
+
+#[test]
 fn stale_versions_are_ignored_and_changes_are_applied_sequentially() {
     let mut server = Server::new();
     server.open(URI, DOCUMENT, 10);
