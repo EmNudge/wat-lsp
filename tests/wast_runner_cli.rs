@@ -171,6 +171,92 @@ fn negative_case_scoring_distinguishes_validation_from_none() {
 }
 
 // ---------------------------------------------------------------------------
+// Core (browser-reachable) vs full (native) pipeline tracking
+// ---------------------------------------------------------------------------
+
+/// Every scored directive carries both a full-pipeline `outcome` and a core /
+/// browser-reachable `core_outcome`, and the summary reports both tallies. This
+/// keeps conformance tracking honest about what the shipped WASM build catches
+/// versus the full native toolchain.
+#[test]
+fn json_reports_core_and_full_outcomes() {
+    let out = run(&[fixtures_dir().to_str().unwrap(), "--format", "json"]);
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+
+    let summary = &json["summary"];
+    // Full-pipeline tallies exist (historical) and so do core tallies.
+    assert!(summary["pass"].is_u64(), "summary.pass should exist");
+    assert!(
+        summary["core_pass"].is_u64(),
+        "summary.core_pass should exist, got: {summary}"
+    );
+    assert!(
+        summary["core_fail"].is_u64(),
+        "summary.core_fail should exist, got: {summary}"
+    );
+
+    // Core passes can never exceed full passes: the core pipeline is a strict
+    // subset of the full pipeline (it drops the native `wast` validator).
+    let core_pass = summary["core_pass"].as_u64().unwrap();
+    let full_pass = summary["pass"].as_u64().unwrap();
+    assert!(
+        core_pass <= full_pass,
+        "core_pass ({core_pass}) must not exceed full pass ({full_pass})"
+    );
+
+    // Every scored directive (module / assert_*) carries a core_outcome.
+    let mut scored = 0;
+    for f in json["files"].as_array().unwrap() {
+        for d in f["directives"].as_array().unwrap() {
+            if d["kind"] != "skip" {
+                assert!(
+                    d.get("core_outcome").is_some(),
+                    "scored directive should have core_outcome: {d}"
+                );
+                scored += 1;
+            }
+        }
+    }
+    assert!(scored > 0, "fixtures should contain scored directives");
+}
+
+/// The vendored spec slice (a pinned copy of the upstream testsuite) is
+/// discovered recursively and includes a case the *full* pipeline catches but
+/// the browser-reachable *core* pipeline does not — proving the split is
+/// meaningful on real spec input, not just synthetic counts.
+#[test]
+fn core_full_split_is_meaningful_on_vendored_spec() {
+    let out = run(&[fixtures_dir().to_str().unwrap(), "--format", "json"]);
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+
+    let files = json["files"].as_array().unwrap();
+    // The vendored spec files are discovered under spec/.
+    let has_spec = files
+        .iter()
+        .any(|f| f["file"].as_str().unwrap_or("").ends_with("type.wast"));
+    assert!(
+        has_spec,
+        "vendored spec slice (spec/type.wast) should be discovered"
+    );
+
+    // At least one directive is caught by full but missed by core.
+    let divergent = files
+        .iter()
+        .flat_map(|f| f["directives"].as_array().unwrap())
+        .any(|d| {
+            d["outcome"] == "pass" && d.get("core_outcome").map(|c| c == "fail").unwrap_or(false)
+        });
+    assert!(
+        divergent,
+        "expected at least one directive that passes full but fails core \
+         (a native-only detection); got: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Baseline regression gate (wast-compare)
 // ---------------------------------------------------------------------------
 
