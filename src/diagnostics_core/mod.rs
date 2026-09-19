@@ -28,6 +28,45 @@ pub(crate) use tree_sitter::provide_tree_sitter_diagnostics;
 use crate::core::types::Diagnostic;
 use crate::symbols::SymbolTable;
 
+/// Remove exact-duplicate diagnostics in place, preserving first-seen order.
+///
+/// The independent syntax and semantic passes (and, on native, the wast
+/// validator) can each surface the same problem at the same location. Two
+/// diagnostics are considered duplicates when their range, severity, code, and
+/// message all match.
+///
+/// The WASM `provideDiagnostics` path calls this directly. The native LSP path
+/// deduplicates equivalently in [`crate::diagnostics::merge_all_diagnostics`]
+/// (which operates on the `tower_lsp` diagnostic type after conversion), so this
+/// core helper is only wired into the WASM build; it is still unit-tested on
+/// native.
+/// A comparable, hashable identity for a core diagnostic: range, severity, code,
+/// and message. Two diagnostics with the same key are treated as exact duplicates.
+#[cfg(any(feature = "wasm", test))]
+type DiagnosticKey = ((u32, u32, u32, u32), u8, Option<&'static str>, String);
+
+#[cfg(any(feature = "wasm", test))]
+pub(crate) fn dedup_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
+    use std::collections::HashSet;
+
+    let mut seen: HashSet<DiagnosticKey> = HashSet::new();
+
+    diagnostics.retain(|d| {
+        let key: DiagnosticKey = (
+            (
+                d.range.start.line,
+                d.range.start.character,
+                d.range.end.line,
+                d.range.end.character,
+            ),
+            d.severity as u8,
+            d.code,
+            d.message.clone(),
+        );
+        seen.insert(key)
+    });
+}
+
 /// Collect all semantic diagnostics (tree walk + subtype + module structure).
 /// Shared between native and WASM diagnostic pipelines.
 #[cfg(feature = "native")]
@@ -61,4 +100,61 @@ pub(crate) fn collect_all_semantic_diagnostics(
     tree_walk::walk_tree_for_diagnostics(root, source, symbols, &config, &mut diagnostics);
     diagnostics.extend(subtype::validate_subtype_hierarchy(symbols));
     diagnostics
+}
+
+#[cfg(test)]
+mod dedup_tests {
+    use super::dedup_diagnostics;
+    use crate::core::types::{Diagnostic, Position, Range};
+
+    fn range(l: u32, c: u32) -> Range {
+        Range {
+            start: Position {
+                line: l,
+                character: c,
+            },
+            end: Position {
+                line: l,
+                character: c + 1,
+            },
+        }
+    }
+
+    #[test]
+    fn removes_exact_duplicates() {
+        let mut diags = vec![
+            Diagnostic::error(range(1, 0), "type mismatch").with_code("type-mismatch"),
+            Diagnostic::error(range(1, 0), "type mismatch").with_code("type-mismatch"),
+        ];
+        dedup_diagnostics(&mut diags);
+        assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn keeps_distinct_message_or_range_or_code() {
+        let mut diags = vec![
+            // Same range + message, different code -> kept.
+            Diagnostic::error(range(1, 0), "type mismatch").with_code("type-mismatch"),
+            Diagnostic::error(range(1, 0), "type mismatch").with_code("arity"),
+            // Same code + message, different range -> kept.
+            Diagnostic::error(range(2, 0), "type mismatch").with_code("type-mismatch"),
+            // Same range + code, different message -> kept.
+            Diagnostic::error(range(1, 0), "other message").with_code("type-mismatch"),
+        ];
+        dedup_diagnostics(&mut diags);
+        assert_eq!(diags.len(), 4);
+    }
+
+    #[test]
+    fn preserves_first_seen_order() {
+        let mut diags = vec![
+            Diagnostic::error(range(3, 0), "c"),
+            Diagnostic::error(range(1, 0), "a"),
+            Diagnostic::error(range(3, 0), "c"), // dup of first
+            Diagnostic::error(range(2, 0), "b"),
+        ];
+        dedup_diagnostics(&mut diags);
+        let msgs: Vec<_> = diags.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(msgs, ["c", "a", "b"]);
+    }
 }

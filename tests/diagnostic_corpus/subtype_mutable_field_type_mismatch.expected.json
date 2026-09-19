@@ -1,0 +1,11 @@
+{
+  "description": "Mutable struct field is invariant; a differing field type must report concrete WAT type names (i32/i64), not internal Debug names",
+  "diagnostics": [
+    {
+      "line": 2,
+      "message_contains": "type mismatch",
+      "message_contains_all": ["i32", "i64"],
+      "severity": 1
+    }
+  ]
+}

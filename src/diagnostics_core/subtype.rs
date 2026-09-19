@@ -102,7 +102,7 @@ fn check_structural_compatibility(
                         diagnostics.push(Diagnostic::error(
                             range,
                             format!(
-                                "Struct field {} type mismatch: expected {:?}, got {:?}",
+                                "Struct field {} type mismatch: expected {}, got {}",
                                 i, parent_type, child_type
                             ),
                         ));
@@ -126,7 +126,7 @@ fn check_structural_compatibility(
                         diagnostics.push(Diagnostic::error(
                             range,
                             format!(
-                                "Struct field {} type mismatch: expected {:?}, got {:?}",
+                                "Struct field {} type mismatch: expected {}, got {}",
                                 i, parent_type, child_type
                             ),
                         ));
@@ -150,7 +150,7 @@ fn check_structural_compatibility(
                     diagnostics.push(Diagnostic::error(
                         range,
                         format!(
-                            "Array element type mismatch: expected {:?}, got {:?}",
+                            "Array element type mismatch: expected {}, got {}",
                             parent_elem, child_elem
                         ),
                     ));
@@ -167,7 +167,7 @@ fn check_structural_compatibility(
                     diagnostics.push(Diagnostic::error(
                         range,
                         format!(
-                            "Array element type mismatch: expected {:?}, got {:?}",
+                            "Array element type mismatch: expected {}, got {}",
                             parent_elem, child_elem
                         ),
                     ));

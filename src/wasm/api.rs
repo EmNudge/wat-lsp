@@ -191,12 +191,13 @@ impl WatLSP {
         let js_array = js_sys::Array::new();
 
         if let Some(tree) = &self.tree {
+            let mut all: Vec<CoreDiagnostic> = Vec::new();
+
             // Syntax errors from tree-sitter ERROR nodes
-            let syntax_diagnostics =
-                crate::diagnostics_core::provide_tree_sitter_diagnostics(tree, &self.document);
-            for diag in syntax_diagnostics {
-                js_array.push(&core_diagnostic_to_js(&diag));
-            }
+            all.extend(crate::diagnostics_core::provide_tree_sitter_diagnostics(
+                tree,
+                &self.document,
+            ));
 
             // Semantic diagnostics: run per-module for multi-module documents
             if self.modules.len() > 1 {
@@ -210,26 +211,28 @@ impl WatLSP {
                 }
                 for (i, module_info) in self.modules.iter().enumerate() {
                     if let Some(module_node) = module_nodes.get(i) {
-                        let diagnostics = crate::diagnostics_core::collect_all_semantic_diagnostics(
+                        all.extend(crate::diagnostics_core::collect_all_semantic_diagnostics(
                             module_node.clone(),
                             &self.document,
                             &module_info.symbols,
-                        );
-                        for diag in diagnostics {
-                            js_array.push(&core_diagnostic_to_js(&diag));
-                        }
+                        ));
                     }
                 }
             } else if let Some(symbols) = &self.symbols {
                 // Single module: use original path
-                let diagnostics = crate::diagnostics_core::collect_all_semantic_diagnostics(
+                all.extend(crate::diagnostics_core::collect_all_semantic_diagnostics(
                     tree.root_node(),
                     &self.document,
                     symbols,
-                );
-                for diag in diagnostics {
-                    js_array.push(&core_diagnostic_to_js(&diag));
-                }
+                ));
+            }
+
+            // Drop exact-duplicate diagnostics so the browser matches the native
+            // pipeline (see `diagnostics::merge_all_diagnostics`).
+            crate::diagnostics_core::dedup_diagnostics(&mut all);
+
+            for diag in &all {
+                js_array.push(&core_diagnostic_to_js(diag));
             }
         }
 
