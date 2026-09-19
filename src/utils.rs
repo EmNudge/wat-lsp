@@ -15,6 +15,19 @@ use crate::ts_facade::{Node, Tree};
 /// Struct operations that reference a type and a field
 pub const STRUCT_OPS: &[&str] = &["struct.get", "struct.set", "struct.get_s", "struct.get_u"];
 
+/// Safety bound on the ancestor walk in [`determine_instruction_context`].
+///
+/// tree-sitter's `Node::parent()` is O(depth-from-root), so a single upward
+/// walk over an adversarially deep nesting is O(depth^2). Real WAT rarely nests
+/// more than a few dozen blocks; a context-carrying ancestor (instruction,
+/// block, module field) is normally within a handful of hops. This cap keeps a
+/// pathological input (e.g. thousands of nested blocks) from stalling an
+/// interactive hover: on hitting it we return `General`, which every caller
+/// already handles by falling back to line-based classification. The value is
+/// far above any legitimate nesting depth, so classification is unchanged for
+/// real inputs.
+const MAX_CONTEXT_ANCESTOR_HOPS: usize = 512;
+
 /// Check if a kind represents any block structure (statement, expression, or instruction form)
 pub fn is_block_kind(kind: &str) -> bool {
     matches!(
@@ -84,6 +97,7 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
 
     let original_start = node.start_byte();
     let mut current = node;
+    let mut hops = 0usize;
 
     loop {
         node_kind!(kind = current);
@@ -161,7 +175,14 @@ pub fn determine_instruction_context(node: Node, document: &str) -> InstructionC
             return InstructionContext::Elem;
         }
 
-        // Walk up the tree
+        // Walk up the tree, bounding the number of hops so a pathologically
+        // deep tree can't turn a single hover into an O(depth^2) stall. The cap
+        // is far above any realistic nesting, so this never changes the result
+        // for real inputs; hitting it yields `General` (line-based fallback).
+        hops += 1;
+        if hops >= MAX_CONTEXT_ANCESTOR_HOPS {
+            break;
+        }
         if let Some(parent) = current.parent() {
             current = parent;
         } else {
