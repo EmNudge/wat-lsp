@@ -1,0 +1,4 @@
+{
+  "description": "storing a non-nullable (ref $s) parameter into a nullable (ref null $s) local is valid (non-null <: nullable)",
+  "diagnostics": []
+}

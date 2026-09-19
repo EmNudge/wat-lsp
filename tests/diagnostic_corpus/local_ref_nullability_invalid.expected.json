@@ -1,0 +1,10 @@
+{
+  "description": "storing a nullable (ref null $s) parameter into a non-nullable (ref $s) local is a type mismatch (nullable cannot satisfy non-null)",
+  "diagnostics": [
+    {
+      "line": 10,
+      "message_contains_all": ["type mismatch", "expected", "found"],
+      "severity": 1
+    }
+  ]
+}

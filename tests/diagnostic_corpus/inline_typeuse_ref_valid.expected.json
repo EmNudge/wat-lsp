@@ -1,0 +1,4 @@
+{
+  "description": "inline function signatures that exactly repeat a reference type (concrete (ref $s) and non-nullable (ref func)) match their type reference and are valid",
+  "diagnostics": []
+}
