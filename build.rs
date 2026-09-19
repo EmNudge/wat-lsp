@@ -33,6 +33,38 @@ fn main() {
     if !target.contains("wasm") {
         compile_tree_sitter_grammar();
     }
+
+    // The WASM build embeds a precompiled grammar via `include_bytes!` in
+    // `src/ts_facade.rs`. That file is produced out-of-band (`tree-sitter build
+    // --wasm`) and is not checked in, so on a clean checkout `include_bytes!`
+    // fails with an opaque "No such file or directory" error. When the `wasm`
+    // feature is enabled, verify the artifact up front and, if it is missing,
+    // fail with the exact command needed to generate it.
+    if env::var_os("CARGO_FEATURE_WASM").is_some() {
+        check_wasm_grammar_artifact();
+    }
+}
+
+fn check_wasm_grammar_artifact() {
+    const GRAMMAR_WASM: &str = "grammars/tree-sitter-wat/tree-sitter-wat.wasm";
+    println!("cargo:rerun-if-changed={GRAMMAR_WASM}");
+    println!("cargo:rerun-if-changed=grammars/tree-sitter-wat/grammar.js");
+
+    if Path::new(GRAMMAR_WASM).exists() {
+        return;
+    }
+
+    const REQUIRED_TREE_SITTER: &str = "tree-sitter-cli@0.27.0";
+    panic!(
+        "\nMissing WASM grammar artifact: {GRAMMAR_WASM}\n\
+         \n\
+         The `wasm` feature embeds this precompiled grammar via `include_bytes!`, \
+         but it is not checked in and must be generated on a clean checkout.\n\
+         \n\
+         Generate it with the pinned tree-sitter CLI:\n\
+         \n    npm install -g {REQUIRED_TREE_SITTER}\
+         \n    (cd grammars/tree-sitter-wat && tree-sitter generate && tree-sitter build --wasm)\n"
+    );
 }
 
 fn compile_tree_sitter_grammar() {

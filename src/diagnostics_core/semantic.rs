@@ -796,7 +796,7 @@ fn process_instruction(
                         Diagnostic::error(
                             node_to_range(node),
                             format!(
-                                "type mismatch: select operands have different types ({:?} vs {:?})",
+                                "type mismatch: select operands have different types ({} vs {})",
                                 v1, v2
                             ),
                         )

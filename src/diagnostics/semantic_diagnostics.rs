@@ -3243,6 +3243,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_untyped_select_mismatch_message_uses_wat_type_names() {
+        // Untyped `select` with two numeric operands of different types must
+        // report the concrete WAT type names (`i32`, `f32`), not the internal
+        // Debug names (`I32`, `F32`).
+        let document = r#"(module (func (result f32)
+  (i32.const 1)
+  (f32.const 2)
+  (i32.const 0)
+  (select)
+))"#;
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+        let symbols = parse_document(document).unwrap();
+        let diagnostics = provide_semantic_diagnostics(&tree, document, &symbols);
+        let mismatch = diagnostics
+            .iter()
+            .find(|d| d.message.contains("select operands have different types"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected a select type-mismatch diagnostic, got: {:?}",
+                    diagnostics
+                )
+            });
+        assert!(
+            mismatch.message.contains("i32") && mismatch.message.contains("f32"),
+            "message should use WAT type names, got: {}",
+            mismatch.message
+        );
+        assert!(
+            !mismatch.message.contains("I32") && !mismatch.message.contains("F32"),
+            "message must not leak Debug type names, got: {}",
+            mismatch.message
+        );
+    }
+
     // ======================================================================
     // Unused locals and parameters tests (Issue #198)
     // ======================================================================

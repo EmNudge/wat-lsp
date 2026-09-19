@@ -1,9 +1,16 @@
 //! Diagnostic Parity Tests (native only)
 //!
-//! This module tests the native diagnostic implementation against the diagnostic
-//! corpus to ensure parity with the WASM implementation. The same corpus is used
-//! by the WASM/Playwright tests to verify both implementations produce the same
-//! results.
+//! This module runs the diagnostic corpus through the **exact same pipeline the
+//! WASM/browser build exposes** (`WatDocument.provideDiagnostics`), so the corpus
+//! stays an honest parity contract: syntax (tree-sitter) diagnostics plus semantic
+//! diagnostics, merged and sorted.
+//!
+//! It intentionally does **not** run `validate_wat` (the `wast`-crate validator).
+//! That validator is a native-only capability (the `wast` dependency is gated
+//! behind the `native` feature and is not part of the WASM build), so including it
+//! here would test a code path the browser can never reach and mask real parity
+//! regressions. Native/browser capability differences are documented in
+//! `tests/diagnostic_corpus/README.md`.
 //!
 //! Run with: `cargo test diagnostic_parity`
 
@@ -15,7 +22,6 @@ use std::path::Path;
 use tower_lsp::lsp_types::Diagnostic;
 use wat_lsp_rust::diagnostics::{
     merge_all_diagnostics, provide_semantic_diagnostics, provide_tree_sitter_diagnostics,
-    validate_wat,
 };
 use wat_lsp_rust::parser;
 use wat_lsp_rust::ts_facade;
@@ -43,9 +49,11 @@ fn get_all_diagnostics(wat: &str) -> Vec<Diagnostic> {
 
     let tree_sitter_diags = provide_tree_sitter_diagnostics(&tree, wat);
     let semantic_diags = provide_semantic_diagnostics(&tree, wat, &symbols);
-    let wast_diags = validate_wat(wat);
 
-    merge_all_diagnostics(tree_sitter_diags, semantic_diags, wast_diags)
+    // Mirror the WASM `provideDiagnostics` pipeline: syntax + semantic only, no
+    // `validate_wat`. Passing an empty `wast` list keeps the merge/dedup behavior
+    // identical to production while staying WASM-reachable.
+    merge_all_diagnostics(tree_sitter_diags, semantic_diags, Vec::new())
 }
 
 fn check_diagnostic_matches(actual: &Diagnostic, expected: &ExpectedDiagnostic) -> bool {
