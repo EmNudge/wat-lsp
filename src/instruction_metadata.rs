@@ -20,6 +20,12 @@ pub enum OperandMode {
 pub struct InstructionArity {
     pub min_params: usize,
     pub max_params: usize,
+    /// When true only `min_params` or `max_params` are valid and the counts in
+    /// between are rejected. Needed for instructions whose immediates form a
+    /// jointly-optional group — e.g. `table.copy`/`memory.copy` accept zero or
+    /// two indices but never exactly one (a plain `min..=max` range would wrongly
+    /// accept one). Has no effect when `max_params - min_params <= 1`.
+    pub endpoints_only: bool,
     pub param_description: &'static str,
     /// Number of operands this instruction consumes from the stack (for folded expressions)
     pub operand_mode: OperandMode,
@@ -37,9 +43,43 @@ impl InstructionArity {
         Self {
             min_params: count,
             max_params: count,
+            endpoints_only: false,
             param_description: description,
             operand_mode: OperandMode::Fixed(stack_operands),
             produces,
+        }
+    }
+
+    /// Instruction accepting a contiguous `min..=max` range of immediates with a
+    /// fixed number of stack operands (e.g. `table.init`, `memory.grow`).
+    const fn range(
+        min_params: usize,
+        max_params: usize,
+        description: &'static str,
+        stack_operands: usize,
+        produces: usize,
+    ) -> Self {
+        Self {
+            min_params,
+            max_params,
+            endpoints_only: false,
+            param_description: description,
+            operand_mode: OperandMode::Fixed(stack_operands),
+            produces,
+        }
+    }
+
+    /// Bulk instruction whose two indices are a jointly-optional group: the
+    /// caller supplies either both or neither, so exactly one immediate is
+    /// invalid. Used for `table.copy` and `memory.copy`.
+    const fn optional_index_pair(description: &'static str, stack_operands: usize) -> Self {
+        Self {
+            min_params: 0,
+            max_params: 2,
+            endpoints_only: true,
+            param_description: description,
+            operand_mode: OperandMode::Fixed(stack_operands),
+            produces: 0,
         }
     }
 
@@ -53,6 +93,7 @@ impl InstructionArity {
         Self {
             min_params,
             max_params,
+            endpoints_only: false,
             param_description: description,
             operand_mode: OperandMode::Dynamic,
             produces,
@@ -102,67 +143,51 @@ impl InstructionArity {
     /// Memory load operation - can take optional memory index (multi-memory proposal)
     /// Consumes address, produces value
     const fn mem_load() -> Self {
-        Self {
-            min_params: 0,
-            max_params: 1,
-            param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(1), // consumes address
-            produces: 1,
-        }
+        // consumes address
+        Self::range(0, 1, "optional memory index", 1, 1)
     }
 
     /// Memory store operation - can take optional memory index (multi-memory proposal)
     /// Consumes address and value, produces nothing
     const fn mem_store() -> Self {
-        Self {
-            min_params: 0,
-            max_params: 1,
-            param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(2), // consumes address and value
-            produces: 0,
-        }
+        // consumes address and value
+        Self::range(0, 1, "optional memory index", 2, 0)
     }
 
     /// Atomic RMW operation - addr + operand → old value
     const fn mem_rmw() -> Self {
-        Self {
-            min_params: 0,
-            max_params: 1,
-            param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(2), // consumes address and operand
-            produces: 1,
-        }
+        // consumes address and operand
+        Self::range(0, 1, "optional memory index", 2, 1)
     }
 
     /// Atomic cmpxchg operation - addr + expected + replacement → old value
     const fn mem_cmpxchg() -> Self {
-        Self {
-            min_params: 0,
-            max_params: 1,
-            param_description: "optional memory index",
-            operand_mode: OperandMode::Fixed(3), // consumes address, expected, replacement
-            produces: 1,
-        }
+        // consumes address, expected, replacement
+        Self::range(0, 1, "optional memory index", 3, 1)
     }
 
     pub fn is_valid(&self, param_count: usize) -> bool {
-        param_count >= self.min_params && param_count <= self.max_params
+        if self.endpoints_only {
+            param_count == self.min_params || param_count == self.max_params
+        } else {
+            param_count >= self.min_params && param_count <= self.max_params
+        }
     }
 
     pub fn expected_message(&self) -> String {
-        if self.min_params == self.max_params {
-            if self.param_description.is_empty() {
-                format!("{}", self.min_params)
-            } else {
-                format!("{} ({})", self.min_params, self.param_description)
-            }
-        } else if self.param_description.is_empty() {
-            format!("{}-{}", self.min_params, self.max_params)
+        let count = if self.min_params == self.max_params {
+            format!("{}", self.min_params)
+        } else if self.endpoints_only {
+            // Discrete endpoints, e.g. "0 or 2" for jointly-optional index pairs.
+            format!("{} or {}", self.min_params, self.max_params)
         } else {
-            format!(
-                "{}-{} ({})",
-                self.min_params, self.max_params, self.param_description
-            )
+            format!("{}-{}", self.min_params, self.max_params)
+        };
+
+        if self.param_description.is_empty() {
+            count
+        } else {
+            format!("{} ({})", count, self.param_description)
         }
     }
 }
@@ -382,23 +407,11 @@ fn init_arity_table() -> Vec<(&'static str, InstructionArity)> {
         // Memory management (optional memory index)
         (
             "memory.size",
-            InstructionArity {
-                min_params: 0,
-                max_params: 1,
-                param_description: "optional memory index",
-                operand_mode: OperandMode::Fixed(0),
-                produces: 1,
-            },
+            InstructionArity::range(0, 1, "optional memory index", 0, 1),
         ),
         (
             "memory.grow",
-            InstructionArity {
-                min_params: 0,
-                max_params: 1,
-                param_description: "optional memory index",
-                operand_mode: OperandMode::Fixed(1),
-                produces: 1,
-            },
+            InstructionArity::range(0, 1, "optional memory index", 1, 1),
         ),
         // WasmGC — Structs
         (
@@ -512,34 +525,17 @@ fn init_arity_table() -> Vec<(&'static str, InstructionArity)> {
         ("extern.convert_any", InstructionArity::unary_op()),
         // Bulk memory (optional memory indices)
         (
+            // Zero or two memory indices — a single index is invalid.
             "memory.copy",
-            InstructionArity {
-                min_params: 0,
-                max_params: 2,
-                param_description: "optional dest and src memory indices",
-                operand_mode: OperandMode::Fixed(3),
-                produces: 0,
-            },
+            InstructionArity::optional_index_pair("optional dest and src memory indices", 3),
         ),
         (
             "memory.fill",
-            InstructionArity {
-                min_params: 0,
-                max_params: 1,
-                param_description: "optional memory index",
-                operand_mode: OperandMode::Fixed(3),
-                produces: 0,
-            },
+            InstructionArity::range(0, 1, "optional memory index", 3, 0),
         ),
         (
             "memory.init",
-            InstructionArity {
-                min_params: 1,
-                max_params: 2,
-                param_description: "data index and optional memory index",
-                operand_mode: OperandMode::Fixed(3),
-                produces: 0,
-            },
+            InstructionArity::range(1, 2, "data index and optional memory index", 3, 0),
         ),
         ("data.drop", InstructionArity::exact(1, "data index", 0, 0)),
         // Table operations
@@ -558,12 +554,14 @@ fn init_arity_table() -> Vec<(&'static str, InstructionArity)> {
             InstructionArity::exact(1, "table index", 3, 0),
         ),
         (
+            // Zero or two table indices — a single index is invalid.
             "table.copy",
-            InstructionArity::exact(2, "dest and src table index", 3, 0),
+            InstructionArity::optional_index_pair("optional dest and src table indices", 3),
         ),
         (
+            // Elem index required; table index optional and defaults to 0.
             "table.init",
-            InstructionArity::exact(2, "table and elem index", 3, 0),
+            InstructionArity::range(1, 2, "optional table index and elem index", 3, 0),
         ),
         ("elem.drop", InstructionArity::exact(1, "elem index", 0, 0)),
         // Reference operations
@@ -840,6 +838,46 @@ mod tests {
         assert!(arity.is_valid(1));
         assert!(!arity.is_valid(0));
         assert!(!arity.is_valid(2));
+    }
+
+    #[test]
+    fn test_copy_ops_accept_zero_or_two_immediates() {
+        // `table.copy`/`memory.copy` take a jointly-optional pair of indices:
+        // zero (both default to 0) or two are valid, one or three are not.
+        for instr in &["table.copy", "memory.copy"] {
+            let arity = lookup_instruction_arity(instr)
+                .unwrap_or_else(|| panic!("missing arity for {instr}"));
+            assert!(arity.is_valid(0), "{instr} should accept zero immediates");
+            assert!(!arity.is_valid(1), "{instr} should reject one immediate");
+            assert!(arity.is_valid(2), "{instr} should accept two immediates");
+            assert!(!arity.is_valid(3), "{instr} should reject three immediates");
+            assert_eq!(arity.min_params, 0);
+            assert_eq!(arity.max_params, 2);
+            assert!(arity.endpoints_only);
+        }
+    }
+
+    #[test]
+    fn test_init_ops_accept_one_or_two_immediates() {
+        // `table.init`/`memory.init` require the elem/data index; the table/memory
+        // index is optional and defaults to 0, so one or two immediates are valid.
+        for instr in &["table.init", "memory.init"] {
+            let arity = lookup_instruction_arity(instr)
+                .unwrap_or_else(|| panic!("missing arity for {instr}"));
+            assert!(!arity.is_valid(0), "{instr} should reject zero immediates");
+            assert!(arity.is_valid(1), "{instr} should accept one immediate");
+            assert!(arity.is_valid(2), "{instr} should accept two immediates");
+            assert!(!arity.is_valid(3), "{instr} should reject three immediates");
+        }
+    }
+
+    #[test]
+    fn test_endpoints_only_expected_message() {
+        let arity = lookup_instruction_arity("table.copy").unwrap();
+        assert_eq!(
+            arity.expected_message(),
+            "0 or 2 (optional dest and src table indices)"
+        );
     }
 
     #[test]
