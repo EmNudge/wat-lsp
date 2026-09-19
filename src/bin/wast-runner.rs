@@ -52,6 +52,13 @@ struct Args {
     /// Filter to .wast files whose name contains this substring
     #[arg(long)]
     filter: Option<String>,
+
+    /// Exit non-zero if any directive fails or any file fails to parse. Missing
+    /// inputs and read errors always exit non-zero regardless of this flag; this
+    /// only adds directive-failure gating for local use, keeping the default
+    /// exit behavior friendly to the baseline-aware CI comparison.
+    #[arg(long)]
+    strict: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +114,10 @@ struct FileSummary {
 struct GlobalSummary {
     files_processed: usize,
     files_parse_errors: usize,
+    /// Requested paths that did not exist (e.g. an unexpanded glob).
+    files_missing: usize,
+    /// Discovered files that existed but could not be read.
+    files_read_errors: usize,
     total: usize,
     pass: usize,
     fail: usize,
@@ -498,15 +509,23 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
 // File processing
 // ---------------------------------------------------------------------------
 
-fn process_wast_file(path: &Path) -> Result<FileSummary, String> {
-    let source = fs::read_to_string(path).map_err(|e| format!("Failed to read: {}", e))?;
+/// Why a file could not be turned into a `FileSummary`. Read errors are an
+/// infrastructure problem (the file is unreadable); parse errors mean the file
+/// was read but the `wast` crate could not lex/parse it.
+enum FileError {
+    Read(String),
+    Parse(String),
+}
+
+fn process_wast_file(path: &Path) -> Result<FileSummary, FileError> {
+    let source = fs::read_to_string(path).map_err(|e| FileError::Read(e.to_string()))?;
     let filename = path.display().to_string();
 
     let buf = wast::parser::ParseBuffer::new(&source)
-        .map_err(|e| format!("Failed to lex {}: {}", filename, e))?;
+        .map_err(|e| FileError::Parse(format!("Failed to lex {}: {}", filename, e)))?;
 
-    let wast: wast::Wast =
-        wast::parser::parse(&buf).map_err(|e| format!("Failed to parse {}: {}", filename, e))?;
+    let wast: wast::Wast = wast::parser::parse(&buf)
+        .map_err(|e| FileError::Parse(format!("Failed to parse {}: {}", filename, e)))?;
 
     let mut summary = FileSummary {
         file: filename,
@@ -561,23 +580,49 @@ fn process_wast_file(path: &Path) -> Result<FileSummary, String> {
 // File collection
 // ---------------------------------------------------------------------------
 
-fn collect_wast_files(paths: &[PathBuf], filter: &Option<String>) -> Vec<PathBuf> {
-    let mut files = Vec::new();
+/// The result of resolving the requested paths into concrete `.wast` files.
+struct Collected {
+    files: Vec<PathBuf>,
+    /// Requested paths that did not exist on disk.
+    missing: Vec<PathBuf>,
+}
+
+/// Recursively collect `.wast` files under `dir` (including nested directories
+/// such as the spec suite's `proposals/` subdirectories).
+fn collect_dir_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+    paths.sort();
     for path in paths {
         if path.is_dir() {
-            if let Ok(entries) = fs::read_dir(path) {
-                let mut dir_files: Vec<PathBuf> = entries
-                    .filter_map(Result::ok)
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|ext| ext == "wast"))
-                    .collect();
-                dir_files.sort();
-                files.extend(dir_files);
-            }
-        } else {
-            files.push(path.clone());
+            collect_dir_recursive(&path, files);
+        } else if path.extension().is_some_and(|ext| ext == "wast") {
+            files.push(path);
         }
     }
+}
+
+fn collect_wast_files(paths: &[PathBuf], filter: &Option<String>) -> Collected {
+    let mut files = Vec::new();
+    let mut missing = Vec::new();
+    for path in paths {
+        if path.is_dir() {
+            collect_dir_recursive(path, &mut files);
+        } else if path.is_file() {
+            // Explicitly requested file — include it even if not `.wast`.
+            files.push(path.clone());
+        } else {
+            // A requested path that does not exist (e.g. an unexpanded
+            // `testsuite/*.wast` glob when the suite was never cloned). Record
+            // it so the run fails rather than silently reporting success.
+            missing.push(path.clone());
+        }
+    }
+
+    files.sort();
+    files.dedup();
 
     if let Some(substr) = filter {
         files.retain(|p| {
@@ -587,7 +632,7 @@ fn collect_wast_files(paths: &[PathBuf], filter: &Option<String>) -> Vec<PathBuf
         });
     }
 
-    files
+    Collected { files, missing }
 }
 
 // ---------------------------------------------------------------------------
@@ -641,8 +686,11 @@ fn print_file_text(summary: &FileSummary, failures_only: bool, verbose: bool) {
 fn print_global_text(global: &GlobalSummary) {
     eprintln!("\n=== GLOBAL SUMMARY ===");
     eprintln!(
-        "Files: {} processed, {} parse errors",
-        global.files_processed, global.files_parse_errors
+        "Files: {} processed, {} parse errors, {} read errors, {} missing",
+        global.files_processed,
+        global.files_parse_errors,
+        global.files_read_errors,
+        global.files_missing
     );
     eprintln!(
         "Directives: {} total — {} pass, {} fail, {} skip",
@@ -659,14 +707,26 @@ fn print_global_text(global: &GlobalSummary) {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    let files = collect_wast_files(&args.paths, &args.filter);
+    let Collected { files, missing } = collect_wast_files(&args.paths, &args.filter);
 
-    if files.is_empty() {
-        eprintln!("No .wast files found");
-        return ExitCode::from(1);
+    // Surface missing inputs explicitly — a requested path that does not exist
+    // is an infrastructure error, never a successful "0 tests" run.
+    for path in &missing {
+        eprintln!("ERROR: requested input path not found: {}", path.display());
     }
 
-    let mut global = GlobalSummary::default();
+    if files.is_empty() {
+        if missing.is_empty() {
+            eprintln!("No .wast files found in the requested paths");
+        }
+        // Usage/infrastructure error: nothing to run, or only missing inputs.
+        return ExitCode::from(2);
+    }
+
+    let mut global = GlobalSummary {
+        files_missing: missing.len(),
+        ..Default::default()
+    };
     let mut all_summaries: Vec<FileSummary> = Vec::new();
 
     for path in &files {
@@ -690,11 +750,16 @@ fn main() -> ExitCode {
                     all_summaries.push(summary);
                 }
             }
-            Err(e) => {
+            Err(FileError::Read(msg)) => {
+                global.files_read_errors += 1;
+                eprintln!("\n=== {} ===", path.display());
+                eprintln!("  READ ERROR: {}", msg);
+            }
+            Err(FileError::Parse(msg)) => {
                 global.files_parse_errors += 1;
                 if matches!(args.format, OutputFormat::Text) {
                     eprintln!("\n=== {} ===", path.display());
-                    eprintln!("  ERROR: {}", e);
+                    eprintln!("  PARSE ERROR: {}", msg);
                 }
             }
         }
@@ -715,5 +780,19 @@ fn main() -> ExitCode {
         }
     }
 
+    // Exit status:
+    // - Missing requested inputs or unreadable files are infrastructure errors:
+    //   always exit non-zero so "missing input" never looks like success. This
+    //   is kept separate from directive outcomes so CI can compare directive
+    //   counts against a baseline without every known failure making the run
+    //   unusable.
+    // - With --strict, directive failures and parse errors also exit non-zero
+    //   for local gating.
+    if global.files_missing > 0 || global.files_read_errors > 0 {
+        return ExitCode::from(2);
+    }
+    if args.strict && (global.fail > 0 || global.files_parse_errors > 0) {
+        return ExitCode::from(1);
+    }
     ExitCode::SUCCESS
 }
