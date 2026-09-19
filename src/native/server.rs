@@ -3,15 +3,14 @@
 //! Extracted from `main.rs` so that integration tests can construct
 //! an `LspService` in-process without going through stdio.
 
+use super::documents::{DocumentEvent, DocumentHandle};
 use crate::parser::ModuleInfo;
 use crate::{
-    completion, definition, diagnostics, document_symbols, folding, hover, parser, references,
-    signature, symbols, tree_sitter_bindings, utils,
+    completion, definition, document_symbols, folding, hover, references, signature, symbols, utils,
 };
+use std::sync::Arc;
 
 use dashmap::DashMap;
-use tokio::sync::watch;
-use tokio::time::{sleep, Duration};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -20,21 +19,17 @@ use tree_sitter::Tree;
 /// Debounce duration for wast validation after edits (milliseconds).
 pub const DEBOUNCE_DURATION_MS: u64 = 500;
 
-/// Type alias for document context references returned by `get_document_context`
-type DocumentContext<'a> = (
-    dashmap::mapref::one::Ref<'a, String, String>,
-    dashmap::mapref::one::Ref<'a, String, Vec<ModuleInfo>>,
-    dashmap::mapref::one::Ref<'a, String, Tree>,
-);
+/// Owned snapshot components: no map guards survive a feature handler's await.
+type DocumentContext = (Arc<String>, Arc<Vec<ModuleInfo>>, Tree);
 
 /// The LSP backend that implements `LanguageServer`.
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
-    document_map: DashMap<String, String>,
-    symbol_map: DashMap<String, Vec<ModuleInfo>>,
-    tree_map: DashMap<String, Tree>,
-    validation_cancellation: DashMap<String, watch::Sender<bool>>,
+    // Keep a lightweight lane after close so a concurrent close/reopen cannot
+    // create two owners for the same URI. Closed lanes retain no document data;
+    // dropping the backend drops their senders and terminates the tasks.
+    documents: DashMap<String, DocumentHandle>,
 }
 
 /// Find the SymbolTable for a given position from a list of modules.
@@ -81,163 +76,27 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            document_map: DashMap::new(),
-            symbol_map: DashMap::new(),
-            tree_map: DashMap::new(),
-            validation_cancellation: DashMap::new(),
+            documents: DashMap::new(),
         }
     }
 
-    /// Get document, symbols, and tree for a given URI.
-    /// Returns None if any of them are missing.
-    fn get_document_context(&self, uri: &str) -> Option<DocumentContext<'_>> {
-        let doc = self.document_map.get(uri)?;
-        let syms = self.symbol_map.get(uri)?;
-        let tree = self.tree_map.get(uri)?;
-        Some((doc, syms, tree))
+    fn document(&self, uri: &Url) -> DocumentHandle {
+        self.documents
+            .entry(uri.to_string())
+            .or_insert_with(|| DocumentHandle::new(self.client.clone(), uri.clone()))
+            .clone()
     }
 
-    /// Parse and generate immediate diagnostics for a document.
-    /// Returns the parsed tree if successful.
-    /// This is shared between update_document and did_change to avoid duplication.
-    async fn parse_and_publish_immediate_diagnostics(
-        &self,
-        uri: &str,
-        text: &str,
-        old_tree: Option<&Tree>,
-    ) -> Option<Tree> {
-        let mut ts_parser = tree_sitter_bindings::create_parser();
-        let tree = ts_parser.parse(text, old_tree)?;
-
-        // Generate IMMEDIATE syntax diagnostics
-        let syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(&tree, text);
-
-        // Extract symbols and generate semantic diagnostics (per-module)
-        let semantic_diagnostics = if let Ok(modules) = parser::parse_modules_from_tree(&tree, text)
-        {
-            let diags = if modules.len() <= 1 {
-                // Single module: use original path for backward compatibility
-                let syms = modules.first().map(|m| &m.symbols);
-                syms.map(|s| diagnostics::provide_semantic_diagnostics(&tree, text, s))
-                    .unwrap_or_default()
-            } else {
-                // Multi-module: run diagnostics per module
-                diagnostics::provide_semantic_diagnostics_multi(&tree, text, &modules)
-            };
-            self.symbol_map.insert(uri.to_string(), modules);
-            diags
-        } else {
-            vec![]
-        };
-
-        // Merge and publish diagnostics
-        let mut combined = syntax_diagnostics;
-        combined.extend(semantic_diagnostics);
-
-        if let Ok(lsp_uri) = uri.parse() {
-            self.client
-                .publish_diagnostics(lsp_uri, combined, None)
-                .await;
-        }
-
-        Some(tree)
-    }
-
-    async fn update_document(&self, uri: String, text: String) {
-        if let Some(tree) = self
-            .parse_and_publish_immediate_diagnostics(&uri, &text, None)
-            .await
-        {
-            // Update document text first, then tree, for consistency with did_change
-            // and to minimize race conditions with validation tasks
-            self.document_map.insert(uri.clone(), text.clone());
-            self.tree_map.insert(uri.clone(), tree);
-        } else {
-            self.document_map.insert(uri.clone(), text.clone());
-        }
-
-        // Schedule debounced wast validation
-        self.schedule_wast_validation(uri, text).await;
-    }
-
-    async fn schedule_wast_validation(&self, uri: String, _text: String) {
-        // Cancel any existing validation task for this document
-        if let Some(entry) = self.validation_cancellation.get(&uri) {
-            let _ = entry.send(true); // Signal cancellation
-        }
-
-        // Create new cancellation channel
-        let (tx, mut rx) = watch::channel(false);
-        self.validation_cancellation.insert(uri.clone(), tx);
-
-        // Clone what we need for the async task
-        let client = self.client.clone();
-        let document_map = self.document_map.clone();
-        let tree_map = self.tree_map.clone();
-        let symbol_map = self.symbol_map.clone();
-
-        // Spawn background task
-        tokio::spawn(async move {
-            // Wait for debounce period or cancellation
-            tokio::select! {
-                _ = sleep(Duration::from_millis(DEBOUNCE_DURATION_MS)) => {
-                    // Debounce period elapsed, run validation
-                }
-                _ = rx.changed() => {
-                    // Cancelled by new edit
-                    return;
-                }
-            }
-
-            // IMPORTANT: Re-fetch the current text from document_map instead of using
-            // captured text. This fixes a race condition (issue #79) where:
-            // 1. This task is spawned with text at time T1
-            // 2. After debounce period, another edit updated tree_map to T2
-            // 3. If we used the captured text (T1) with the new tree (T2), the tree's
-            //    byte ranges wouldn't match the text, causing wrong error positions.
-            // By re-fetching, we ensure tree and text are always from the same state.
-            let text = match document_map.get(&uri) {
-                Some(doc) => doc.clone(),
-                None => return, // Document was closed
-            };
-
-            // Get tree-sitter diagnostics (from cached tree)
-            let tree_diags = if let Some(tree) = tree_map.get(&uri) {
-                diagnostics::provide_tree_sitter_diagnostics(&tree, &text)
-            } else {
-                vec![]
-            };
-
-            // Get semantic diagnostics (undefined label references)
-            // Use cached symbols instead of re-parsing
-            let semantic_diags = match (tree_map.get(&uri), symbol_map.get(&uri)) {
-                (Some(tree), Some(modules)) => {
-                    if modules.len() <= 1 {
-                        modules
-                            .first()
-                            .map(|m| {
-                                diagnostics::provide_semantic_diagnostics(&tree, &text, &m.symbols)
-                            })
-                            .unwrap_or_default()
-                    } else {
-                        diagnostics::provide_semantic_diagnostics_multi(&tree, &text, &modules)
-                    }
-                }
-                _ => vec![],
-            };
-
-            // Run wast validation
-            let wast_diags = diagnostics::validate_wat(&text);
-
-            // Merge all diagnostics
-            let combined =
-                diagnostics::merge_all_diagnostics(tree_diags, semantic_diags, wast_diags);
-
-            // Publish combined diagnostics
-            if let Ok(lsp_uri) = uri.parse() {
-                client.publish_diagnostics(lsp_uri, combined, None).await;
-            }
-        });
+    /// Reads use the same queue as mutations, so a request observes preceding
+    /// edits, not a mixture of independently fetched text, symbols, and tree.
+    async fn get_document_context(&self, uri: &str) -> Option<DocumentContext> {
+        let document = self.documents.get(uri)?.clone();
+        let snapshot = document.dispatch(DocumentEvent::Snapshot).await?;
+        Some((
+            snapshot.text.clone(),
+            snapshot.modules.clone(),
+            snapshot.tree.clone()?,
+        ))
     }
 }
 
@@ -293,110 +152,45 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
-        let text = params.text_document.text;
-        self.update_document(uri, text).await;
+        let doc = params.text_document;
+        self.document(&doc.uri)
+            .dispatch(DocumentEvent::Open {
+                text: doc.text,
+                version: doc.version,
+            })
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
-
-        // Get the current document text
-        let mut text = match self.document_map.get(&uri) {
-            Some(doc) => doc.clone(),
-            None => {
-                // Document not found, fall back to full sync
-                if let Some(change) = params.content_changes.into_iter().next() {
-                    self.update_document(uri, change.text).await;
-                }
-                return;
-            }
-        };
-
-        // Get the current tree for incremental reparsing
-        let mut old_tree = self.tree_map.get(&uri).map(|t| t.clone());
-
-        // Apply all incremental changes
-        for change in params.content_changes {
-            if let Some(range) = change.range {
-                // Incremental change
-                let start_byte = utils::position_to_byte(&text, range.start.into());
-                let old_end_byte = utils::position_to_byte(&text, range.end.into());
-
-                // Apply the text edit and get new end position
-                let new_end = utils::apply_text_edit(
-                    &mut text,
-                    range.start.into(),
-                    range.end.into(),
-                    &change.text,
-                );
-                let new_end_byte = start_byte + change.text.len();
-
-                // Apply the edit to the tree if we have one
-                if let Some(ref mut tree) = old_tree {
-                    // Create InputEdit for tree-sitter
-                    let edit = tree_sitter::InputEdit {
-                        start_byte,
-                        old_end_byte,
-                        new_end_byte,
-                        start_position: tree_sitter::Point {
-                            row: range.start.line as usize,
-                            column: range.start.character as usize,
-                        },
-                        old_end_position: tree_sitter::Point {
-                            row: range.end.line as usize,
-                            column: range.end.character as usize,
-                        },
-                        new_end_position: tree_sitter::Point {
-                            row: new_end.line as usize,
-                            column: new_end.character as usize,
-                        },
-                    };
-
-                    tree.edit(&edit);
-                }
-            } else {
-                // Full document sync fallback
-                text = change.text;
-                old_tree = None; // Invalidate tree for full sync
-            }
-        }
-
-        // Reparse with the edited tree and publish diagnostics
-        if let Some(tree) = self
-            .parse_and_publish_immediate_diagnostics(&uri, &text, old_tree.as_ref())
-            .await
-        {
-            // Update document text first, then tree, to minimize race conditions
-            // with the debounced validation task (see issue #79). The validation
-            // task fetches text then tree, so updating text first makes it more
-            // likely to get a consistent pair.
-            self.document_map.insert(uri.clone(), text.clone());
-            self.tree_map.insert(uri.clone(), tree);
+        // Clone the lane and release the map guard before awaiting it.
+        let document = self
+            .documents
+            .get(params.text_document.uri.as_str())
+            .map(|d| d.clone());
+        if let Some(document) = document {
+            document
+                .dispatch(DocumentEvent::Change {
+                    changes: params.content_changes,
+                    version: params.text_document.version,
+                })
+                .await;
         } else {
-            // Even if parsing failed, update the document text
-            self.document_map.insert(uri.clone(), text.clone());
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!(
+                        "Ignoring didChange for unopened document {}",
+                        params.text_document.uri,
+                    ),
+                )
+                .await;
         }
-
-        // Schedule debounced wast validation
-        self.schedule_wast_validation(uri, text).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
-
-        // Clear diagnostics for the closed document
-        self.client
-            .publish_diagnostics(params.text_document.uri, vec![], None)
+        self.document(&params.text_document.uri)
+            .dispatch(DocumentEvent::Close)
             .await;
-
-        // Remove cached data
-        self.document_map.remove(&uri);
-        self.symbol_map.remove(&uri);
-        self.tree_map.remove(&uri);
-
-        // Cancel any pending validation
-        self.validation_cancellation.remove(&uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -407,7 +201,7 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
             if let Some(syms) = symbols_for_position(&modules, position) {
                 return Ok(hover::provide_hover(&doc, syms, &tree, position));
             }
@@ -420,7 +214,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
 
-        if let Some((doc, modules, _tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, _tree)) = self.get_document_context(&uri).await {
             if let Some(syms) = symbols_for_position(&modules, position) {
                 let completions = completion::provide_completion(&doc, syms, position.into());
                 return Ok(Some(CompletionResponse::Array(
@@ -440,7 +234,7 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
             if let Some(syms) = symbols_for_position(&modules, position) {
                 return Ok(signature::provide_signature_help(
                     &doc, syms, &tree, position,
@@ -462,7 +256,7 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
             if let Some(syms) = symbols_for_position(&modules, position) {
                 if let Some(location) =
                     definition::provide_definition(&doc, syms, &tree, position, &uri)
@@ -490,7 +284,7 @@ impl LanguageServer for Backend {
             )
             .await;
 
-        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
             if let Some(module) = module_for_position(&modules, position) {
                 // For multi-module docs, scope references to the containing module
                 let module_scope = if modules.len() > 1 {
@@ -532,7 +326,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri.to_string();
 
-        if let Some(modules) = self.symbol_map.get(&uri) {
+        if let Some((_doc, modules, _tree)) = self.get_document_context(&uri).await {
             // Aggregate document symbols from all modules
             let mut all_symbols = Vec::new();
             for module in modules.iter() {
@@ -551,7 +345,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
-        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
             let syms = match symbols_for_position(&modules, position) {
                 Some(s) => s,
                 None => return Ok(None),
@@ -619,7 +413,7 @@ impl LanguageServer for Backend {
             )
             .await;
 
-        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
             let module = match module_for_position(&modules, position) {
                 Some(m) => m,
                 None => return Ok(None),
@@ -687,7 +481,7 @@ impl LanguageServer for Backend {
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri.to_string();
 
-        if let Some((doc, modules, tree)) = self.get_document_context(&uri) {
+        if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
             if let Some(syms) = first_symbols(&modules) {
                 return Ok(Some(folding::provide_folding_ranges_lsp(&doc, syms, &tree)));
             }
