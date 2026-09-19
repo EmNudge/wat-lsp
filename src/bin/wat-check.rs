@@ -33,10 +33,10 @@ enum OutputFormat {
 enum DiagnosticLevel {
     /// Only syntax errors (fastest)
     Syntax,
-    /// Syntax + semantic validation (default)
-    #[default]
+    /// Syntax + semantic validation
     Semantic,
-    /// Full validation including wast deep checks (slowest but most thorough)
+    /// Full validation including wast deep checks (default; most thorough)
+    #[default]
     Full,
 }
 
@@ -53,8 +53,10 @@ struct Args {
     #[arg(short, long, value_enum, default_value_t = OutputFormat::Text)]
     format: OutputFormat,
 
-    /// Diagnostic level (controls which checks are run)
-    #[arg(short, long, value_enum, default_value_t = DiagnosticLevel::Semantic)]
+    /// Diagnostic level (controls which checks are run). Defaults to the full
+    /// pipeline (syntax + semantic + wast deep validation); pass `--level
+    /// syntax` or `--level semantic` to run a narrower subset.
+    #[arg(short, long, value_enum, default_value_t = DiagnosticLevel::Full)]
     level: DiagnosticLevel,
 
     /// Only show errors (hide warnings and hints)

@@ -287,13 +287,51 @@ fn is_component(qw: &wast::QuoteWat<'_>) -> bool {
 // Diagnostic pipeline
 // ---------------------------------------------------------------------------
 
-/// Run the full LSP diagnostic pipeline and return the count of error-level diagnostics
-/// plus all diagnostic messages (for verbose output).
-fn get_diagnostics(wat_text: &str) -> (usize, Vec<String>) {
+/// The result of running the diagnostic pipeline on a single module, with error
+/// counts split by *layer* so negative cases can be scored correctly.
+///
+/// The WAST spec draws a sharp line between two failure modes:
+///
+/// * `assert_malformed` expects the text to fail *lexing/parsing* — it is not
+///   even well-formed WAT.
+/// * `assert_invalid` expects the text to *parse* but fail *validation* (type
+///   checking, index resolution, etc.).
+///
+/// If we scored both on "any error", a grammar gap in our tree-sitter parser
+/// would make an `assert_invalid` case spuriously pass: we would reject the
+/// module for the wrong reason (a syntax error we shouldn't have produced)
+/// while claiming we correctly detected the validation failure. Keeping the
+/// counts separate lets us require a *validation-layer* error for
+/// `assert_invalid` and treat a syntax-only rejection as an unmet expectation
+/// (a grammar gap), not a pass.
+struct DiagCounts {
+    /// Errors from the tree-sitter grammar layer (a syntax / grammar failure).
+    syntax_errors: usize,
+    /// Errors from validation: semantic checks plus the `wast` validator.
+    validation_errors: usize,
+    /// Rendered messages for verbose output.
+    messages: Vec<String>,
+}
+
+impl DiagCounts {
+    /// Total error-level diagnostics across all layers.
+    fn total_errors(&self) -> usize {
+        self.syntax_errors + self.validation_errors
+    }
+}
+
+/// Run the full LSP diagnostic pipeline on `wat_text`, counting errors per layer.
+fn get_diagnostics(wat_text: &str) -> DiagCounts {
     let mut parser = create_parser();
     let tree = match parser.parse(wat_text, None) {
         Some(t) => t,
-        None => return (1, vec!["Failed to parse with tree-sitter".to_string()]),
+        None => {
+            return DiagCounts {
+                syntax_errors: 1,
+                validation_errors: 0,
+                messages: vec!["  syntax: Failed to parse with tree-sitter".to_string()],
+            };
+        }
     };
 
     let syntax_diags = provide_tree_sitter_diagnostics(&tree, wat_text);
@@ -302,13 +340,17 @@ fn get_diagnostics(wat_text: &str) -> (usize, Vec<String>) {
         Err(_) => vec![],
     };
     let wast_diags = validate_wat(wat_text);
+
+    let is_error =
+        |d: &tower_lsp::lsp_types::Diagnostic| d.severity == Some(DiagnosticSeverity::ERROR);
+
+    let syntax_errors = syntax_diags.iter().filter(|d| is_error(d)).count();
+    // Semantic checks and the `wast` validator are both validation-layer
+    // signals: they only fire on text that parsed far enough to type-check.
+    let validation_errors = semantic_diags.iter().filter(|d| is_error(d)).count()
+        + wast_diags.iter().filter(|d| is_error(d)).count();
+
     let all = merge_all_diagnostics(syntax_diags, semantic_diags, wast_diags);
-
-    let error_count = all
-        .iter()
-        .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
-        .count();
-
     let messages: Vec<String> = all
         .iter()
         .map(|d| {
@@ -328,7 +370,11 @@ fn get_diagnostics(wat_text: &str) -> (usize, Vec<String>) {
         })
         .collect();
 
-    (error_count, messages)
+    DiagCounts {
+        syntax_errors,
+        validation_errors,
+        messages,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +390,60 @@ fn strip_module_definition(text: &str) -> String {
         format!("{}{}", before, after.trim_start())
     } else {
         text.to_string()
+    }
+}
+
+/// The scored outcome of a negative directive plus a human-readable reason.
+///
+/// This is pulled out of `process_directive` so the crucial negative-case
+/// scoring rules can be unit-tested without depending on the `wast` crate's
+/// tolerance for our fixtures.
+struct ScoredNegative {
+    outcome: Outcome,
+    detail: String,
+}
+
+/// Score an `assert_invalid` directive.
+///
+/// `assert_invalid` expects a module that *parses* and then fails *validation*.
+/// A validation-layer error is the expected pass. A grammar-layer (syntax) error
+/// alone means our parser rejected text it should have accepted, so we detected
+/// the "wrong" problem — that is a grammar gap and must not count as a pass.
+fn score_assert_invalid(counts: &DiagCounts) -> ScoredNegative {
+    if counts.validation_errors > 0 {
+        ScoredNegative {
+            outcome: Outcome::Pass,
+            detail: "validation error".to_string(),
+        }
+    } else if counts.syntax_errors > 0 {
+        ScoredNegative {
+            outcome: Outcome::Fail,
+            detail: "syntax error only, expected validation failure (grammar gap)".to_string(),
+        }
+    } else {
+        ScoredNegative {
+            outcome: Outcome::Fail,
+            detail: "no errors".to_string(),
+        }
+    }
+}
+
+/// Score an `assert_malformed` directive.
+///
+/// `assert_malformed` expects text that is not even well-formed. Any error — a
+/// tree-sitter syntax error or a `wast` lex/parse error — means we rejected it,
+/// which is the expected behavior, so we score on total errors.
+fn score_assert_malformed(counts: &DiagCounts) -> ScoredNegative {
+    if counts.total_errors() > 0 {
+        ScoredNegative {
+            outcome: Outcome::Pass,
+            detail: "found errors".to_string(),
+        }
+    } else {
+        ScoredNegative {
+            outcome: Outcome::Fail,
+            detail: "no errors".to_string(),
+        }
     }
 }
 
@@ -373,14 +473,15 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                     } else {
                         text
                     };
-                    let (errors, diags) = get_diagnostics(&text);
+                    let counts = get_diagnostics(&text);
+                    let errors = counts.total_errors();
                     if errors == 0 {
                         DirectiveResult {
                             line: line_1based,
                             kind: DirectiveKind::Module,
                             outcome: Outcome::Pass,
                             label: format!("Module: valid ({} errors)", errors),
-                            diagnostics: diags,
+                            diagnostics: counts.messages,
                         }
                     } else {
                         DirectiveResult {
@@ -388,7 +489,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                             kind: DirectiveKind::Module,
                             outcome: Outcome::Fail,
                             label: format!("Module: expected valid but got {} error(s)", errors),
-                            diagnostics: diags,
+                            diagnostics: counts.messages,
                         }
                     }
                 }
@@ -416,26 +517,17 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
             }
             match extract_wat_text(module, source) {
                 Some(text) => {
-                    let (errors, diags) = get_diagnostics(&text);
-                    if errors > 0 {
-                        DirectiveResult {
-                            line: line_1based,
-                            kind: DirectiveKind::AssertInvalid,
-                            outcome: Outcome::Pass,
-                            label: format!(
-                                "AssertInvalid: found errors (expected \"{}\")",
-                                message
-                            ),
-                            diagnostics: diags,
-                        }
-                    } else {
-                        DirectiveResult {
-                            line: line_1based,
-                            kind: DirectiveKind::AssertInvalid,
-                            outcome: Outcome::Fail,
-                            label: format!("AssertInvalid: no errors (expected \"{}\")", message),
-                            diagnostics: diags,
-                        }
+                    let counts = get_diagnostics(&text);
+                    let scored = score_assert_invalid(&counts);
+                    DirectiveResult {
+                        line: line_1based,
+                        kind: DirectiveKind::AssertInvalid,
+                        outcome: scored.outcome,
+                        label: format!(
+                            "AssertInvalid: {} (expected \"{}\")",
+                            scored.detail, message
+                        ),
+                        diagnostics: counts.messages,
                     }
                 }
                 None => DirectiveResult {
@@ -462,26 +554,17 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
             }
             match extract_wat_text(module, source) {
                 Some(text) => {
-                    let (errors, diags) = get_diagnostics(&text);
-                    if errors > 0 {
-                        DirectiveResult {
-                            line: line_1based,
-                            kind: DirectiveKind::AssertMalformed,
-                            outcome: Outcome::Pass,
-                            label: format!(
-                                "AssertMalformed: found errors (expected \"{}\")",
-                                message
-                            ),
-                            diagnostics: diags,
-                        }
-                    } else {
-                        DirectiveResult {
-                            line: line_1based,
-                            kind: DirectiveKind::AssertMalformed,
-                            outcome: Outcome::Fail,
-                            label: format!("AssertMalformed: no errors (expected \"{}\")", message),
-                            diagnostics: diags,
-                        }
+                    let counts = get_diagnostics(&text);
+                    let scored = score_assert_malformed(&counts);
+                    DirectiveResult {
+                        line: line_1based,
+                        kind: DirectiveKind::AssertMalformed,
+                        outcome: scored.outcome,
+                        label: format!(
+                            "AssertMalformed: {} (expected \"{}\")",
+                            scored.detail, message
+                        ),
+                        diagnostics: counts.messages,
                     }
                 }
                 None => DirectiveResult {
@@ -795,4 +878,63 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn counts(syntax: usize, validation: usize) -> DiagCounts {
+        DiagCounts {
+            syntax_errors: syntax,
+            validation_errors: validation,
+            messages: vec![],
+        }
+    }
+
+    #[test]
+    fn assert_invalid_passes_on_validation_error() {
+        // A genuine validation failure (module parsed, failed type-check) is the
+        // expected outcome for assert_invalid.
+        assert_eq!(score_assert_invalid(&counts(0, 1)).outcome, Outcome::Pass);
+    }
+
+    #[test]
+    fn assert_invalid_fails_on_syntax_only_error() {
+        // A syntax-only rejection is a grammar gap: our parser choked on text it
+        // should have accepted, so we did not actually test validation. This must
+        // NOT be scored as a pass (the false-positive the audit calls out).
+        let scored = score_assert_invalid(&counts(1, 0));
+        assert_eq!(scored.outcome, Outcome::Fail);
+        assert!(
+            scored.detail.contains("grammar gap"),
+            "detail should explain the grammar gap, got: {}",
+            scored.detail
+        );
+    }
+
+    #[test]
+    fn assert_invalid_fails_when_clean() {
+        // No error at all when a validation error was expected is a failure.
+        assert_eq!(score_assert_invalid(&counts(0, 0)).outcome, Outcome::Fail);
+    }
+
+    #[test]
+    fn assert_invalid_prefers_validation_when_both_present() {
+        // If validation caught it, that satisfies the assertion even if there is
+        // also a syntax error alongside.
+        assert_eq!(score_assert_invalid(&counts(1, 1)).outcome, Outcome::Pass);
+    }
+
+    #[test]
+    fn assert_malformed_passes_on_any_error() {
+        // Malformed text may be rejected by either the grammar or the wast lexer.
+        assert_eq!(score_assert_malformed(&counts(1, 0)).outcome, Outcome::Pass);
+        assert_eq!(score_assert_malformed(&counts(0, 1)).outcome, Outcome::Pass);
+    }
+
+    #[test]
+    fn assert_malformed_fails_when_clean() {
+        assert_eq!(score_assert_malformed(&counts(0, 0)).outcome, Outcome::Fail);
+    }
 }

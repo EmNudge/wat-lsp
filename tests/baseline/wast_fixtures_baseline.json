@@ -1,0 +1,100 @@
+{
+  "files": [
+    {
+      "assert_invalid": {
+        "pass": 1,
+        "total": 2
+      },
+      "assert_malformed": {
+        "pass": 1,
+        "total": 1
+      },
+      "directives": [
+        {
+          "kind": "assert_invalid",
+          "label": "AssertInvalid: validation error (expected \"type mismatch\")",
+          "line": 12,
+          "outcome": "pass"
+        },
+        {
+          "kind": "assert_invalid",
+          "label": "AssertInvalid: no errors (expected \"type mismatch\")",
+          "line": 19,
+          "outcome": "fail"
+        },
+        {
+          "kind": "assert_malformed",
+          "label": "AssertMalformed: found errors (expected \"unexpected end\")",
+          "line": 27,
+          "outcome": "pass"
+        }
+      ],
+      "fail": 1,
+      "file": "negative_cases.wast",
+      "modules": {
+        "pass": 0,
+        "total": 0
+      },
+      "pass": 2,
+      "skip": 0
+    },
+    {
+      "assert_invalid": {
+        "pass": 0,
+        "total": 0
+      },
+      "assert_malformed": {
+        "pass": 0,
+        "total": 0
+      },
+      "directives": [
+        {
+          "kind": "module",
+          "label": "Module: valid (0 errors)",
+          "line": 1,
+          "outcome": "pass"
+        }
+      ],
+      "fail": 0,
+      "file": "nested.wast",
+      "modules": {
+        "pass": 1,
+        "total": 1
+      },
+      "pass": 1,
+      "skip": 0
+    },
+    {
+      "assert_invalid": {
+        "pass": 0,
+        "total": 0
+      },
+      "assert_malformed": {
+        "pass": 1,
+        "total": 1
+      },
+      "directives": [
+        {
+          "kind": "module",
+          "label": "Module: valid (0 errors)",
+          "line": 2,
+          "outcome": "pass"
+        },
+        {
+          "kind": "assert_malformed",
+          "label": "AssertMalformed: found errors (expected \"type mismatch\")",
+          "line": 7,
+          "outcome": "pass"
+        }
+      ],
+      "fail": 0,
+      "file": "valid.wast",
+      "modules": {
+        "pass": 1,
+        "total": 1
+      },
+      "pass": 2,
+      "skip": 0
+    }
+  ]
+}

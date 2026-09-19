@@ -156,3 +156,63 @@ jobs:
           section: wast_progress
           title: WAST Spec Test Progress
           file-path: /tmp/wast-comment.md
+
+  # Baseline-aware regression gate. Unlike the informational comment above this
+  # job is NOT continue-on-error: it hard-fails the PR when a reviewed, covered
+  # case regresses.
+  #
+  # It compares the current run against a *committed* baseline
+  # (`tests/baseline/wast_fixtures_baseline.json`) that was produced by this same
+  # runner over the committed fixtures in `tests/wast_fixtures/`. Because both the
+  # baseline and the current run use the same scoring logic, a change to the
+  # scoring *rules* never shows up as a spurious regression — only an actual
+  # change in a covered case's outcome does. When a PR legitimately changes a
+  # covered outcome (e.g. a grammar fix), the author regenerates the baseline:
+  #
+  #     cargo run --features native --bin wast-runner -- tests/wast_fixtures \
+  #       --format json | scripts/normalize-baseline.py > \
+  #       tests/baseline/wast_fixtures_baseline.json
+  #
+  # `wast-compare` keys on `(file basename, line, kind)` and compares structural
+  # outcomes only, never exact upstream error wording.
+  wast-regression-gate:
+    name: WAST Regression Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli@0.27.0
+
+      - name: Generate tree-sitter parser
+        working-directory: grammars/tree-sitter-wat
+        run: tree-sitter generate
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target
+          key: ${{ runner.os }}-wast-gate-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build runner + comparator
+        run: cargo build --features native --release --bin wast-runner --bin wast-compare
+
+      - name: Run wast-runner over committed fixtures
+        run: ./target/release/wast-runner tests/wast_fixtures --format json > /tmp/fixtures-results.json
+
+      - name: Compare against committed baseline and fail on regressions
+        run: ./target/release/wast-compare --base tests/baseline/wast_fixtures_baseline.json --pr /tmp/fixtures-results.json
