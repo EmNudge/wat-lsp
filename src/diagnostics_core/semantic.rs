@@ -4468,4 +4468,116 @@ mod branch_type_tests {
             &["type mismatch"],
         );
     }
+
+    // --- inline typeuse: reference forms are resolved, not masked by Unknown ---
+
+    fn assert_no_inline_type_mismatch(source: &str) {
+        let diags = semantic_diags(source);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.contains("Inline function type does not match")),
+            "expected no inline-type mismatch, got: {:?}",
+            diags
+        );
+    }
+
+    fn assert_inline_type_mismatch(source: &str) {
+        let diags = semantic_diags(source);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.contains("Inline function type does not match")),
+            "expected an inline-type mismatch, got: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn inline_typeuse_matching_reference_forms_are_valid() {
+        // An inline signature that repeats a concrete `(ref $s)` and a
+        // non-nullable `(ref func)` exactly matches its type reference. Before
+        // reference forms were resolved these collapsed to `Unknown` on the
+        // inline side while the type-def side carried the resolved type, so a
+        // spurious "does not match" was emitted. (Valid per wasm-tools.)
+        assert_no_inline_type_mismatch(
+            "(module
+               (type $s (struct))
+               (type $t1 (func (param (ref $s)) (result (ref null $s))))
+               (func (type $t1) (param (ref $s)) (result (ref null $s)) ref.null $s)
+               (type $t2 (func (param (ref func)) (result funcref)))
+               (func (type $t2) (param (ref func)) (result funcref) local.get 0))",
+        );
+    }
+
+    #[test]
+    fn inline_typeuse_reference_mismatch_is_flagged() {
+        // Genuine concrete mismatch: inline `(ref $b)` vs referenced `(ref $a)`.
+        assert_inline_type_mismatch(
+            "(module
+               (type $a (struct))
+               (type $b (struct (field i32)))
+               (type $ta (func (param (ref $a)) (result i32)))
+               (func (type $ta) (param (ref $b)) (result i32) i32.const 0))",
+        );
+        // Genuine nullability mismatch: inline non-null `(ref $a)` vs referenced
+        // nullable `(ref null $a)`.
+        assert_inline_type_mismatch(
+            "(module
+               (type $a (struct))
+               (type $tn (func (param (ref null $a)) (result i32)))
+               (func (type $tn) (param (ref $a)) (result i32) i32.const 0))",
+        );
+    }
+
+    // --- local/param reference identity & nullability through the value stack ---
+
+    #[test]
+    fn local_ref_nullability_valid_and_invalid() {
+        // non-null `(ref $s)` param stored into nullable `(ref null $s)` local: OK
+        assert_no_type_mismatch(
+            "(module (type $s (struct))
+               (func (param (ref $s)) (local (ref null $s))
+                 local.get 0 local.set 1))",
+        );
+        // nullable `(ref null $s)` param stored into non-null `(ref $s)` local: error
+        assert_type_mismatch(
+            "(module (type $s (struct))
+               (func (param (ref null $s)) (local (ref $s))
+                 local.get 0 local.set 1))",
+            &["type mismatch"],
+        );
+    }
+
+    // --- is_heap_subtype: intentionally tolerant on concrete/`(ref …)` forms ---
+
+    #[test]
+    fn is_heap_subtype_abstract_hierarchy_rules() {
+        use super::is_heap_subtype;
+        // Real abstract subtyping is enforced.
+        assert!(is_heap_subtype("eq", "any"));
+        assert!(is_heap_subtype("i31", "eq"));
+        assert!(is_heap_subtype("nofunc", "func"));
+        // Cross-hierarchy abstract pairs have no subtype relation.
+        assert!(!is_heap_subtype("func", "extern"));
+        assert!(!is_heap_subtype("func", "any"));
+        assert!(!is_heap_subtype("extern", "any"));
+    }
+
+    #[test]
+    fn is_heap_subtype_concrete_forms_are_intentionally_tolerant() {
+        use super::is_heap_subtype;
+        // INTENTIONALLY TOLERANT: `is_heap_subtype` works on raw heap-type
+        // *strings* with no symbol table, so it cannot decide the real hierarchy
+        // of a concrete index (`$t`/`0`) or a `(ref …)` form. It therefore bails
+        // to `true` for these rather than risk a false positive on a valid
+        // concrete GC cast. This only weakens the standalone heap-hierarchy check
+        // used by `check_br_on_cast_types`; the reachable br_on_cast form is still
+        // caught by the separate branch-type-vs-label check (see
+        // `br_on_cast_cross_hierarchy_is_flagged`). Tightening this safely needs
+        // symbol-aware resolution and is deferred to avoid regressing valid code.
+        assert!(is_heap_subtype("$myfunc", "extern"));
+        assert!(is_heap_subtype("(ref extern)", "func"));
+        assert!(is_heap_subtype("0", "any"));
+    }
 }

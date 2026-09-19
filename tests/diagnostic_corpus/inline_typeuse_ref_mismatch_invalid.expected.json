@@ -1,0 +1,15 @@
+{
+  "description": "inline reference signatures that differ from the type reference (concrete (ref $b) vs (ref $a); non-nullable (ref $a) vs nullable (ref null $a)) are flagged as mismatches",
+  "diagnostics": [
+    {
+      "line": 11,
+      "message_contains": "Inline function type does not match",
+      "severity": 1
+    },
+    {
+      "line": 15,
+      "message_contains": "Inline function type does not match",
+      "severity": 1
+    }
+  ]
+}

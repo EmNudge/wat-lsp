@@ -2682,7 +2682,7 @@ pub(crate) fn normalize_identifier(text: &str) -> String {
 /// Extract value type with symbol table resolution for named refs.
 /// When the basic extraction falls back to Structref for named refs like `(ref $vec)`,
 /// this tries to resolve the name to a concrete Ref(index) using the symbol table.
-fn extract_value_type_resolved(
+pub(crate) fn extract_value_type_resolved(
     value_type_node: &Node,
     source: &str,
     symbols: &SymbolTable,

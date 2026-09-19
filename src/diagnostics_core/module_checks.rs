@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::types::{Diagnostic, Range};
-use crate::parser::{normalize_identifier, parse_wat_nat};
+use crate::parser::{extract_value_type_resolved, normalize_identifier, parse_wat_nat};
 use crate::symbols::{Function, SymbolTable, TypeKind, ValueType};
 use crate::utils::{is_non_nullable_ref_type, node_text, node_to_range};
 
@@ -647,11 +647,11 @@ fn check_inline_type_mismatches(
                 }
                 "func_type_params" => {
                     has_inline_sig = true;
-                    collect_value_types_recursive(&child, source, &mut inline_params);
+                    collect_value_types_recursive(&child, source, symbols, &mut inline_params);
                 }
                 "func_type_results" => {
                     has_inline_sig = true;
-                    collect_value_types_recursive(&child, source, &mut inline_results);
+                    collect_value_types_recursive(&child, source, symbols, &mut inline_results);
                 }
                 _ => {}
             }
@@ -677,15 +677,42 @@ fn check_inline_type_mismatches(
     });
 }
 
-fn collect_value_types_recursive(node: &Node, source: &str, out: &mut Vec<ValueType>) {
+/// Collect the concrete `ValueType`s declared by an inline signature subtree
+/// (`func_type_params` / `func_type_results`).
+///
+/// Reference forms — `(ref $t)`, `(ref null $t)`, `(ref func)`, `(ref extern)`,
+/// etc. — are resolved through the same symbol-aware parser path
+/// (`extract_value_type_resolved`) that builds the referenced type definition's
+/// parameter/result types. This is what lets the inline-vs-type-reference
+/// equality check in `check_inline_type_mismatches` compare like-with-like:
+/// without it, every reference type collapsed to `Unknown`, which both hid genuine
+/// reference mismatches and — because the type-def side carried the resolved
+/// `Ref(idx)` / `NonNull*` — produced a *false* "does not match" error on valid
+/// code whose inline signature exactly repeats a reference type (verified against
+/// `wasm-tools validate --features all`).
+///
+/// A truly unresolvable reference (e.g. a named index with no matching type
+/// definition) still yields `Unknown`, preserving tolerant recovery on
+/// incomplete/unresolved source.
+fn collect_value_types_recursive(
+    node: &Node,
+    source: &str,
+    symbols: &SymbolTable,
+    out: &mut Vec<ValueType>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         node_kind!(ck = child);
         if ck == "value_type" || ck == "ref_type" {
             let text = node_text(&child, source);
-            out.push(ValueType::try_parse(text).unwrap_or(ValueType::Unknown));
+            // Fast path for the plain keyword forms; fall back to the
+            // symbol-aware resolver for reference types that `try_parse` cannot
+            // handle (concrete `(ref $t)` and non-nullable `(ref func)` etc.).
+            let vt = ValueType::try_parse(text)
+                .unwrap_or_else(|| extract_value_type_resolved(&child, source, symbols));
+            out.push(vt);
         } else {
-            collect_value_types_recursive(&child, source, out);
+            collect_value_types_recursive(&child, source, symbols, out);
         }
     }
 }
@@ -3073,6 +3100,7 @@ fn check_block_node_type_use(
     check_block_children_for_type_use(
         node,
         source,
+        symbols,
         &mut type_use_node,
         &mut has_inline_sig,
         &mut inline_params,
@@ -3097,7 +3125,7 @@ fn check_block_node_type_use(
 }
 
 macro_rules! check_block_children_for_type_use_body {
-    ($node:ident, $source:ident, $type_use_node:ident, $has_inline_sig:ident, $inline_params:ident, $inline_results:ident) => {{
+    ($node:ident, $source:ident, $symbols:ident, $type_use_node:ident, $has_inline_sig:ident, $inline_params:ident, $inline_results:ident) => {{
         let mut cursor = $node.walk();
         for child in $node.children(&mut cursor) {
             node_kind!(ck = child);
@@ -3105,17 +3133,18 @@ macro_rules! check_block_children_for_type_use_body {
                 "type_use" => *$type_use_node = Some(node_copy!(&child)),
                 "func_type_params" | "func_type_params_many" => {
                     *$has_inline_sig = true;
-                    collect_value_types_recursive(&child, $source, $inline_params);
+                    collect_value_types_recursive(&child, $source, $symbols, $inline_params);
                 }
                 "func_type_results" => {
                     *$has_inline_sig = true;
-                    collect_value_types_recursive(&child, $source, $inline_results);
+                    collect_value_types_recursive(&child, $source, $symbols, $inline_results);
                 }
                 "block_block" | "block_loop" | "block_if" | "if_block" | "block_try_table"
                 | "block_try" => {
                     check_block_children_for_type_use(
                         &child,
                         $source,
+                        $symbols,
                         $type_use_node,
                         $has_inline_sig,
                         $inline_params,
@@ -3131,6 +3160,7 @@ macro_rules! check_block_children_for_type_use_body {
 fn check_block_children_for_type_use<'a>(
     node: &Node<'a>,
     source: &str,
+    symbols: &SymbolTable,
     type_use_node: &mut Option<Node<'a>>,
     has_inline_sig: &mut bool,
     inline_params: &mut Vec<ValueType>,
@@ -3139,6 +3169,7 @@ fn check_block_children_for_type_use<'a>(
     check_block_children_for_type_use_body!(
         node,
         source,
+        symbols,
         type_use_node,
         has_inline_sig,
         inline_params,
@@ -3149,6 +3180,7 @@ fn check_block_children_for_type_use<'a>(
 fn check_block_children_for_type_use(
     node: &Node,
     source: &str,
+    symbols: &SymbolTable,
     type_use_node: &mut Option<Node>,
     has_inline_sig: &mut bool,
     inline_params: &mut Vec<ValueType>,
@@ -3157,6 +3189,7 @@ fn check_block_children_for_type_use(
     check_block_children_for_type_use_body!(
         node,
         source,
+        symbols,
         type_use_node,
         has_inline_sig,
         inline_params,
