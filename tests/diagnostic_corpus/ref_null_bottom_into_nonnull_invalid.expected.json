@@ -1,0 +1,11 @@
+{
+  "description": "Null bottom operand cannot satisfy a non-nullable abstract ref",
+  "diagnostics": [
+    {
+      "line": 4,
+      "message_contains": "type mismatch",
+      "message_contains_all": ["ref struct", "nullref"],
+      "severity": 1
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "description": "ref.null yields a nullable reference; valid into nullable/bottom targets",
+  "diagnostics": []
+}

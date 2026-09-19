@@ -1691,7 +1691,7 @@ fn infer_instruction_result_types(
 
         "drop" | "local.set" | "global.set" | "return" | "br" | "unreachable" | "nop" => vec![],
 
-        "ref.null" => vec![ValueType::Unknown],
+        "ref.null" => get_ref_null_result_type(node, symbols, source),
         "ref.func" => get_ref_func_result_type(node, symbols, source),
         "ref.extern" => vec![ValueType::Externref],
         "ref.is_null" => vec![ValueType::I32],
@@ -1883,6 +1883,91 @@ fn get_ref_func_result_type(node: &Node, symbols: &SymbolTable, source: &str) ->
         }
     }
     vec![ValueType::Funcref]
+}
+
+/// Infer the result type of a `ref.null <heaptype>` instruction.
+///
+/// `ref.null ht` produces a *nullable* reference to `ht`. Preserving the precise
+/// heap type (rather than collapsing to `Unknown`) is what lets the value stack
+/// distinguish e.g. `(ref null func)` from `(ref null extern)` and lets the null
+/// bottom types (`nullref`, `nullfuncref`, `nullexternref`) participate in
+/// subtyping. Returns `[Unknown]` only when the heap type cannot be resolved
+/// (genuinely incomplete source), preserving recovery behavior.
+fn get_ref_null_result_type(node: &Node, symbols: &SymbolTable, source: &str) -> Vec<ValueType> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        node_kind!(kind = child);
+
+        // Abstract heap type: `ref.null func`, `ref.null extern`, `ref.null none`, ...
+        if kind == "ref_kind" {
+            let text = source[child.byte_range()].trim();
+            return vec![abstract_null_heap_type(text)];
+        }
+
+        // Concrete type reference: `ref.null $t` or `ref.null 3` → (ref null $t)
+        if kind == "index" || kind == "identifier" {
+            let text = source[child.byte_range()].trim();
+            if let Some(idx) = resolve_type_index(text, symbols) {
+                return vec![ValueType::RefNull(idx)];
+            }
+            // Unresolved concrete reference — keep tolerant recovery.
+            return vec![ValueType::Unknown];
+        }
+
+        // Full `(ref null? ht)` form (rare for ref.null but accepted by the grammar).
+        if kind == "ref_type" || kind == "ref_type_ref" {
+            let text = source[child.byte_range()].trim();
+            if let Some(vt) = ValueType::try_parse(text) {
+                return vec![make_nullable(&vt)];
+            }
+            // Fall back to scanning the inner heap type node.
+            let mut inner = child.walk();
+            for gc in child.children(&mut inner) {
+                node_kind!(gk = gc);
+                if gk == "ref_kind" {
+                    let t = source[gc.byte_range()].trim();
+                    return vec![abstract_null_heap_type(t)];
+                }
+                if gk == "index" || gk == "identifier" {
+                    let t = source[gc.byte_range()].trim();
+                    if let Some(idx) = resolve_type_index(t, symbols) {
+                        return vec![ValueType::RefNull(idx)];
+                    }
+                }
+            }
+            return vec![ValueType::Unknown];
+        }
+    }
+    vec![ValueType::Unknown]
+}
+
+/// Map an abstract heap-type keyword to the *nullable* reference type produced by
+/// `ref.null`. `none`/`nofunc`/`noextern` are the bottom types; the rest are the
+/// standard nullable abbreviations.
+fn abstract_null_heap_type(text: &str) -> ValueType {
+    match text {
+        "func" => ValueType::Funcref,
+        "extern" => ValueType::Externref,
+        "any" => ValueType::Anyref,
+        "eq" => ValueType::Eqref,
+        "i31" => ValueType::I31ref,
+        "struct" => ValueType::Structref,
+        "array" => ValueType::Arrayref,
+        "none" => ValueType::Nullref,
+        "nofunc" => ValueType::NullFuncref,
+        "noextern" => ValueType::NullExternref,
+        _ => ValueType::Unknown,
+    }
+}
+
+/// Resolve a type reference token (`$name` or a numeric index) to a type index,
+/// using the symbol table for named lookups.
+fn resolve_type_index(text: &str, symbols: &SymbolTable) -> Option<u32> {
+    if text.starts_with('$') {
+        symbols.get_type_by_name(text).map(|t| t.index as u32)
+    } else {
+        parse_wat_nat(text).map(|n| n as u32)
+    }
 }
 
 /// Get result types for a call instruction
@@ -4092,5 +4177,128 @@ fn normalize_heap_type(ty: &str) -> &str {
         "exnref" => "exn",
         "nullexnref" => "noexn",
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod ref_null_tests {
+    use super::*;
+
+    #[test]
+    fn abstract_null_heap_type_maps_nullable_variants() {
+        assert_eq!(abstract_null_heap_type("func"), ValueType::Funcref);
+        assert_eq!(abstract_null_heap_type("extern"), ValueType::Externref);
+        assert_eq!(abstract_null_heap_type("any"), ValueType::Anyref);
+        assert_eq!(abstract_null_heap_type("eq"), ValueType::Eqref);
+        assert_eq!(abstract_null_heap_type("i31"), ValueType::I31ref);
+        assert_eq!(abstract_null_heap_type("struct"), ValueType::Structref);
+        assert_eq!(abstract_null_heap_type("array"), ValueType::Arrayref);
+        // Bottom heap types
+        assert_eq!(abstract_null_heap_type("none"), ValueType::Nullref);
+        assert_eq!(abstract_null_heap_type("nofunc"), ValueType::NullFuncref);
+        assert_eq!(
+            abstract_null_heap_type("noextern"),
+            ValueType::NullExternref
+        );
+        // Unknown recovery
+        assert_eq!(abstract_null_heap_type("bogus"), ValueType::Unknown);
+    }
+
+    #[cfg(feature = "native")]
+    mod integration {
+        use crate::parser::parse_document;
+        use crate::tree_sitter_bindings::create_parser;
+
+        /// Collect semantic diagnostics via the core (browser-reachable) path only,
+        /// deliberately NOT invoking native wast validation, so these assertions
+        /// hold for both native and WASM builds.
+        fn semantic_diags(source: &str) -> Vec<String> {
+            let mut parser = create_parser();
+            let tree = parser.parse(source, None).unwrap();
+            let symbols = parse_document(source).expect("Failed to extract symbols");
+            let diags = crate::diagnostics::provide_semantic_diagnostics(&tree, source, &symbols);
+            diags.iter().map(|d| d.message.clone()).collect()
+        }
+
+        fn assert_type_mismatch(source: &str, needles: &[&str]) {
+            let diags = semantic_diags(source);
+            let found = diags
+                .iter()
+                .any(|d| d.contains("type mismatch") && needles.iter().all(|n| d.contains(n)));
+            assert!(
+                found,
+                "expected type mismatch containing {:?}, got: {:?}",
+                needles, diags
+            );
+        }
+
+        fn assert_no_type_mismatch(source: &str) {
+            let diags = semantic_diags(source);
+            assert!(
+                !diags.iter().any(|d| d.contains("type mismatch")),
+                "expected no type mismatch, got: {:?}",
+                diags
+            );
+        }
+
+        // --- Positive cases (must stay valid) ---
+
+        #[test]
+        fn ref_null_into_matching_nullable_is_valid() {
+            assert_no_type_mismatch("(module (func (result funcref) ref.null func))");
+            assert_no_type_mismatch(
+                "(module (type $t (struct)) (func (result (ref null $t)) ref.null $t))",
+            );
+        }
+
+        #[test]
+        fn ref_null_bottom_subtype_is_valid() {
+            // nullref (ref.null none) is a subtype of the nullable internal refs.
+            assert_no_type_mismatch("(module (func (result structref) ref.null none))");
+            assert_no_type_mismatch("(module (func (result eqref) ref.null none))");
+            assert_no_type_mismatch("(module (func (result anyref) ref.null none))");
+        }
+
+        #[test]
+        fn ref_null_stored_in_matching_local_is_valid() {
+            assert_no_type_mismatch(
+                "(module (func (local $x (ref null func)) ref.null func local.set $x))",
+            );
+        }
+
+        // --- Negative cases (must be flagged) ---
+
+        #[test]
+        fn nullable_ref_null_cannot_satisfy_nonnull() {
+            // ref.null func is nullable; (ref func) is non-nullable.
+            assert_type_mismatch(
+                "(module (func (result (ref func)) ref.null func))",
+                &["ref func", "funcref"],
+            );
+        }
+
+        #[test]
+        fn ref_null_unrelated_abstract_type_is_flagged() {
+            assert_type_mismatch(
+                "(module (func (result funcref) ref.null extern))",
+                &["funcref", "externref"],
+            );
+        }
+
+        #[test]
+        fn nullable_concrete_ref_null_cannot_satisfy_nonnull() {
+            assert_type_mismatch(
+                "(module (type $t (struct)) (func (result (ref $t)) ref.null $t))",
+                &[],
+            );
+        }
+
+        #[test]
+        fn null_bottom_operand_cannot_satisfy_nonnull_abstract() {
+            assert_type_mismatch(
+                "(module (func (result (ref struct)) ref.null none))",
+                &["ref struct", "nullref"],
+            );
+        }
     }
 }

@@ -1,0 +1,10 @@
+{
+  "description": "Nullable concrete ref.null cannot satisfy non-nullable concrete (ref $t)",
+  "diagnostics": [
+    {
+      "line": 5,
+      "message_contains": "type mismatch",
+      "severity": 1
+    }
+  ]
+}
