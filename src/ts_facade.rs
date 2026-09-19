@@ -285,6 +285,11 @@ mod wasm {
             self.0.parent().map(Node)
         }
 
+        /// Get the previous sibling node
+        pub fn prev_sibling(&self) -> Option<Node> {
+            self.0.previous_sibling().map(Node)
+        }
+
         /// Check if node has an error
         pub fn has_error(&self) -> bool {
             self.0.has_error()
