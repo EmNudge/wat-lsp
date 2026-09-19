@@ -52,14 +52,28 @@ fn compile_tree_sitter_grammar() {
         "tree-sitter"
     };
 
+    // The generated parser (src/parser.c) is not committed, so it must be
+    // regenerated on every clean checkout. Pin the CLI version to match CI
+    // (.github/workflows) so generated output stays reproducible.
+    const REQUIRED_TREE_SITTER: &str = "tree-sitter-cli@0.27.0";
     let status = Command::new(tree_sitter_cmd)
         .args(["generate"])
         .current_dir(grammar_dir)
         .status()
-        .expect("Failed to run tree-sitter generate. Make sure tree-sitter-cli is installed.");
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to run `{tree_sitter_cmd} generate` ({e}).\n\
+                 The tree-sitter parser is generated at build time and is not \
+                 checked in.\n\
+                 Install the pinned CLI and rebuild: npm install -g {REQUIRED_TREE_SITTER}"
+            )
+        });
 
     if !status.success() {
-        panic!("tree-sitter generate failed");
+        panic!(
+            "`{tree_sitter_cmd} generate` failed in {grammar_dir}. \
+             Ensure {REQUIRED_TREE_SITTER} is installed and grammar.js is valid."
+        );
     }
 
     // Now compile the generated parser

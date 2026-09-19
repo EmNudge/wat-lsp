@@ -1,0 +1,4 @@
+{
+  "description": "table.copy with zero or two table indices is valid (no diagnostics)",
+  "diagnostics": []
+}

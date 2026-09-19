@@ -29,18 +29,35 @@ Supports WasmGC, Relaxed SIMD, Exception Handling, Reference Types, Wide Arithme
 
 ## Building
 
-Requires `tree-sitter-cli` (`npm install -g tree-sitter-cli`).
+The tree-sitter parser (`grammars/tree-sitter-wat/src/parser.c`) is generated,
+not committed, so building from a clean checkout requires the `tree-sitter-cli`.
+Pin the same version CI uses to keep generated output reproducible:
 
 ```bash
-# Generate parser (required first)
-cd grammars/tree-sitter-wat && tree-sitter generate && cd ../..
+npm install -g tree-sitter-cli@0.27.0
+```
 
-# Build native LSP server
+```bash
+# Build native LSP server. build.rs runs `tree-sitter generate` automatically,
+# so no manual generation step is needed for native builds.
 cargo build --release  # outputs to target/release/wat-lsp-rust
 
-# Build WASM module (for browser)
-cd grammars/tree-sitter-wat && tree-sitter build --wasm && cd ../..
+# Build WASM module (for browser). WASM builds skip the native grammar
+# compilation, so generate the parser explicitly first.
+cd grammars/tree-sitter-wat && tree-sitter generate && tree-sitter build --wasm && cd ../..
 wasm-pack build --target web --features wasm --no-default-features
+```
+
+### Verifying a checkout
+
+With `tree-sitter-cli@0.27.0` on `PATH`, a clean checkout reproduces CI's
+formatting, linting, and test results:
+
+```bash
+cargo fmt --all --check
+cargo clippy --features native --all-targets -- -D warnings
+cargo clippy --features wasm --no-default-features --lib -- -D warnings
+cargo test --features native
 ```
 
 ## License

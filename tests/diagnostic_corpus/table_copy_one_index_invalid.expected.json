@@ -1,0 +1,10 @@
+{
+  "description": "table.copy with a single table index is rejected as a syntax error",
+  "diagnostics": [
+    {
+      "line": 8,
+      "message_contains": "Syntax error",
+      "severity": 1
+    }
+  ]
+}
