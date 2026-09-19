@@ -1,0 +1,11 @@
+{
+  "description": "Nullable ref.null result cannot satisfy a non-nullable (ref func) target",
+  "diagnostics": [
+    {
+      "line": 4,
+      "message_contains": "type mismatch",
+      "message_contains_all": ["ref func", "funcref"],
+      "severity": 1
+    }
+  ]
+}

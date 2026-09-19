@@ -1,0 +1,11 @@
+{
+  "description": "Unrelated abstract ref types (externref vs funcref) are not compatible",
+  "diagnostics": [
+    {
+      "line": 3,
+      "message_contains": "type mismatch",
+      "message_contains_all": ["funcref", "externref"],
+      "severity": 1
+    }
+  ]
+}

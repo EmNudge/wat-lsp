@@ -2951,20 +2951,33 @@ pub(crate) fn extract_ref_type(ref_type_node: &Node, source: &str) -> ValueType 
                     }
                 }
 
-                // If it's a ref_kind like (ref func), (ref extern), etc.
+                // If it's a ref_kind like (ref func), (ref null extern), etc.
+                // Preserve nullability: `(ref func)` is the NON-nullable variant,
+                // `(ref null func)` / `funcref` are the nullable ones. Collapsing
+                // both to the nullable form loses a real distinction that later
+                // validation depends on.
                 if let Some(kind) = ref_kind {
                     return match kind {
-                        "func" => ValueType::Funcref,
-                        "extern" => ValueType::Externref,
-                        "any" => ValueType::Anyref,
-                        "eq" => ValueType::Eqref,
-                        "i31" => ValueType::I31ref,
-                        "struct" => ValueType::Structref,
-                        "array" => ValueType::Arrayref,
+                        "func" if nullable => ValueType::Funcref,
+                        "func" => ValueType::NonNullFuncref,
+                        "extern" if nullable => ValueType::Externref,
+                        "extern" => ValueType::NonNullExternref,
+                        "any" if nullable => ValueType::Anyref,
+                        "any" => ValueType::NonNullAnyref,
+                        "eq" if nullable => ValueType::Eqref,
+                        "eq" => ValueType::NonNullEqref,
+                        "i31" if nullable => ValueType::I31ref,
+                        "i31" => ValueType::NonNullI31ref,
+                        "struct" if nullable => ValueType::Structref,
+                        "struct" => ValueType::NonNullStructref,
+                        "array" if nullable => ValueType::Arrayref,
+                        "array" => ValueType::NonNullArrayref,
+                        // Bottom heap types are inherently nullable.
                         "null" | "none" => ValueType::Nullref,
                         "nofunc" => ValueType::NullFuncref,
                         "noextern" => ValueType::NullExternref,
-                        _ => ValueType::Funcref,
+                        _ if nullable => ValueType::Funcref,
+                        _ => ValueType::NonNullFuncref,
                     };
                 }
 
