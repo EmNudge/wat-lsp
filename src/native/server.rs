@@ -10,6 +10,7 @@ use crate::parser::ModuleInfo;
 use crate::{
     completion, definition, document_symbols, folding, hover, references, signature, symbols, utils,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -32,6 +33,10 @@ pub struct Backend {
     // create two owners for the same URI. Closed lanes retain no document data;
     // dropping the backend drops their senders and terminates the tasks.
     documents: DashMap<String, DocumentHandle>,
+    // Set when a `shutdown` request is received. `main` reads this after the
+    // serve loop ends to decide the process exit status: the LSP spec requires
+    // exit code 0 only if `shutdown` preceded the stream ending.
+    shutdown_requested: Arc<AtomicBool>,
 }
 
 /// Find the SymbolTable for a given position from a list of modules.
@@ -77,7 +82,15 @@ impl Backend {
         Self {
             client,
             documents: DashMap::new(),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Handle to the shutdown flag, set once a `shutdown` request is received.
+    /// `main` clones this before the serve loop starts so it can choose the
+    /// process exit status once the loop ends.
+    pub fn shutdown_flag(&self) -> Arc<AtomicBool> {
+        self.shutdown_requested.clone()
     }
 
     fn document(&self, uri: &Url) -> DocumentHandle {
@@ -149,6 +162,7 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
         Ok(())
     }
 
