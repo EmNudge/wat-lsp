@@ -18,6 +18,7 @@ struct Server {
     messages: Receiver<Value>,
     diagnostics: Vec<Value>,
     next_id: u64,
+    initialization: Value,
 }
 
 impl Server {
@@ -62,8 +63,15 @@ impl Server {
             messages,
             diagnostics: Vec::new(),
             next_id: 1,
+            initialization: Value::Null,
         };
-        server.request("initialize", json!({"capabilities": {}}));
+        let initialized = server.request(
+            "initialize",
+            json!({"capabilities": {
+                "general": {"positionEncodings": ["utf-8", "utf-16"]}
+            }}),
+        );
+        server.initialization = initialized;
         server.notify("initialized", json!({}));
         server
     }
@@ -323,4 +331,226 @@ fn interleaved_documents_and_immediate_reopen_have_independent_state() {
         assert_eq!(last["version"], version);
         assert!(last["diagnostics"].as_array().unwrap().is_empty());
     }
+}
+
+// Independent UTF-16 oracle for wire assertions; deliberately does not use the
+// server's conversion helpers, so matching conversion bugs cannot hide a failure.
+fn client_position(source: &str, byte: usize) -> Value {
+    let before = &source[..byte];
+    let line = before.bytes().filter(|&b| b == b'\n').count();
+    let column = before.rsplit('\n').next().unwrap().encode_utf16().count();
+    json!({"line": line, "character": column})
+}
+
+fn client_offset(source: &str, position: &Value) -> usize {
+    let row = position["line"].as_u64().unwrap() as usize;
+    let mut units = position["character"].as_u64().unwrap() as usize;
+    let mut start = 0;
+    for _ in 0..row {
+        start += source[start..]
+            .find('\n')
+            .expect("range line lies in document")
+            + 1;
+    }
+    let line = source[start..]
+        .split('\n')
+        .next()
+        .unwrap()
+        .trim_end_matches('\r');
+    for (byte, ch) in line.char_indices() {
+        if units == 0 {
+            return start + byte;
+        }
+        assert!(
+            units >= ch.len_utf16(),
+            "position splits a surrogate pair: {position}"
+        );
+        units -= ch.len_utf16();
+    }
+    assert_eq!(
+        units, 0,
+        "range column escapes document: {position}, {source:?}"
+    );
+    start + line.len()
+}
+
+fn client_range(source: &str, range: &Value) -> std::ops::Range<usize> {
+    let start = client_offset(source, &range["start"]);
+    let end = client_offset(source, &range["end"]);
+    assert!(start <= end, "reversed range: {range}");
+    start..end
+}
+
+#[test]
+fn unicode_rename_definition_references_and_outline_use_utf16() {
+    let mut server = Server::new();
+    for prefix in ["ascii", "é", "漢", "😀", "é漢😀"] {
+        let source = format!("(module (; {prefix} ;) (func $a (param $p i32) (local $l i32)) (func $caller (call $a (i32.const 0))))");
+        server.open(URI, &source, 1);
+        let position = client_position(&source, source.rfind("$a").unwrap() + 1);
+        let params = json!({"textDocument": {"uri": URI}, "position": position});
+        let prepared = server.request("textDocument/prepareRename", params.clone());
+        assert_eq!(&source[client_range(&source, &prepared)], "$a");
+        let definition = server.request("textDocument/definition", params.clone());
+        assert_eq!(&source[client_range(&source, &definition["range"])], "$a");
+        assert_eq!(
+            definition["range"]["start"],
+            client_position(&source, source.find("$a").unwrap())
+        );
+        let references = server.request(
+            "textDocument/references",
+            json!({
+                "textDocument": {"uri": URI}, "position": position,
+                "context": {"includeDeclaration": true},
+            }),
+        );
+        assert_eq!(references.as_array().unwrap().len(), 2);
+        for location in references.as_array().unwrap() {
+            assert_eq!(&source[client_range(&source, &location["range"])], "$a");
+        }
+        let outline = server.symbols(URI);
+        assert_eq!(
+            &source[client_range(&source, &outline[0]["selectionRange"])],
+            "$a"
+        );
+        for child in outline[0]["children"].as_array().unwrap() {
+            let selected = &source[client_range(&source, &child["selectionRange"])];
+            assert!(selected == "$p" || selected == "$l", "{child}");
+            client_range(&source, &child["range"]);
+        }
+        let rename = server.request(
+            "textDocument/rename",
+            json!({
+                "textDocument": {"uri": URI}, "position": position, "newName": "$renamed",
+            }),
+        );
+        let mut edits: Vec<_> = rename["changes"][URI]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|edit| {
+                (
+                    client_range(&source, &edit["range"]),
+                    edit["newText"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(edits.len(), 2);
+        edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+        let mut renamed = source.clone();
+        for (range, text) in edits {
+            renamed.replace_range(range, text);
+        }
+        assert_eq!(renamed, source.replace("$a", "$renamed"));
+    }
+}
+
+#[test]
+fn unicode_requests_select_the_correct_same_line_module() {
+    let mut server = Server::new();
+    // The accumulated byte/UTF-16 difference is larger than the second module's
+    // declaration prefix. Comparing a UTF-16 cursor against byte ranges would
+    // select the first module (or its fallback) instead of the second.
+    let source = format!(
+        "(module (; {} ;) (func $first)) (module (func $second (call $second)))",
+        "😀".repeat(40)
+    );
+    server.open(URI, &source, 1);
+    let position = client_position(&source, source.find("$second").unwrap() + 1);
+    let result = server.request(
+        "textDocument/rename",
+        json!({
+            "textDocument": {"uri": URI}, "position": position, "newName": "$fixed",
+        }),
+    );
+    let edits = result["changes"][URI]
+        .as_array()
+        .expect("rename in second module");
+    assert_eq!(edits.len(), 2);
+    for edit in edits {
+        assert_eq!(&source[client_range(&source, &edit["range"])], "$second");
+    }
+}
+
+#[test]
+fn unicode_diagnostics_are_utf16_and_stay_within_incomplete_documents() {
+    let mut server = Server::new();
+    let source = "(module (; é漢😀 ;) (func (call $missing)))";
+    server.open(URI, source, 1);
+    server.symbols(URI);
+    server.collect_for(Duration::from_millis(750));
+    assert!(
+        server.diagnostics.len() >= 2,
+        "immediate and deferred diagnostics"
+    );
+    for publication in &server.diagnostics {
+        let diagnostics = publication["diagnostics"].as_array().unwrap();
+        assert!(!diagnostics.is_empty());
+        for diagnostic in diagnostics {
+            let selected = &source[client_range(source, &diagnostic["range"])];
+            if diagnostic["message"]
+                .as_str()
+                .unwrap()
+                .contains("Undefined function")
+            {
+                assert_eq!(selected, "$missing");
+            }
+        }
+    }
+    for (i, source) in [
+        "(module",
+        "(module\n",
+        "(module\r\n",
+        "(; 😀 ;) (module (func",
+        "(; 😀 ;) (module (func i32.const 漢))",
+    ]
+    .iter()
+    .enumerate()
+    {
+        server.diagnostics.clear();
+        server.change(URI, i as i32 + 2, json!([{"text": source}]));
+        server.symbols(URI);
+        server.collect_for(Duration::from_millis(750));
+        assert!(server.diagnostics.len() >= 2);
+        for publication in &server.diagnostics {
+            for diagnostic in publication["diagnostics"].as_array().unwrap() {
+                client_range(source, &diagnostic["range"]);
+            }
+        }
+    }
+}
+
+#[test]
+fn oversized_and_reversed_edit_ranges_do_not_kill_or_wipe_the_document() {
+    let mut server = Server::new();
+    server.open(URI, ";; é漢😀\r\n(module (func $kept))", 1);
+    server.change(URI, 2, json!([{
+        "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 2147483647}}, "text": "",
+    }]));
+    assert_eq!(server.symbols(URI)[0]["name"], "$kept");
+    // First-line overshoot followed by an ordered next-line endpoint used to panic.
+    server.change(URI, 3, json!([{
+        "range": {"start": {"line": 0, "character": 300}, "end": {"line": 1, "character": 0}}, "text": "",
+    }]));
+    assert_eq!(server.symbols(URI)[0]["name"], "$kept");
+    server.change(URI, 4, json!([
+        insert(0, 16, "x"),
+        {"range": {"start": {"line": 1, "character": 0}, "end": {"line": 0, "character": 0}}, "text": "BAD"},
+    ]));
+    assert_eq!(
+        server.symbols(URI)[0]["name"],
+        "$kept",
+        "reject the entire malformed batch"
+    );
+    server.change(URI, 5, json!([{"text": "(module (func $recovered))"}]));
+    assert_eq!(server.symbols(URI)[0]["name"], "$recovered");
+}
+
+#[test]
+fn position_encoding_is_explicit_utf16() {
+    let server = Server::new();
+    assert_eq!(
+        server.initialization["capabilities"]["positionEncoding"],
+        "utf-16"
+    );
 }

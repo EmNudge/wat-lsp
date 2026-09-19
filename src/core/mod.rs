@@ -3,6 +3,7 @@
 //! This module contains protocol-independent types that can be used
 //! without depending on tower-lsp or other LSP-specific crates.
 
+pub mod text;
 pub mod types;
 
 pub use types::*;
