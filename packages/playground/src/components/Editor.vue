@@ -325,8 +325,27 @@ function updateDiagnostics(code: string) {
   watLSP.parse(code);
   const diagnostics = watLSP.provideDiagnostics();
   
+  // Map LSP diagnostic severities (1=Error, 2=Warning, 3=Info, 4=Hint) to the
+  // corresponding Monaco marker severities. Previously every diagnostic was
+  // hardcoded to Error, which promoted informational hints (e.g. the memory64
+  // address-operand hints) to red error markers.
+  const toMonacoSeverity = (sev: number) => {
+    switch (sev) {
+      case 1:
+        return monaco.MarkerSeverity.Error;
+      case 2:
+        return monaco.MarkerSeverity.Warning;
+      case 3:
+        return monaco.MarkerSeverity.Info;
+      case 4:
+        return monaco.MarkerSeverity.Hint;
+      default:
+        return monaco.MarkerSeverity.Error;
+    }
+  };
+
   const markers = diagnostics.map((d: any) => ({
-    severity: monaco.MarkerSeverity.Error,
+    severity: toMonacoSeverity(d.severity),
     message: d.message,
     startLineNumber: d.range.start.line + 1,
     startColumn: d.range.start.character + 1,

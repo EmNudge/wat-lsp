@@ -1,0 +1,4 @@
+{
+  "description": "memory.copy between memories with differing index types type-checks each address operand from its own memory and produces no errors",
+  "diagnostics": []
+}

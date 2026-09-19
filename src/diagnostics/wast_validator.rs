@@ -132,4 +132,47 @@ mod tests {
         let diags = validate_wat(source);
         assert!(diags.is_empty(), "Expected no errors, got: {:?}", diags);
     }
+
+    #[test]
+    fn test_unicode_name_strings_no_false_errors() {
+        // Name strings (quoted export/import names) are UTF-8 and may contain
+        // arbitrary valid Unicode. The native `wast`-crate validator must accept
+        // them without emitting false diagnostics. Each of these validates under
+        // `wasm-tools validate --features all`.
+        for source in [
+            r#"(module (func (export "café_ñ_🎉_日本語")))"#,
+            r#"(module (func (export "\u{1F389}\u{00e9}")))"#,
+            r#"(module (import "wåsî" "función_🚀" (func)))"#,
+            r#"(module (global (export "π_value") i32 (i32.const 0)))"#,
+        ] {
+            let diags = validate_wat(source);
+            assert!(
+                diags.is_empty(),
+                "Expected no errors for {:?}, got: {:?}",
+                source,
+                diags
+            );
+        }
+    }
+
+    #[test]
+    fn test_error_positioning_past_multibyte_name_string() {
+        // An error following a multi-byte name string must not panic on byte
+        // slicing and must land on the offending token. This pins the UTF-8-safe
+        // byte/char math in `wast_error_to_diagnostic`.
+        let source = r#"(module (func (export "café_🎉")) (func $x i32.const))"#;
+        let diags = validate_wat(source);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one error, got: {:?}",
+            diags
+        );
+        // The error is the incomplete `i32.const`, located after the Unicode name.
+        assert!(
+            diags[0].range.start.character > 0,
+            "error should be positioned within the source, got {:?}",
+            diags[0].range
+        );
+    }
 }
