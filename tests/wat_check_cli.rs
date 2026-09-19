@@ -92,6 +92,32 @@ fn explicit_full_level_matches_default() {
     assert_eq!(out.status.code(), Some(1));
 }
 
+/// Messy input must not flood the CLI with a cascade of derived syntax
+/// diagnostics. With recovery-cascade suppression, one root syntax problem
+/// yields only a handful of `error` lines rather than dozens.
+#[test]
+fn syntax_errors_do_not_cascade_in_cli() {
+    let src = "(func $f (@#$%^ garbage )))) more (((( junk";
+    let out = run_stdin(&["--level", "syntax", "--format", "compact", "-"], src);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "malformed input should exit 1, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Compact format emits one `<file>:<line>:<col>:E:<message>` line per error.
+    let error_lines = stdout.lines().filter(|l| l.contains(":E:")).count();
+    assert!(
+        error_lines >= 1,
+        "at least one error should be reported, got:\n{stdout}"
+    );
+    assert!(
+        error_lines <= 3,
+        "syntax errors should not cascade in the CLI, got {error_lines} lines:\n{stdout}"
+    );
+}
+
 /// A hard syntax error is caught at every level (exit 1).
 #[test]
 fn syntax_error_exits_one_at_syntax_level() {

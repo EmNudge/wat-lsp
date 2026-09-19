@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseInstructionsFile } from './parse-instructions.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, '..');
@@ -209,35 +210,6 @@ const categories = {
   },
 };
 
-// Parse instruction from markdown
-function parseInstruction(block) {
-  const lines = block.trim().split('\n');
-  const nameLine = lines[0];
-  const match = nameLine.match(/^## (.+)$/);
-  if (!match) return null;
-
-  const name = match[1];
-  if (name === 'instruction.name') return null; // Skip template
-
-  const content = lines.slice(1).join('\n').trim();
-
-  // Parse signature
-  const sigMatch = content.match(/Signature:\s*`([^`]+)`/);
-  const signature = sigMatch ? sigMatch[1] : null;
-
-  // Parse description (everything before Signature: or Example:)
-  const sigIdx = content.indexOf('Signature:');
-  const exIdx = content.indexOf('Example:');
-  const descEnd = sigIdx > 0 ? sigIdx : exIdx > 0 ? exIdx : -1;
-  const description = descEnd > 0 ? content.slice(0, descEnd).trim() : content.split('\n')[0];
-
-  // Parse example
-  const exampleMatch = content.match(/Example:\s*```wat\n([\s\S]*?)```/);
-  const example = exampleMatch ? exampleMatch[1].trim() : null;
-
-  return { name, description, signature, example, rawContent: content };
-}
-
 // Categorize instruction - order matters! More specific matches first
 function categorize(name) {
   // Check atomic first (they have prefixes like i32.atomic.)
@@ -328,12 +300,15 @@ description: ${cat.description}${sidebarYaml}
 
 // Main
 async function main() {
-  const content = fs.readFileSync(instructionsPath, 'utf-8');
+  // Use the shared parser so docs codegen and `lint-instructions.mjs` agree on
+  // one parsed instruction set.
+  const { instructions, errors } = parseInstructionsFile(instructionsPath);
 
-  // Split by ## at the start of a line (instruction headers)
-  const blocks = content.split(/\n(?=## )/g).filter((b) => b.trim() && b.startsWith('## '));
-
-  const instructions = blocks.map(parseInstruction).filter(Boolean);
+  if (errors.length > 0) {
+    console.error(`instructions.md has ${errors.length} issue(s); refusing to generate docs:\n`);
+    for (const err of errors) console.error(`  ${err}`);
+    process.exit(1);
+  }
 
   console.log(`Parsed ${instructions.length} instructions`);
 

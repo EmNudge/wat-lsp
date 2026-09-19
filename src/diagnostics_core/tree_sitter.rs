@@ -19,13 +19,24 @@ pub(crate) fn provide_tree_sitter_diagnostics(tree: &Tree, source: &str) -> Vec<
 }
 
 /// Recursively walk the tree and collect ERROR / MISSING nodes as diagnostics.
+///
+/// To avoid a recovery cascade — a single root syntax problem otherwise emits a
+/// flood of nested ERROR/MISSING diagnostics as tree-sitter re-synchronizes — we
+/// report one diagnostic for an ERROR node and do NOT descend into its subtree.
+/// The nested nodes under an ERROR are recovery artifacts derived from the same
+/// root cause, so surfacing them adds noise without adding information.
 fn walk_tree_for_errors(node: Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "ERROR" {
         diagnostics.push(create_error_diagnostic(&node, source));
+        // Stop here: children of an ERROR are derived recovery noise.
+        return;
     }
 
     if node.is_missing() {
         diagnostics.push(create_missing_diagnostic(&node));
+        // A MISSING node is a leaf inserted by the parser; nothing meaningful
+        // lives beneath it.
+        return;
     }
 
     let mut cursor = node.walk();

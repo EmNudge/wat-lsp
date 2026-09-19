@@ -1,30 +1,30 @@
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
+
+// Shared, testable markdown-docs parser and code generator. `include!`d here for
+// codegen and from `tests/instruction_docs_codegen.rs` for validation so both
+// agree on one parsed instruction set.
+include!("build_support/instruction_docs.rs");
 
 fn main() {
     // Instruction documentation generation
     println!("cargo:rerun-if-changed=packages/docs/instructions.md");
     // Annotation documentation generation
     println!("cargo:rerun-if-changed=packages/docs/annotations.md");
+    println!("cargo:rerun-if-changed=build_support/instruction_docs.rs");
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
 
     // Generate instruction docs
     let dest_path = Path::new(&out_dir).join("instruction_docs.rs");
-    let docs_content = fs::read_to_string("packages/docs/instructions.md")
-        .expect("Failed to read packages/docs/instructions.md");
-    let docs = parse_docs(&docs_content);
-    let generated_code = generate_rust_code(&docs, "INSTRUCTION_DOCS");
+    let generated_code = generate_docs_table("packages/docs/instructions.md", "INSTRUCTION_DOCS");
     fs::write(&dest_path, generated_code).expect("Failed to write generated code");
 
     // Generate annotation docs
     let annotation_dest_path = Path::new(&out_dir).join("annotation_docs.rs");
-    let annotation_content =
-        fs::read_to_string("packages/docs/annotations.md").unwrap_or_else(|_| String::new());
-    let annotation_docs = parse_docs(&annotation_content);
-    let annotation_generated = generate_rust_code(&annotation_docs, "ANNOTATION_DOCS");
+    let annotation_generated =
+        generate_docs_table("packages/docs/annotations.md", "ANNOTATION_DOCS");
     fs::write(&annotation_dest_path, annotation_generated)
         .expect("Failed to write annotation docs");
 
@@ -124,117 +124,22 @@ fn compile_tree_sitter_grammar() {
     build.compile("tree-sitter-wat");
 }
 
-fn parse_docs(content: &str) -> HashMap<String, String> {
-    let mut docs = HashMap::new();
-    // Normalize line endings to handle both Unix (\n) and Windows (\r\n)
-    let normalized = content.replace("\r\n", "\n");
+/// Read `path`, parse it with the shared docs parser, and render the generated
+/// Rust table. Fails the build with a clear, actionable message when the file is
+/// missing or its contents are malformed (duplicate/empty entries), instead of
+/// silently producing wrong or empty output.
+fn generate_docs_table(path: &str, var_name: &str) -> String {
+    let content = fs::read_to_string(path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read required docs file `{path}` ({e}).\n\
+             This file is parsed at build time to generate `{var_name}`; it must \
+             exist on a clean checkout."
+        )
+    });
 
-    // Process line by line instead of splitting on ---, since --- can appear inside code blocks
-    let mut instruction_name: Option<String> = None;
-    let mut doc_lines: Vec<&str> = Vec::new();
-    let mut in_code_block = false;
+    let entries = parse_docs(&content).unwrap_or_else(|e| {
+        panic!("Invalid docs input in `{path}`: {e}");
+    });
 
-    // Helper to save current instruction if we have one
-    let save_instruction =
-        |name: &mut Option<String>, lines: &mut Vec<&str>, docs: &mut HashMap<String, String>| {
-            if let Some(n) = name.take() {
-                // Trim trailing empty lines
-                while lines.last() == Some(&"") {
-                    lines.pop();
-                }
-                if !lines.is_empty() {
-                    let doc = lines.join("\n");
-                    docs.insert(n, doc);
-                }
-                lines.clear();
-            }
-        };
-
-    for line in normalized.lines() {
-        let trimmed = line.trim();
-
-        // Check for code block boundaries
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
-            // Add code fence to doc if we're collecting
-            if instruction_name.is_some() {
-                doc_lines.push(trimmed);
-            }
-            continue;
-        }
-
-        // Inside code blocks, preserve original indentation
-        if in_code_block {
-            if instruction_name.is_some() {
-                // Strip hidden context lines (# prefix) from hover display
-                if line.starts_with("# ") || line == "#" {
-                    continue;
-                }
-                doc_lines.push(line);
-            }
-            continue;
-        }
-
-        // Outside code blocks - check for section markers and headers
-
-        // Section separator - save current instruction and reset
-        if trimmed == "---" {
-            save_instruction(&mut instruction_name, &mut doc_lines, &mut docs);
-            continue;
-        }
-
-        // New instruction header
-        if let Some(stripped) = trimmed.strip_prefix("## ") {
-            // Save previous instruction if any
-            save_instruction(&mut instruction_name, &mut doc_lines, &mut docs);
-            instruction_name = Some(stripped.trim().to_string());
-            continue;
-        }
-
-        // Skip document title
-        if trimmed.starts_with("# ") {
-            continue;
-        }
-
-        // Add content line if we're collecting for an instruction
-        if instruction_name.is_some() {
-            // Include empty lines only after we've started collecting content
-            if !trimmed.is_empty() || !doc_lines.is_empty() {
-                doc_lines.push(trimmed);
-            }
-        }
-    }
-
-    // Don't forget the last instruction
-    save_instruction(&mut instruction_name, &mut doc_lines, &mut docs);
-
-    docs
-}
-
-fn generate_rust_code(docs: &HashMap<String, String>, var_name: &str) -> String {
-    let mut sorted_entries: Vec<_> = docs.iter().collect();
-    sorted_entries.sort_by_key(|(k, _)| k.as_str());
-
-    let count = sorted_entries.len();
-
-    let mut code = format!(
-        "// This file is automatically generated by build.rs\n\
-         // Do not edit manually\n\n\
-         /// Sorted array of (name, doc) pairs — use binary search for lookup.\n\
-         pub(super) static {}: [(&str, &str); {}] = [\n",
-        var_name, count
-    );
-
-    for (key, value) in &sorted_entries {
-        let escaped = value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n");
-
-        code.push_str(&format!("    (\"{}\", \"{}\"),\n", key, escaped));
-    }
-
-    code.push_str("];\n");
-
-    code
+    generate_rust_code(&entries, var_name)
 }

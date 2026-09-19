@@ -256,3 +256,118 @@ fn if_always_terminates(node: &Node, source: &str) -> bool {
     // If without else does not terminate unconditionally
     has_else && then_terminates && else_terminates
 }
+
+#[cfg(all(test, feature = "native"))]
+mod tests {
+    use super::sequence_always_terminates;
+    use crate::tree_sitter_bindings::create_parser;
+    use tree_sitter::{Node, Tree};
+
+    /// Depth-first search for the first node of `kind` in the tree.
+    fn find_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+        if node.kind() == kind {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = find_kind(child, kind) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Parse `src` and evaluate `sequence_always_terminates` on the first
+    /// function-body `instr_list`.
+    fn body_terminates(src: &str) -> bool {
+        let mut parser = create_parser();
+        let tree: Tree = parser.parse(src, None).unwrap();
+        // The func body is the top-level `instr_list` inside the function.
+        let list = find_kind(tree.root_node(), "instr_list")
+            .expect("expected an instr_list in the parsed function");
+        sequence_always_terminates(&list, src)
+    }
+
+    #[test]
+    fn plain_sequence_does_not_terminate() {
+        assert!(!body_terminates(
+            "(func $f (result i32) (i32.const 1) (i32.const 2) (i32.add))"
+        ));
+    }
+
+    #[test]
+    fn return_terminates() {
+        assert!(body_terminates(
+            "(func $f (result i32) (return (i32.const 1)))"
+        ));
+    }
+
+    #[test]
+    fn unreachable_terminates() {
+        assert!(body_terminates("(func $f (result i32) unreachable)"));
+    }
+
+    #[test]
+    fn br_terminates() {
+        assert!(body_terminates(
+            "(func $f (result i32) (block (result i32) (br 0 (i32.const 1))))"
+        ));
+    }
+
+    #[test]
+    fn linear_if_terminates_only_with_both_branches() {
+        // Linear if with only a `then` branch that returns: not unconditional.
+        assert!(!body_terminates(
+            "(func $f (result i32) i32.const 1 if (result i32) \
+             i32.const 1 return end)"
+        ));
+        // Both branches return: the whole if always terminates.
+        assert!(body_terminates(
+            "(func $f (result i32) i32.const 1 if (result i32) \
+             i32.const 1 return else i32.const 2 return end)"
+        ));
+    }
+
+    #[test]
+    fn if_without_else_does_not_terminate() {
+        // A folded/linear if lacking an else branch never terminates
+        // unconditionally, regardless of what the then branch does.
+        assert!(!body_terminates(
+            "(func $f (result i32) (if (i32.const 1) (then (return (i32.const 1)))))"
+        ));
+    }
+
+    #[test]
+    fn try_table_with_catch_does_not_terminate() {
+        // A catch clause can branch to an outer label, so the try_table does not
+        // always terminate even though its body returns. Guards issue #108.
+        let src = "(module (tag $e) (func $f (result i32) \
+                   (block $out (result i32) \
+                   (try_table (result i32) (catch $e $out) (return (i32.const 1))))))";
+        let mut parser = create_parser();
+        let tree = parser.parse(src, None).unwrap();
+        let try_table = find_kind(tree.root_node(), "block_try_table")
+            .or_else(|| find_kind(tree.root_node(), "expr1_try_table"));
+        if let Some(node) = try_table {
+            assert!(!sequence_always_terminates(&node, src));
+        }
+    }
+
+    #[test]
+    fn terminates_within_recursion_depth_and_halts() {
+        // Deeply nested folded blocks must terminate the recursion (no infinite
+        // loop / stack blowup) and report a stable answer.
+        let mut src = String::from("(func $f (result i32) ");
+        let depth = 200;
+        for _ in 0..depth {
+            src.push_str("(block (result i32) ");
+        }
+        src.push_str("(return (i32.const 1))");
+        for _ in 0..depth {
+            src.push(')');
+        }
+        src.push(')');
+        // Should return (halt) without overflowing; a return inside terminates.
+        assert!(body_terminates(&src));
+    }
+}

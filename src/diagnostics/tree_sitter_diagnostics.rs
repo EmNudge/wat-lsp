@@ -169,6 +169,46 @@ mod tests {
     }
 
     #[test]
+    fn test_error_does_not_cascade_into_children() {
+        // A single malformed region should not emit a flood of nested
+        // ERROR/MISSING diagnostics from tree-sitter's recovery. We report one
+        // diagnostic per top-level ERROR node and stop descending.
+        let document = "(func $f (@#$%^ garbage )))) more (((( junk";
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        assert!(
+            !diagnostics.is_empty(),
+            "malformed input should report at least one diagnostic"
+        );
+        // Without cascade suppression this kind of input produces many derived
+        // diagnostics; assert we stay small.
+        assert!(
+            diagnostics.len() <= 3,
+            "expected a small number of diagnostics (no cascade), got {}: {:?}",
+            diagnostics.len(),
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_single_error_still_reported() {
+        // Cascade suppression must not silence the root error itself.
+        let document = "(func $test (param $x i32\n  (local.get $x))"; // missing paren
+        let mut parser = create_parser();
+        let tree = parser.parse(document, None).unwrap();
+
+        let diagnostics = provide_tree_sitter_diagnostics(&tree, document);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+            "root syntax error must still be reported"
+        );
+    }
+
+    #[test]
     fn test_store8_load8_valid() {
         let document = r#"(module
   (memory 1)
