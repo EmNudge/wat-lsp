@@ -86,25 +86,45 @@ enum DirectiveKind {
 struct DirectiveResult {
     line: usize,
     kind: DirectiveKind,
+    /// Outcome under the *full* pipeline (all layers, including the native-only
+    /// `wast` deep validator). This is the historical `outcome` field and the one
+    /// the baseline gate keys on.
     outcome: Outcome,
+    /// Outcome under the *core* pipeline: only the layers the browser/WASM build
+    /// can reach (tree-sitter syntax + semantic checks), with no native `wast`
+    /// validation. Lets conformance tracking be honest about what the browser
+    /// build actually catches. `None` for directives that are always skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    core_outcome: Option<Outcome>,
     label: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     diagnostics: Vec<String>,
 }
 
+/// Pass/total for one directive category, tracked separately for the *full*
+/// pipeline (all layers) and the *core* pipeline (browser-reachable layers only).
 #[derive(Debug, Default, serde::Serialize)]
 struct CategoryStats {
+    /// Passes under the full pipeline (all layers).
     pass: usize,
     total: usize,
+    /// Passes under the core / browser-reachable pipeline (no native `wast`
+    /// validation). Always `<= pass`, since dropping a layer can only lose
+    /// detections, never gain them.
+    core_pass: usize,
 }
 
 #[derive(Debug, serde::Serialize)]
 struct FileSummary {
     file: String,
     directives: Vec<DirectiveResult>,
+    /// Full-pipeline directive outcome tallies (historical fields).
     pass: usize,
     fail: usize,
     skip: usize,
+    /// Core / browser-reachable directive outcome tallies.
+    core_pass: usize,
+    core_fail: usize,
     modules: CategoryStats,
     assert_invalid: CategoryStats,
     assert_malformed: CategoryStats,
@@ -122,6 +142,11 @@ struct GlobalSummary {
     pass: usize,
     fail: usize,
     skip: usize,
+    /// Core / browser-reachable directive outcome tallies. `core_pass` counts
+    /// scored directives the browser build gets right; `core_fail` counts those
+    /// it does not. Skipped directives are excluded from both.
+    core_pass: usize,
+    core_fail: usize,
     modules: CategoryStats,
     assert_invalid: CategoryStats,
     assert_malformed: CategoryStats,
@@ -306,17 +331,39 @@ fn is_component(qw: &wast::QuoteWat<'_>) -> bool {
 /// (a grammar gap), not a pass.
 struct DiagCounts {
     /// Errors from the tree-sitter grammar layer (a syntax / grammar failure).
+    /// Browser-reachable.
     syntax_errors: usize,
-    /// Errors from validation: semantic checks plus the `wast` validator.
-    validation_errors: usize,
+    /// Errors from our own semantic checks (type/index/etc.). Browser-reachable:
+    /// the WASM build runs these too.
+    semantic_errors: usize,
+    /// Errors from the native-only `wast` deep validator. NOT reachable by the
+    /// browser/WASM build, so these only count toward the *full* pipeline.
+    wast_errors: usize,
     /// Rendered messages for verbose output.
     messages: Vec<String>,
 }
 
 impl DiagCounts {
-    /// Total error-level diagnostics across all layers.
+    /// Validation-layer errors reachable by the *core* (browser/WASM) pipeline:
+    /// our semantic checks only, excluding the native `wast` validator.
+    fn core_validation_errors(&self) -> usize {
+        self.semantic_errors
+    }
+
+    /// Validation-layer errors under the *full* pipeline: semantic checks plus
+    /// the native `wast` validator.
+    fn full_validation_errors(&self) -> usize {
+        self.semantic_errors + self.wast_errors
+    }
+
+    /// Total error-level diagnostics reachable by the core pipeline.
+    fn core_total_errors(&self) -> usize {
+        self.syntax_errors + self.core_validation_errors()
+    }
+
+    /// Total error-level diagnostics across all layers (full pipeline).
     fn total_errors(&self) -> usize {
-        self.syntax_errors + self.validation_errors
+        self.syntax_errors + self.full_validation_errors()
     }
 }
 
@@ -328,7 +375,8 @@ fn get_diagnostics(wat_text: &str) -> DiagCounts {
         None => {
             return DiagCounts {
                 syntax_errors: 1,
-                validation_errors: 0,
+                semantic_errors: 0,
+                wast_errors: 0,
                 messages: vec!["  syntax: Failed to parse with tree-sitter".to_string()],
             };
         }
@@ -345,10 +393,11 @@ fn get_diagnostics(wat_text: &str) -> DiagCounts {
         |d: &tower_lsp::lsp_types::Diagnostic| d.severity == Some(DiagnosticSeverity::ERROR);
 
     let syntax_errors = syntax_diags.iter().filter(|d| is_error(d)).count();
-    // Semantic checks and the `wast` validator are both validation-layer
-    // signals: they only fire on text that parsed far enough to type-check.
-    let validation_errors = semantic_diags.iter().filter(|d| is_error(d)).count()
-        + wast_diags.iter().filter(|d| is_error(d)).count();
+    // Our semantic checks are browser-reachable; the `wast` validator is
+    // native-only. Track them separately so we can score both the browser-
+    // reachable (core) and native (full) pipelines from a single run.
+    let semantic_errors = semantic_diags.iter().filter(|d| is_error(d)).count();
+    let wast_errors = wast_diags.iter().filter(|d| is_error(d)).count();
 
     let all = merge_all_diagnostics(syntax_diags, semantic_diags, wast_diags);
     let messages: Vec<String> = all
@@ -372,7 +421,8 @@ fn get_diagnostics(wat_text: &str) -> DiagCounts {
 
     DiagCounts {
         syntax_errors,
-        validation_errors,
+        semantic_errors,
+        wast_errors,
         messages,
     }
 }
@@ -393,6 +443,37 @@ fn strip_module_definition(text: &str) -> String {
     }
 }
 
+/// Which set of diagnostic layers to score against.
+///
+/// The browser/WASM build reaches only the tree-sitter syntax layer and our own
+/// semantic checks; it does NOT run the native `wast` deep validator. Scoring
+/// the same run under both pipelines lets conformance tracking distinguish what
+/// the shipped browser build actually catches (`Core`) from what the full native
+/// toolchain catches (`Full`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pipeline {
+    /// Browser-reachable: tree-sitter syntax + our semantic checks only.
+    Core,
+    /// Native/full: adds the `wast` deep validator on top of the core layers.
+    Full,
+}
+
+impl Pipeline {
+    fn validation_errors(self, counts: &DiagCounts) -> usize {
+        match self {
+            Pipeline::Core => counts.core_validation_errors(),
+            Pipeline::Full => counts.full_validation_errors(),
+        }
+    }
+
+    fn total_errors(self, counts: &DiagCounts) -> usize {
+        match self {
+            Pipeline::Core => counts.core_total_errors(),
+            Pipeline::Full => counts.total_errors(),
+        }
+    }
+}
+
 /// The scored outcome of a negative directive plus a human-readable reason.
 ///
 /// This is pulled out of `process_directive` so the crucial negative-case
@@ -403,14 +484,15 @@ struct ScoredNegative {
     detail: String,
 }
 
-/// Score an `assert_invalid` directive.
+/// Score an `assert_invalid` directive under the given pipeline.
 ///
 /// `assert_invalid` expects a module that *parses* and then fails *validation*.
-/// A validation-layer error is the expected pass. A grammar-layer (syntax) error
-/// alone means our parser rejected text it should have accepted, so we detected
-/// the "wrong" problem — that is a grammar gap and must not count as a pass.
-fn score_assert_invalid(counts: &DiagCounts) -> ScoredNegative {
-    if counts.validation_errors > 0 {
+/// A validation-layer error (for the requested pipeline) is the expected pass. A
+/// grammar-layer (syntax) error alone means our parser rejected text it should
+/// have accepted, so we detected the "wrong" problem — that is a grammar gap and
+/// must not count as a pass.
+fn score_assert_invalid(counts: &DiagCounts, pipeline: Pipeline) -> ScoredNegative {
+    if pipeline.validation_errors(counts) > 0 {
         ScoredNegative {
             outcome: Outcome::Pass,
             detail: "validation error".to_string(),
@@ -428,13 +510,14 @@ fn score_assert_invalid(counts: &DiagCounts) -> ScoredNegative {
     }
 }
 
-/// Score an `assert_malformed` directive.
+/// Score an `assert_malformed` directive under the given pipeline.
 ///
 /// `assert_malformed` expects text that is not even well-formed. Any error — a
-/// tree-sitter syntax error or a `wast` lex/parse error — means we rejected it,
-/// which is the expected behavior, so we score on total errors.
-fn score_assert_malformed(counts: &DiagCounts) -> ScoredNegative {
-    if counts.total_errors() > 0 {
+/// tree-sitter syntax error or (full pipeline only) a `wast` lex/parse error —
+/// means we rejected it, which is the expected behavior, so we score on total
+/// errors for the requested pipeline.
+fn score_assert_malformed(counts: &DiagCounts, pipeline: Pipeline) -> ScoredNegative {
+    if pipeline.total_errors(counts) > 0 {
         ScoredNegative {
             outcome: Outcome::Pass,
             detail: "found errors".to_string(),
@@ -460,6 +543,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                     line: line_1based,
                     kind: DirectiveKind::Skip,
                     outcome: Outcome::Skip,
+                    core_outcome: None,
                     label: "Binary/Component module: not applicable".to_string(),
                     diagnostics: vec![],
                 };
@@ -474,29 +558,40 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                         text
                     };
                     let counts = get_diagnostics(&text);
-                    let errors = counts.total_errors();
-                    if errors == 0 {
-                        DirectiveResult {
-                            line: line_1based,
-                            kind: DirectiveKind::Module,
-                            outcome: Outcome::Pass,
-                            label: format!("Module: valid ({} errors)", errors),
-                            diagnostics: counts.messages,
-                        }
+                    // A valid module is expected to produce NO errors. The full
+                    // pipeline is stricter (adds `wast`), so a module that passes
+                    // full also passes core, but not necessarily vice versa.
+                    let full_errors = counts.total_errors();
+                    let core_errors = counts.core_total_errors();
+                    let outcome = if full_errors == 0 {
+                        Outcome::Pass
                     } else {
-                        DirectiveResult {
-                            line: line_1based,
-                            kind: DirectiveKind::Module,
-                            outcome: Outcome::Fail,
-                            label: format!("Module: expected valid but got {} error(s)", errors),
-                            diagnostics: counts.messages,
-                        }
+                        Outcome::Fail
+                    };
+                    let core_outcome = if core_errors == 0 {
+                        Outcome::Pass
+                    } else {
+                        Outcome::Fail
+                    };
+                    let label = if full_errors == 0 {
+                        format!("Module: valid ({} errors)", full_errors)
+                    } else {
+                        format!("Module: expected valid but got {} error(s)", full_errors)
+                    };
+                    DirectiveResult {
+                        line: line_1based,
+                        kind: DirectiveKind::Module,
+                        outcome,
+                        core_outcome: Some(core_outcome),
+                        label,
+                        diagnostics: counts.messages,
                     }
                 }
                 None => DirectiveResult {
                     line: line_1based,
                     kind: DirectiveKind::Skip,
                     outcome: Outcome::Skip,
+                    core_outcome: None,
                     label: "Module: could not extract text".to_string(),
                     diagnostics: vec![],
                 },
@@ -511,6 +606,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                     line: line_1based,
                     kind: DirectiveKind::Skip,
                     outcome: Outcome::Skip,
+                    core_outcome: None,
                     label: "AssertInvalid (binary/component): not applicable".to_string(),
                     diagnostics: vec![],
                 };
@@ -518,11 +614,13 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
             match extract_wat_text(module, source) {
                 Some(text) => {
                     let counts = get_diagnostics(&text);
-                    let scored = score_assert_invalid(&counts);
+                    let scored = score_assert_invalid(&counts, Pipeline::Full);
+                    let core = score_assert_invalid(&counts, Pipeline::Core);
                     DirectiveResult {
                         line: line_1based,
                         kind: DirectiveKind::AssertInvalid,
                         outcome: scored.outcome,
+                        core_outcome: Some(core.outcome),
                         label: format!(
                             "AssertInvalid: {} (expected \"{}\")",
                             scored.detail, message
@@ -534,6 +632,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                     line: line_1based,
                     kind: DirectiveKind::Skip,
                     outcome: Outcome::Skip,
+                    core_outcome: None,
                     label: "AssertInvalid: could not extract text".to_string(),
                     diagnostics: vec![],
                 },
@@ -548,6 +647,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                     line: line_1based,
                     kind: DirectiveKind::Skip,
                     outcome: Outcome::Skip,
+                    core_outcome: None,
                     label: "AssertMalformed (binary/component): not applicable".to_string(),
                     diagnostics: vec![],
                 };
@@ -555,11 +655,13 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
             match extract_wat_text(module, source) {
                 Some(text) => {
                     let counts = get_diagnostics(&text);
-                    let scored = score_assert_malformed(&counts);
+                    let scored = score_assert_malformed(&counts, Pipeline::Full);
+                    let core = score_assert_malformed(&counts, Pipeline::Core);
                     DirectiveResult {
                         line: line_1based,
                         kind: DirectiveKind::AssertMalformed,
                         outcome: scored.outcome,
+                        core_outcome: Some(core.outcome),
                         label: format!(
                             "AssertMalformed: {} (expected \"{}\")",
                             scored.detail, message
@@ -571,6 +673,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
                     line: line_1based,
                     kind: DirectiveKind::Skip,
                     outcome: Outcome::Skip,
+                    core_outcome: None,
                     label: "AssertMalformed: could not extract text".to_string(),
                     diagnostics: vec![],
                 },
@@ -582,6 +685,7 @@ fn process_directive(directive: &wast::WastDirective<'_>, source: &str) -> Direc
             line: line_1based,
             kind: DirectiveKind::Skip,
             outcome: Outcome::Skip,
+            core_outcome: None,
             label: "Runtime/infrastructure directive: not applicable".to_string(),
             diagnostics: vec![],
         },
@@ -616,6 +720,8 @@ fn process_wast_file(path: &Path) -> Result<FileSummary, FileError> {
         pass: 0,
         fail: 0,
         skip: 0,
+        core_pass: 0,
+        core_fail: 0,
         modules: CategoryStats::default(),
         assert_invalid: CategoryStats::default(),
         assert_malformed: CategoryStats::default(),
@@ -624,33 +730,34 @@ fn process_wast_file(path: &Path) -> Result<FileSummary, FileError> {
     for directive in &wast.directives {
         let result = process_directive(directive, &source);
 
-        // Update category stats
-        match result.kind {
-            DirectiveKind::Module => {
-                summary.modules.total += 1;
-                if result.outcome == Outcome::Pass {
-                    summary.modules.pass += 1;
-                }
+        // Update category stats (full + core).
+        let core_pass = result.core_outcome == Some(Outcome::Pass);
+        let stats = match result.kind {
+            DirectiveKind::Module => Some(&mut summary.modules),
+            DirectiveKind::AssertInvalid => Some(&mut summary.assert_invalid),
+            DirectiveKind::AssertMalformed => Some(&mut summary.assert_malformed),
+            DirectiveKind::Skip => None,
+        };
+        if let Some(stats) = stats {
+            stats.total += 1;
+            if result.outcome == Outcome::Pass {
+                stats.pass += 1;
             }
-            DirectiveKind::AssertInvalid => {
-                summary.assert_invalid.total += 1;
-                if result.outcome == Outcome::Pass {
-                    summary.assert_invalid.pass += 1;
-                }
+            if core_pass {
+                stats.core_pass += 1;
             }
-            DirectiveKind::AssertMalformed => {
-                summary.assert_malformed.total += 1;
-                if result.outcome == Outcome::Pass {
-                    summary.assert_malformed.pass += 1;
-                }
-            }
-            DirectiveKind::Skip => {}
         }
 
         match result.outcome {
             Outcome::Pass => summary.pass += 1,
             Outcome::Fail => summary.fail += 1,
             Outcome::Skip => summary.skip += 1,
+        }
+        // Core tallies cover only scored directives (those with a core outcome).
+        match result.core_outcome {
+            Some(Outcome::Pass) => summary.core_pass += 1,
+            Some(_) => summary.core_fail += 1,
+            None => {}
         }
 
         summary.directives.push(result);
@@ -725,9 +832,10 @@ fn collect_wast_files(paths: &[PathBuf], filter: &Option<String>) -> Collected {
 fn print_category(label: &str, stats: &CategoryStats) {
     if stats.total > 0 {
         let pct = 100.0 * stats.pass as f64 / stats.total as f64;
+        let core_pct = 100.0 * stats.core_pass as f64 / stats.total as f64;
         eprintln!(
-            "    {:<20} {}/{} ({:.1}%)",
-            label, stats.pass, stats.total, pct
+            "    {:<20} full {}/{} ({:.1}%)  core {}/{} ({:.1}%)",
+            label, stats.pass, stats.total, pct, stats.core_pass, stats.total, core_pct
         );
     }
 }
@@ -758,8 +866,12 @@ fn print_file_text(summary: &FileSummary, failures_only: bool, verbose: bool) {
     }
 
     eprintln!(
-        "\n  Summary: {} pass, {} fail, {} skip",
+        "\n  Summary: {} pass, {} fail, {} skip (full pipeline)",
         summary.pass, summary.fail, summary.skip
+    );
+    eprintln!(
+        "           {} pass, {} fail (core / browser-reachable pipeline)",
+        summary.core_pass, summary.core_fail
     );
     print_category("Valid modules:", &summary.modules);
     print_category("assert_invalid:", &summary.assert_invalid);
@@ -776,8 +888,12 @@ fn print_global_text(global: &GlobalSummary) {
         global.files_missing
     );
     eprintln!(
-        "Directives: {} total — {} pass, {} fail, {} skip",
+        "Directives: {} total — {} pass, {} fail, {} skip (full pipeline)",
         global.total, global.pass, global.fail, global.skip
+    );
+    eprintln!(
+        "            {} pass, {} fail (core / browser-reachable pipeline)",
+        global.core_pass, global.core_fail
     );
     print_category("Valid modules:", &global.modules);
     print_category("assert_invalid:", &global.assert_invalid);
@@ -820,12 +936,17 @@ fn main() -> ExitCode {
                 global.pass += summary.pass;
                 global.fail += summary.fail;
                 global.skip += summary.skip;
+                global.core_pass += summary.core_pass;
+                global.core_fail += summary.core_fail;
                 global.modules.pass += summary.modules.pass;
                 global.modules.total += summary.modules.total;
+                global.modules.core_pass += summary.modules.core_pass;
                 global.assert_invalid.pass += summary.assert_invalid.pass;
                 global.assert_invalid.total += summary.assert_invalid.total;
+                global.assert_invalid.core_pass += summary.assert_invalid.core_pass;
                 global.assert_malformed.pass += summary.assert_malformed.pass;
                 global.assert_malformed.total += summary.assert_malformed.total;
+                global.assert_malformed.core_pass += summary.assert_malformed.core_pass;
 
                 if matches!(args.format, OutputFormat::Text) {
                     print_file_text(&summary, args.failures_only, args.verbose);
@@ -884,19 +1005,30 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
-    fn counts(syntax: usize, validation: usize) -> DiagCounts {
+    /// Build counts with explicit per-layer error counts.
+    fn counts_layered(syntax: usize, semantic: usize, wast: usize) -> DiagCounts {
         DiagCounts {
             syntax_errors: syntax,
-            validation_errors: validation,
+            semantic_errors: semantic,
+            wast_errors: wast,
             messages: vec![],
         }
+    }
+
+    /// Legacy helper: `validation` errors modeled as `wast`-layer (native-only)
+    /// errors, i.e. the classic full-pipeline validation signal.
+    fn counts(syntax: usize, validation: usize) -> DiagCounts {
+        counts_layered(syntax, 0, validation)
     }
 
     #[test]
     fn assert_invalid_passes_on_validation_error() {
         // A genuine validation failure (module parsed, failed type-check) is the
-        // expected outcome for assert_invalid.
-        assert_eq!(score_assert_invalid(&counts(0, 1)).outcome, Outcome::Pass);
+        // expected outcome for assert_invalid under the full pipeline.
+        assert_eq!(
+            score_assert_invalid(&counts(0, 1), Pipeline::Full).outcome,
+            Outcome::Pass
+        );
     }
 
     #[test]
@@ -904,7 +1036,7 @@ mod tests {
         // A syntax-only rejection is a grammar gap: our parser choked on text it
         // should have accepted, so we did not actually test validation. This must
         // NOT be scored as a pass (the false-positive the audit calls out).
-        let scored = score_assert_invalid(&counts(1, 0));
+        let scored = score_assert_invalid(&counts(1, 0), Pipeline::Full);
         assert_eq!(scored.outcome, Outcome::Fail);
         assert!(
             scored.detail.contains("grammar gap"),
@@ -916,25 +1048,110 @@ mod tests {
     #[test]
     fn assert_invalid_fails_when_clean() {
         // No error at all when a validation error was expected is a failure.
-        assert_eq!(score_assert_invalid(&counts(0, 0)).outcome, Outcome::Fail);
+        assert_eq!(
+            score_assert_invalid(&counts(0, 0), Pipeline::Full).outcome,
+            Outcome::Fail
+        );
     }
 
     #[test]
     fn assert_invalid_prefers_validation_when_both_present() {
         // If validation caught it, that satisfies the assertion even if there is
         // also a syntax error alongside.
-        assert_eq!(score_assert_invalid(&counts(1, 1)).outcome, Outcome::Pass);
+        assert_eq!(
+            score_assert_invalid(&counts(1, 1), Pipeline::Full).outcome,
+            Outcome::Pass
+        );
     }
 
     #[test]
     fn assert_malformed_passes_on_any_error() {
         // Malformed text may be rejected by either the grammar or the wast lexer.
-        assert_eq!(score_assert_malformed(&counts(1, 0)).outcome, Outcome::Pass);
-        assert_eq!(score_assert_malformed(&counts(0, 1)).outcome, Outcome::Pass);
+        assert_eq!(
+            score_assert_malformed(&counts(1, 0), Pipeline::Full).outcome,
+            Outcome::Pass
+        );
+        assert_eq!(
+            score_assert_malformed(&counts(0, 1), Pipeline::Full).outcome,
+            Outcome::Pass
+        );
     }
 
     #[test]
     fn assert_malformed_fails_when_clean() {
-        assert_eq!(score_assert_malformed(&counts(0, 0)).outcome, Outcome::Fail);
+        assert_eq!(
+            score_assert_malformed(&counts(0, 0), Pipeline::Full).outcome,
+            Outcome::Fail
+        );
+    }
+
+    // ---- core vs full pipeline scoring ------------------------------------
+
+    #[test]
+    fn assert_invalid_wast_only_error_passes_full_but_not_core() {
+        // A validation error found ONLY by the native `wast` validator (no
+        // semantic-layer error) is caught by the full pipeline but is invisible
+        // to the browser-reachable core pipeline. Core must not pass.
+        let c = counts_layered(0, 0, 1);
+        assert_eq!(
+            score_assert_invalid(&c, Pipeline::Full).outcome,
+            Outcome::Pass
+        );
+        assert_eq!(
+            score_assert_invalid(&c, Pipeline::Core).outcome,
+            Outcome::Fail
+        );
+    }
+
+    #[test]
+    fn assert_invalid_semantic_error_passes_both_pipelines() {
+        // A semantic-layer error IS browser-reachable, so both pipelines pass.
+        let c = counts_layered(0, 1, 0);
+        assert_eq!(
+            score_assert_invalid(&c, Pipeline::Full).outcome,
+            Outcome::Pass
+        );
+        assert_eq!(
+            score_assert_invalid(&c, Pipeline::Core).outcome,
+            Outcome::Pass
+        );
+    }
+
+    #[test]
+    fn assert_malformed_wast_only_error_passes_full_but_not_core() {
+        // Malformed text rejected only by the native `wast` lexer is caught by
+        // full but not by the browser-reachable core pipeline.
+        let c = counts_layered(0, 0, 1);
+        assert_eq!(
+            score_assert_malformed(&c, Pipeline::Full).outcome,
+            Outcome::Pass
+        );
+        assert_eq!(
+            score_assert_malformed(&c, Pipeline::Core).outcome,
+            Outcome::Fail
+        );
+    }
+
+    #[test]
+    fn assert_malformed_syntax_error_passes_both_pipelines() {
+        // A tree-sitter syntax rejection is reachable by both pipelines.
+        let c = counts_layered(1, 0, 0);
+        assert_eq!(
+            score_assert_malformed(&c, Pipeline::Full).outcome,
+            Outcome::Pass
+        );
+        assert_eq!(
+            score_assert_malformed(&c, Pipeline::Core).outcome,
+            Outcome::Pass
+        );
+    }
+
+    #[test]
+    fn core_error_counts_never_exceed_full() {
+        // Core is a strict subset of full: dropping the `wast` layer can only
+        // lose detections, never gain them.
+        let c = counts_layered(2, 3, 5);
+        assert!(c.core_total_errors() <= c.total_errors());
+        assert!(c.core_validation_errors() <= c.full_validation_errors());
     }
 }

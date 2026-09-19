@@ -97,9 +97,18 @@ jobs:
 
             let body = `| Category | Base | PR | Delta |\n`;
             body += `|----------|-----:|---:|------:|\n`;
-            body += `| **Total pass** | ${bs.pass} | ${ps.pass} | ${delta(ps.pass - bs.pass)} |\n`;
-            body += `| **Total fail** | ${bs.fail} | ${ps.fail} | ${delta(ps.fail - bs.fail)} |\n`;
+            body += `| **Total pass** (full) | ${bs.pass} | ${ps.pass} | ${delta(ps.pass - bs.pass)} |\n`;
+            body += `| **Total fail** (full) | ${bs.fail} | ${ps.fail} | ${delta(ps.fail - bs.fail)} |\n`;
             body += `| **Total skip** | ${bs.skip} | ${ps.skip} | ${delta(ps.skip - bs.skip)} |\n`;
+            // Core = browser-reachable pipeline (tree-sitter syntax + semantic
+            // checks, no native `wast` validator). Older base runs may not carry
+            // these fields, so default missing values to 0.
+            const bCorePass = bs.core_pass ?? 0;
+            const pCorePass = ps.core_pass ?? 0;
+            const bCoreFail = bs.core_fail ?? 0;
+            const pCoreFail = ps.core_fail ?? 0;
+            body += `| Total pass (core / browser) | ${bCorePass} | ${pCorePass} | ${delta(pCorePass - bCorePass)} |\n`;
+            body += `| Total fail (core / browser) | ${bCoreFail} | ${pCoreFail} | ${delta(pCoreFail - bCoreFail)} |\n`;
             body += `| Valid modules | ${frac(bs.modules.pass, bs.modules.total)} | ${frac(ps.modules.pass, ps.modules.total)} | ${delta(ps.modules.pass - bs.modules.pass)} |\n`;
             body += `| assert_invalid | ${frac(bs.assert_invalid.pass, bs.assert_invalid.total)} | ${frac(ps.assert_invalid.pass, ps.assert_invalid.total)} | ${delta(ps.assert_invalid.pass - bs.assert_invalid.pass)} |\n`;
             body += `| assert_malformed | ${frac(bs.assert_malformed.pass, bs.assert_malformed.total)} | ${frac(ps.assert_malformed.pass, ps.assert_malformed.total)} | ${delta(ps.assert_malformed.pass - bs.assert_malformed.pass)} |\n`;
