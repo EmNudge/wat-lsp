@@ -22,6 +22,107 @@ use crate::{diagnostics, parser, tree_sitter_bindings, utils};
 
 use super::server::DEBOUNCE_DURATION_MS;
 
+/// Inputs larger than this (bytes) skip the expensive semantic and `wast`
+/// validation passes. Tolerant tree-sitter syntax diagnostics still run so the
+/// editor stays usable; a single info diagnostic explains the fallback. Keeping
+/// the guard in bytes avoids scanning the whole document just to measure it.
+pub(super) const MAX_ANALYSIS_BYTES: usize = 4 * 1024 * 1024;
+
+/// Maximum parenthesis nesting depth before the semantic and `wast` passes are
+/// skipped. Deeply nested s-expressions drive recursive traversals that can
+/// occupy the request path far longer than the input size suggests, so this is
+/// bounded independently of `MAX_ANALYSIS_BYTES`.
+pub(super) const MAX_ANALYSIS_DEPTH: usize = 500;
+
+/// Cheap, allocation-free upper bound on s-expression nesting. Counts the
+/// deepest run of unbalanced `(` while ignoring parens inside comments and
+/// strings so that text content cannot inflate the estimate. Runs in a single
+/// pass over the bytes, so it stays proportional to input size.
+fn max_paren_depth(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut max = 0usize;
+    let mut block_comment = 0usize;
+    let mut in_line_comment = false;
+    let mut in_string = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_line_comment {
+            if b == b'\n' {
+                in_line_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if block_comment > 0 {
+            if b == b'(' && bytes.get(i + 1) == Some(&b';') {
+                block_comment += 1;
+                i += 2;
+                continue;
+            }
+            if b == b';' && bytes.get(i + 1) == Some(&b')') {
+                block_comment -= 1;
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b';' if bytes.get(i + 1) == Some(&b';') => {
+                in_line_comment = true;
+                i += 2;
+                continue;
+            }
+            b'(' if bytes.get(i + 1) == Some(&b';') => {
+                block_comment = 1;
+                i += 2;
+                continue;
+            }
+            b'(' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    max
+}
+
+/// Whether a document should skip the expensive semantic and `wast` passes.
+/// Returns the info diagnostic to surface the fallback, or `None` to analyze.
+fn analysis_budget_exceeded(text: &str) -> Option<Diagnostic> {
+    let reason = if text.len() > MAX_ANALYSIS_BYTES {
+        "document exceeds the size limit for semantic analysis"
+    } else if max_paren_depth(text) > MAX_ANALYSIS_DEPTH {
+        "document exceeds the nesting-depth limit for semantic analysis"
+    } else {
+        return None;
+    };
+    Some(Diagnostic {
+        range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+        severity: Some(DiagnosticSeverity::INFORMATION),
+        source: Some("wat-lsp".to_string()),
+        message: format!("Semantic and script validation skipped: {reason}."),
+        ..Default::default()
+    })
+}
+
 /// Text and all derived data belong to the same version, including parse failure:
 /// a failed parse has no tree or symbols, never data left over from an older edit.
 #[derive(Debug)]
@@ -32,6 +133,10 @@ pub(super) struct DocumentSnapshot {
     pub version: i32,
     syntax_diagnostics: Vec<Diagnostic>,
     semantic_diagnostics: Vec<Diagnostic>,
+    /// Set when the analysis budget was exceeded: the semantic pass was skipped
+    /// and the background `wast` validation must be skipped too, so incomplete
+    /// validation is never published as a clean result.
+    analysis_skipped: bool,
 }
 
 impl DocumentSnapshot {
@@ -40,9 +145,16 @@ impl DocumentSnapshot {
         let mut modules = Vec::new();
         let mut syntax_diagnostics = Vec::new();
         let mut semantic_diagnostics = Vec::new();
+        let budget = analysis_budget_exceeded(&text);
+        let analysis_skipped = budget.is_some();
         if let Some(tree) = &tree {
             syntax_diagnostics = diagnostics::provide_tree_sitter_diagnostics(tree, &text);
-            if let Ok(parsed) = parser::parse_modules_from_tree(tree, &text) {
+            if let Some(diagnostic) = budget {
+                // Fall back to tolerant syntax diagnostics only. Skip the
+                // recursive semantic traversal (and, later, `wast` validation)
+                // so a pathological input cannot occupy the request path.
+                syntax_diagnostics.push(diagnostic);
+            } else if let Ok(parsed) = parser::parse_modules_from_tree(tree, &text) {
                 semantic_diagnostics = if parsed.len() <= 1 {
                     parsed.first().map_or_else(Vec::new, |module| {
                         diagnostics::provide_semantic_diagnostics(tree, &text, &module.symbols)
@@ -60,6 +172,7 @@ impl DocumentSnapshot {
             version,
             syntax_diagnostics,
             semantic_diagnostics,
+            analysis_skipped,
         }
     }
 
@@ -126,7 +239,19 @@ pub(super) struct DocumentHandle {
 }
 
 impl DocumentHandle {
+    /// `.wast` documents are conformance scripts: they may contain script
+    /// directives (`assert_*`, `register`) and multiple top-level modules, which
+    /// the single-module `wast` validation path misreports as errors. For those
+    /// URIs the background `wast` validation is suppressed and only tolerant
+    /// tree-sitter syntax (plus semantic) diagnostics are published. The separate
+    /// `wast-runner` conformance binary calls `validate_wat` directly and is
+    /// unaffected by this gate.
     pub fn new(client: Client, uri: Url) -> Self {
+        let validate_script = !uri
+            .path()
+            .rsplit('.')
+            .next()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("wast"));
         let (commands, mut incoming) = mpsc::channel::<Command>(16);
         tokio::spawn(async move {
             let mut snapshot: Option<Arc<DocumentSnapshot>> = None;
@@ -204,7 +329,14 @@ impl DocumentHandle {
                     }
                     _ = sleep_until(deadline), if validation_due.is_some() => {
                         validation_due = None;
-                        if let Some(current) = &snapshot {
+                        // `.wast` scripts and inputs that blew the analysis budget
+                        // never run the single-module `wast` validation: it would
+                        // misreport script directives / multiple modules, or re-run
+                        // the pathological work the parse pass already skipped.
+                        if let Some(current) = snapshot.as_ref()
+                            .filter(|_| validate_script)
+                            .filter(|current| !current.analysis_skipped)
+                        {
                             // Run the expensive full validation off the async executor.
                             // Tag it with the version and generation it was started for;
                             // the result is version/generation-gated on the way back so a
@@ -262,12 +394,14 @@ mod tests {
     use tower_lsp::LspService;
 
     fn document() -> (DocumentHandle, LspService<super::super::Backend>) {
+        document_for("file:///snapshot.wat")
+    }
+
+    fn document_for(uri: &str) -> (DocumentHandle, LspService<super::super::Backend>) {
         let mut document = None;
+        let uri = uri.to_owned();
         let (service, mut socket) = LspService::new(|client| {
-            document = Some(DocumentHandle::new(
-                client.clone(),
-                "file:///snapshot.wat".parse().unwrap(),
-            ));
+            document = Some(DocumentHandle::new(client.clone(), uri.parse().unwrap()));
             super::super::Backend::new(client)
         });
         tokio::spawn(async move { while socket.next().await.is_some() {} });
@@ -412,6 +546,74 @@ mod tests {
             assert_eq!(snapshot.syntax_diagnostics, fresh.syntax_diagnostics);
             assert_eq!(snapshot.semantic_diagnostics, fresh.semantic_diagnostics);
         }
+    }
+
+    #[test]
+    fn max_paren_depth_ignores_comments_and_strings() {
+        assert_eq!(max_paren_depth("(module (func))"), 2);
+        // Parens inside line/block comments and strings do not count.
+        assert_eq!(max_paren_depth("(a ;; (((\n)"), 1);
+        assert_eq!(max_paren_depth("(a (; ((( ;) )"), 1);
+        assert_eq!(max_paren_depth("(data \"(((\")"), 1);
+        // Escaped quote keeps the string open, so its parens stay uncounted.
+        assert_eq!(max_paren_depth("(a \"\\\"(((\" )"), 1);
+        // Unbalanced closes never underflow the depth.
+        assert_eq!(max_paren_depth(")))(x)"), 1);
+    }
+
+    #[test]
+    fn deep_nesting_skips_semantic_analysis_with_fallback() {
+        let deep = "(".repeat(MAX_ANALYSIS_DEPTH + 5);
+        let snapshot = DocumentSnapshot::parse(deep, 1, None);
+        assert!(snapshot.analysis_skipped);
+        assert!(snapshot.semantic_diagnostics.is_empty());
+        assert!(snapshot.modules.is_empty());
+        assert!(snapshot
+            .syntax_diagnostics
+            .iter()
+            .any(|d| d.severity == Some(DiagnosticSeverity::INFORMATION)
+                && d.message.contains("nesting-depth")));
+    }
+
+    #[test]
+    fn oversized_input_skips_semantic_analysis_with_fallback() {
+        let mut text = String::from("(module (func $a))\n");
+        text.push_str(&";; padding\n".repeat(MAX_ANALYSIS_BYTES / 11 + 1));
+        assert!(text.len() > MAX_ANALYSIS_BYTES);
+        let snapshot = DocumentSnapshot::parse(text, 1, None);
+        assert!(snapshot.analysis_skipped);
+        assert!(snapshot.semantic_diagnostics.is_empty());
+        assert!(snapshot
+            .syntax_diagnostics
+            .iter()
+            .any(|d| d.message.contains("size limit")));
+    }
+
+    #[test]
+    fn ordinary_document_is_analyzed() {
+        let snapshot = DocumentSnapshot::parse("(module (func $a))".into(), 1, None);
+        assert!(!snapshot.analysis_skipped);
+        assert_eq!(snapshot.modules.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn wast_script_document_opens_without_panicking() {
+        // `.wast` scripts (directives, multiple modules) must open cleanly; the
+        // background single-module `wast` validation is suppressed for them. The
+        // observable no-late-error behavior is asserted end-to-end in
+        // tests/document_sync.rs against real published diagnostics.
+        let (document, _service) = document_for("file:///script.wast");
+        let script = "(module)\n(assert_return (invoke \"missing\") (i32.const 0))\n";
+        let snapshot = document
+            .dispatch(DocumentEvent::Open {
+                text: script.into(),
+                version: 1,
+            })
+            .await
+            .unwrap();
+        // Give the debounce timer time to fire; it must be a no-op for `.wast`.
+        tokio::time::sleep(Duration::from_millis(DEBOUNCE_DURATION_MS + 200)).await;
+        assert!(!snapshot.analysis_skipped);
     }
 
     #[test]
