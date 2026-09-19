@@ -1,0 +1,4 @@
+{
+  "description": "br_on_cast with a nullable target type (rt2) and non-nullable source (rt1) is valid; nullability alone must not be rejected",
+  "diagnostics": []
+}

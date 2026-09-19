@@ -1,0 +1,15 @@
+{
+  "description": "br_table targets in unrelated reference hierarchies (funcref/externref) have no common subtype and are invalid",
+  "diagnostics": [
+    {
+      "line": 10,
+      "message_contains_all": ["type mismatch", "br_table", "inconsistent"],
+      "severity": 1
+    },
+    {
+      "line": 10,
+      "message_contains_all": ["type mismatch", "expected externref", "found funcref"],
+      "severity": 1
+    }
+  ]
+}

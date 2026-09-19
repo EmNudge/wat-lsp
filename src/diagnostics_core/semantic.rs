@@ -718,7 +718,7 @@ fn process_instruction(
                             reported = true;
                         } else if !is_unreachable {
                             for (t, d) in target_types.iter().zip(default_types.iter()) {
-                                if !types_compatible(t, d) {
+                                if !br_table_types_consistent(t, d, symbols) {
                                     checker.diagnostics.push(
                                         Diagnostic::error(
                                             node_to_range(node),
@@ -1439,6 +1439,33 @@ fn types_compatible(a: &ValueType, b: &ValueType) -> bool {
         return true;
     }
     a == b
+}
+
+/// Check whether a `br_table` target label type and the default label type are
+/// consistent per the spec's common-subtype rule.
+///
+/// `br_table` type-checks only if the operands branched to every label share a
+/// single common subtype `t*`. For a given position that means the target type
+/// and the default type must be *comparable* — one must be a subtype of the
+/// other (so a common subtype, e.g. the more specific of the two, exists).
+///
+/// Non-reference types (i32/f32/…) have no subtyping, so this reduces to
+/// equality for them; reference types use the full symbol-aware subtype lattice
+/// (including nullability and concrete GC types). `Unknown` on either side
+/// stays permissive to preserve recovery on incomplete/unresolved source.
+///
+/// This is strictly *more* permissive than the previous equality check, so it
+/// can only remove false positives (e.g. `structref`/`eqref` labels) — it never
+/// introduces new ones for types that used to compare equal.
+fn br_table_types_consistent(a: &ValueType, b: &ValueType, symbols: &SymbolTable) -> bool {
+    if *a == ValueType::Unknown || *b == ValueType::Unknown {
+        return true;
+    }
+    if a == b {
+        return true;
+    }
+    // Comparable in either direction => a common subtype exists.
+    types_compatible_with_symbols(a, b, symbols) || types_compatible_with_symbols(b, a, symbols)
 }
 
 /// Get the result type from a typed select instruction: `(select (result T))`
@@ -3682,9 +3709,17 @@ fn ref_types_compatible(src: ValueType, dst: ValueType, symbols: &SymbolTable) -
 /// Check br_on_cast / br_on_cast_fail type validation.
 ///
 /// The instruction format is: `br_on_cast <label> <rt1> <rt2>`
-/// Validation: rt2 must be a subtype of rt1 (including nullability).
+/// Validation: rt1 and rt2 must share a heap-type hierarchy, and the value
+/// carried to the branch label must match the label's result type.
 /// For br_on_cast: branch carries rt2, fallthrough gets diff(rt1, rt2).
 /// For br_on_cast_fail: branch carries diff(rt1, rt2), fallthrough gets rt2.
+///
+/// Note: we deliberately do NOT reject solely because rt2 is nullable while rt1
+/// is non-nullable. The reference validator (wasm-tools) accepts such forms
+/// (e.g. `br_on_cast $l (ref any) anyref`); the meaningful nullability
+/// constraint is enforced instead by the branch-type-vs-label check below, which
+/// rejects carrying a nullable value into a non-null label. Rejecting on the
+/// rt2/rt1 nullability pair alone was a false positive against valid code.
 fn check_br_on_cast_types(
     node: &Node,
     source: &str,
@@ -3701,23 +3736,14 @@ fn check_br_on_cast_types(
 
     let mut has_error = false;
 
-    // Validate rt2 <: rt1: nullable rt2 can't be subtype of non-null rt1
-    if *rt2_nullable && !*rt1_nullable {
+    // Check heap type subtyping: rt2's heap type must be a subtype of rt1's,
+    // i.e. they must be in the same reference hierarchy.
+    let heap_types = extract_heap_types_from_cast(node, source);
+    if heap_types.len() >= 2 && !is_heap_subtype(heap_types[1], heap_types[0]) {
         checker.diagnostics.push(
             Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
         );
         has_error = true;
-    }
-
-    // Check heap type subtyping (use existing heap_types approach)
-    if !has_error {
-        let heap_types = extract_heap_types_from_cast(node, source);
-        if heap_types.len() >= 2 && !is_heap_subtype(heap_types[1], heap_types[0]) {
-            checker.diagnostics.push(
-                Diagnostic::error(node_to_range(node), "type mismatch").with_code("type-mismatch"),
-            );
-            has_error = true;
-        }
     }
 
     // Resolve branch label depth and check branch/fallthrough types
@@ -4303,5 +4329,132 @@ mod ref_null_tests {
                 &["ref struct", "nullref"],
             );
         }
+    }
+}
+
+/// Tests for `br_table` common-subtype consistency and `br_on_cast` nullability,
+/// covering the follow-up items of #294. Every positive case below has been
+/// confirmed valid, and every negative case invalid, by
+/// `wasm-tools validate --features all`.
+#[cfg(all(test, feature = "native"))]
+mod branch_type_tests {
+    use crate::parser::parse_document;
+    use crate::tree_sitter_bindings::create_parser;
+
+    /// Core (browser-reachable) semantic path only — no native wast validation —
+    /// so these assertions hold for both native and WASM builds.
+    fn semantic_diags(source: &str) -> Vec<String> {
+        let mut parser = create_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let symbols = parse_document(source).expect("Failed to extract symbols");
+        let diags = crate::diagnostics::provide_semantic_diagnostics(&tree, source, &symbols);
+        diags.iter().map(|d| d.message.clone()).collect()
+    }
+
+    fn assert_no_type_mismatch(source: &str) {
+        let diags = semantic_diags(source);
+        assert!(
+            !diags.iter().any(|d| d.contains("type mismatch")),
+            "expected no type mismatch, got: {:?}",
+            diags
+        );
+    }
+
+    fn assert_type_mismatch(source: &str, needles: &[&str]) {
+        let diags = semantic_diags(source);
+        let found = diags
+            .iter()
+            .any(|d| d.contains("type mismatch") && needles.iter().all(|n| d.contains(n)));
+        assert!(
+            found,
+            "expected type mismatch containing {:?}, got: {:?}",
+            needles, diags
+        );
+    }
+
+    // --- br_table: subtype-related labels share a common subtype (valid) ---
+
+    #[test]
+    fn br_table_subtype_related_labels_are_valid() {
+        // structref value is a subtype of both the structref and eqref labels.
+        assert_no_type_mismatch(
+            "(module (func (param $r structref)
+               (block $a (result eqref)
+                 (block $b (result structref)
+                   local.get $r i32.const 0 br_table $b $a)
+                 drop unreachable)
+               drop))",
+        );
+        // Same, with the wider label as the default (reverse ordering).
+        assert_no_type_mismatch(
+            "(module (func (param $r structref)
+               (block $a (result structref)
+                 (block $b (result eqref)
+                   local.get $r i32.const 0 br_table $a $b)
+                 drop unreachable)
+               drop))",
+        );
+    }
+
+    // --- br_table: unrelated labels have no common subtype (invalid) ---
+
+    #[test]
+    fn br_table_unrelated_hierarchies_are_flagged() {
+        assert_type_mismatch(
+            "(module (func
+               (block $a (result externref)
+                 (block $b (result funcref)
+                   ref.null func i32.const 0 br_table $b $a)
+                 drop unreachable)
+               drop))",
+            &["br_table", "inconsistent"],
+        );
+    }
+
+    #[test]
+    fn br_table_unrelated_numeric_labels_are_flagged() {
+        assert_type_mismatch(
+            "(module (func
+               (block $a (result f32)
+                 (block $b (result i32)
+                   i32.const 0 i32.const 0 br_table $b $a)
+                 drop unreachable)
+               drop))",
+            &["br_table", "inconsistent"],
+        );
+    }
+
+    // --- br_on_cast: nullable rt2 with non-null rt1 is valid ---
+
+    #[test]
+    fn br_on_cast_nullable_target_is_valid() {
+        // abstract: rt1 = (ref any) non-null, rt2 = anyref nullable
+        assert_no_type_mismatch(
+            "(module (func (param $x (ref any)) (result (ref any))
+               (block $b (result anyref)
+                 local.get $x br_on_cast $b (ref any) anyref unreachable)
+               unreachable))",
+        );
+        // concrete: rt1 = (ref $s) non-null, rt2 = (ref null $s) nullable
+        assert_no_type_mismatch(
+            "(module (type $s (struct))
+               (func (param $x (ref $s)) (result (ref $s))
+                 (block $b (result (ref null $s))
+                   local.get $x br_on_cast $b (ref $s) (ref null $s) unreachable)
+                 unreachable))",
+        );
+    }
+
+    // --- br_on_cast: unrelated hierarchies remain flagged ---
+
+    #[test]
+    fn br_on_cast_cross_hierarchy_is_flagged() {
+        assert_type_mismatch(
+            "(module (func (param $x funcref) (result funcref)
+               (block $b (result (ref extern))
+                 local.get $x br_on_cast $b funcref (ref extern))
+               drop local.get $x))",
+            &["type mismatch"],
+        );
     }
 }

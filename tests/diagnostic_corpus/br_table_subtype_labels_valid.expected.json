@@ -1,0 +1,4 @@
+{
+  "description": "br_table targets whose types are related by reference subtyping (structref/eqref) share a common subtype and are valid",
+  "diagnostics": []
+}

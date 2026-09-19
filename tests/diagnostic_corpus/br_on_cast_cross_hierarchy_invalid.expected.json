@@ -1,0 +1,10 @@
+{
+  "description": "br_on_cast across unrelated reference hierarchies (funcref vs (ref extern)) is invalid",
+  "diagnostics": [
+    {
+      "line": 6,
+      "message_contains_all": ["type mismatch", "expected (ref extern)", "found funcref"],
+      "severity": 1
+    }
+  ]
+}
