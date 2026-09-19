@@ -1,0 +1,4 @@
+{
+  "description": "Imported functions with explicit typeuse (type + params/results) parse without diagnostics",
+  "diagnostics": []
+}

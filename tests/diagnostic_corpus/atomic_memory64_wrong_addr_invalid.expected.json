@@ -1,0 +1,10 @@
+{
+  "description": "An i32 address on a memory64 atomic rmw is a type mismatch",
+  "diagnostics": [
+    {
+      "line": 7,
+      "message_contains_all": ["type mismatch", "i64"],
+      "severity": 1
+    }
+  ]
+}

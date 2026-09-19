@@ -1282,26 +1282,29 @@ fn derive_consumed_types_from_name(
         // Atomic fence — no operands
         "atomic.fence" => Some(Cow::Borrowed(&[])),
 
-        // Wait/notify
-        "memory.atomic.wait32" => Some(Cow::Borrowed(&[
-            ValueType::I32,
-            ValueType::I32,
-            ValueType::I64,
-        ])),
-        "memory.atomic.wait64" => Some(Cow::Borrowed(&[
-            ValueType::I32,
-            ValueType::I64,
-            ValueType::I64,
-        ])),
-        "memory.atomic.notify" => Some(Cow::Borrowed(&[ValueType::I32, ValueType::I32])),
+        // Wait/notify — the address operand follows the memory's index type
+        // (i32 for memory32, i64 for memory64), not a hardcoded i32.
+        "memory.atomic.wait32" => {
+            let addr = get_memory_address_type(node, symbols, source);
+            Some(Cow::Owned(vec![addr, ValueType::I32, ValueType::I64]))
+        }
+        "memory.atomic.wait64" => {
+            let addr = get_memory_address_type(node, symbols, source);
+            Some(Cow::Owned(vec![addr, ValueType::I64, ValueType::I64]))
+        }
+        "memory.atomic.notify" => {
+            let addr = get_memory_address_type(node, symbols, source);
+            Some(Cow::Owned(vec![addr, ValueType::I32]))
+        }
 
-        // Atomic RMW — address (i32) + value (prefix type)
+        // Atomic RMW — address (memory index type) + value (prefix type)
         name if name.contains(".atomic.rmw") => {
             if let Some(ty) = type_from_prefix(name) {
+                let addr = get_memory_address_type(node, symbols, source);
                 if name.contains("cmpxchg") {
-                    Some(Cow::Owned(vec![ValueType::I32, ty, ty])) // addr + expected + replacement
+                    Some(Cow::Owned(vec![addr, ty, ty])) // addr + expected + replacement
                 } else {
-                    Some(Cow::Owned(vec![ValueType::I32, ty])) // addr + value
+                    Some(Cow::Owned(vec![addr, ty])) // addr + value
                 }
             } else {
                 None

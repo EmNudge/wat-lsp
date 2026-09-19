@@ -1,0 +1,4 @@
+{
+  "description": "Atomic memory instructions with offset=/align= memargs produce no diagnostics",
+  "diagnostics": []
+}

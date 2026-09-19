@@ -503,7 +503,7 @@ fn check_import_identifier_dup<'a>(
             for desc in child.children(&mut dc) {
                 node_kind!(dk = desc);
                 match dk {
-                    "import_desc_func_type" | "import_desc_type_use" => {
+                    "import_desc_func_type" => {
                         check_identifier_dup(&desc, source, &mut ids.func, "func", diagnostics);
                     }
                     "import_desc_global_type" => {
