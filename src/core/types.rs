@@ -102,7 +102,11 @@ impl CompletionItem {
     }
 }
 
-/// A position in a text document (0-indexed line and character)
+/// A 0-indexed line/column coordinate container.
+///
+/// Feature request positions use UTF-16 code units. Positions in tree-derived
+/// core ranges use UTF-8 byte columns. `core::text::TextIndex` converts between
+/// them; a structural `Into` conversion to LSP types does not change encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "native", derive(Serialize, Deserialize))]
 pub struct Position {

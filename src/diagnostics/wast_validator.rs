@@ -32,19 +32,20 @@ pub fn validate_wat(source: &str) -> Vec<Diagnostic> {
 }
 
 fn wast_error_to_diagnostic(error: &wast::Error, source: &str) -> Diagnostic {
-    let span = error.span();
-    let (line, col) = span.linecol_in(source);
+    // Keep this adapter's result in byte columns, like the other diagnostic
+    // producers. Native publication converts the merged result to UTF-16 once.
+    let index = crate::core::text::TextIndex::new(source);
+    let start = index.point_to_byte(index.byte_to_point(error.span().offset()));
+    let width = source[start..]
+        .chars()
+        .next()
+        .filter(|ch| *ch != '\r' && *ch != '\n')
+        .map_or(0, char::len_utf8);
 
     Diagnostic {
         range: Range {
-            start: Position {
-                line: line as u32,
-                character: col as u32,
-            },
-            end: Position {
-                line: line as u32,
-                character: (col + 1) as u32, // Extend by 1 char
-            },
+            start: index.byte_to_point(start).into(),
+            end: index.byte_to_point(start + width).into(),
         },
         severity: Some(DiagnosticSeverity::ERROR),
         code: None,

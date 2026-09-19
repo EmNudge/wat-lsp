@@ -4,6 +4,8 @@
 //! an `LspService` in-process without going through stdio.
 
 use super::documents::{DocumentEvent, DocumentHandle};
+use super::positions;
+use crate::core::text::TextIndex;
 use crate::parser::ModuleInfo;
 use crate::{
     completion, definition, document_symbols, folding, hover, references, signature, symbols, utils,
@@ -34,24 +36,22 @@ pub struct Backend {
 
 /// Find the SymbolTable for a given position from a list of modules.
 /// Falls back to the first module if no module contains the position.
-fn symbols_for_position(modules: &[ModuleInfo], pos: Position) -> Option<&symbols::SymbolTable> {
-    let line = pos.line;
-    let character = pos.character;
-    for module in modules {
-        let start = &module.range.start;
-        let end = &module.range.end;
-        if (line > start.line || (line == start.line && character >= start.character))
-            && (line < end.line || (line == end.line && character <= end.character))
-        {
-            return Some(&module.symbols);
-        }
-    }
-    // Fall back to first module
-    modules.first().map(|m| &m.symbols)
+fn symbols_for_position<'a>(
+    modules: &'a [ModuleInfo],
+    source: &str,
+    pos: Position,
+) -> Option<&'a symbols::SymbolTable> {
+    module_for_position(modules, source, pos).map(|module| &module.symbols)
 }
 
 /// Find the ModuleInfo for a given position (returns symbols + range).
-fn module_for_position(modules: &[ModuleInfo], pos: Position) -> Option<&ModuleInfo> {
+fn module_for_position<'a>(
+    modules: &'a [ModuleInfo],
+    source: &str,
+    pos: Position,
+) -> Option<&'a ModuleInfo> {
+    let index = TextIndex::new(source);
+    let pos = index.byte_to_point(index.utf16_to_byte(pos.into()));
     let line = pos.line;
     let character = pos.character;
     for module in modules {
@@ -109,6 +109,7 @@ impl LanguageServer for Backend {
                 version: Some("0.1.0".to_string()),
             }),
             capabilities: ServerCapabilities {
+                position_encoding: Some(PositionEncodingKind::UTF16),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
@@ -202,8 +203,15 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
-            if let Some(syms) = symbols_for_position(&modules, position) {
-                return Ok(hover::provide_hover(&doc, syms, &tree, position));
+            if let Some(syms) = symbols_for_position(&modules, &doc, position) {
+                return Ok(
+                    hover::provide_hover(&doc, syms, &tree, position).map(|mut hover| {
+                        hover.range = hover
+                            .range
+                            .map(|range| positions::range(&TextIndex::new(&doc), range));
+                        hover
+                    }),
+                );
             }
         }
 
@@ -215,7 +223,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
 
         if let Some((doc, modules, _tree)) = self.get_document_context(&uri).await {
-            if let Some(syms) = symbols_for_position(&modules, position) {
+            if let Some(syms) = symbols_for_position(&modules, &doc, position) {
                 let completions = completion::provide_completion(&doc, syms, position.into());
                 return Ok(Some(CompletionResponse::Array(
                     completions.into_iter().map(|c| c.into()).collect(),
@@ -235,7 +243,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
-            if let Some(syms) = symbols_for_position(&modules, position) {
+            if let Some(syms) = symbols_for_position(&modules, &doc, position) {
                 return Ok(signature::provide_signature_help(
                     &doc, syms, &tree, position,
                 ));
@@ -257,10 +265,11 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
-            if let Some(syms) = symbols_for_position(&modules, position) {
-                if let Some(location) =
+            if let Some(syms) = symbols_for_position(&modules, &doc, position) {
+                if let Some(mut location) =
                     definition::provide_definition(&doc, syms, &tree, position, &uri)
                 {
+                    positions::locations(&doc, &uri, std::slice::from_mut(&mut location));
                     return Ok(Some(GotoDefinitionResponse::Scalar(location)));
                 }
             }
@@ -285,14 +294,14 @@ impl LanguageServer for Backend {
             .await;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
-            if let Some(module) = module_for_position(&modules, position) {
+            if let Some(module) = module_for_position(&modules, &doc, position) {
                 // For multi-module docs, scope references to the containing module
                 let module_scope = if modules.len() > 1 {
                     Some(module.range)
                 } else {
                     None
                 };
-                let refs = references::provide_references_scoped(
+                let mut refs = references::provide_references_scoped(
                     &doc,
                     &module.symbols,
                     &tree,
@@ -302,6 +311,7 @@ impl LanguageServer for Backend {
                     module_scope,
                 );
 
+                positions::locations(&doc, &uri, &mut refs);
                 self.client
                     .log_message(
                         MessageType::INFO,
@@ -326,12 +336,13 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri.to_string();
 
-        if let Some((_doc, modules, _tree)) = self.get_document_context(&uri).await {
+        if let Some((doc, modules, _tree)) = self.get_document_context(&uri).await {
             // Aggregate document symbols from all modules
             let mut all_symbols = Vec::new();
             for module in modules.iter() {
                 all_symbols.extend(document_symbols::provide_document_symbols(&module.symbols));
             }
+            positions::document_symbols(&doc, &mut all_symbols);
             return Ok(Some(DocumentSymbolResponse::Nested(all_symbols)));
         }
 
@@ -346,7 +357,7 @@ impl LanguageServer for Backend {
         let position = params.position;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
-            let syms = match symbols_for_position(&modules, position) {
+            let syms = match symbols_for_position(&modules, &doc, position) {
                 Some(s) => s,
                 None => return Ok(None),
             };
@@ -354,32 +365,12 @@ impl LanguageServer for Backend {
                 // The symbol logic deems this a valid symbol.
                 // Now find the range to select.
                 if let Some(node) = utils::node_at_position(&tree, &doc, position.into()) {
-                    // If it's an identifier (e.g. $foo), return its full range.
-                    if node.kind() == "identifier" {
-                        let range = Range {
-                            start: Position {
-                                line: node.start_position().row as u32,
-                                character: node.start_position().column as u32,
-                            },
-                            end: Position {
-                                line: node.end_position().row as u32,
-                                character: node.end_position().column as u32,
-                            },
-                        };
-                        return Ok(Some(PrepareRenameResponse::Range(range)));
-                    } else if node.kind() == "nat" || node.kind() == "index" {
-                        // Even for indices, return the range so client knows what to replace
-                        let range = Range {
-                            start: Position {
-                                line: node.start_position().row as u32,
-                                character: node.start_position().column as u32,
-                            },
-                            end: Position {
-                                line: node.end_position().row as u32,
-                                character: node.end_position().column as u32,
-                            },
-                        };
-                        return Ok(Some(PrepareRenameResponse::Range(range)));
+                    if matches!(node.kind(), "identifier" | "nat" | "index") {
+                        let range = utils::node_to_range(&node).into();
+                        return Ok(Some(PrepareRenameResponse::Range(positions::range(
+                            &TextIndex::new(&doc),
+                            range,
+                        ))));
                     }
                 }
             }
@@ -414,7 +405,7 @@ impl LanguageServer for Backend {
             .await;
 
         if let Some((doc, modules, tree)) = self.get_document_context(&uri).await {
-            let module = match module_for_position(&modules, position) {
+            let module = match module_for_position(&modules, &doc, position) {
                 Some(m) => m,
                 None => return Ok(None),
             };
@@ -435,7 +426,7 @@ impl LanguageServer for Backend {
                 }
 
                 // Find all references (scoped to module for multi-module docs)
-                let refs = references::provide_references_scoped(
+                let mut refs = references::provide_references_scoped(
                     &doc,
                     &module.symbols,
                     &tree,
@@ -445,6 +436,7 @@ impl LanguageServer for Backend {
                     module_scope,
                 );
 
+                positions::locations(&doc, &uri, &mut refs);
                 if refs.is_empty() {
                     return Ok(None);
                 }

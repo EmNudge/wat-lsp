@@ -417,7 +417,10 @@ pub fn find_containing_function(symbols: &SymbolTable, position: Position) -> Op
 /// Get the line at the specified position in a document.
 /// Returns a borrowed string slice to avoid unnecessary allocations.
 pub fn get_line_at_position(document: &str, line_num: usize) -> Option<&str> {
-    document.lines().nth(line_num)
+    document
+        .split('\n')
+        .nth(line_num)
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
 }
 
 /// Get the word at the specified position in a document.
@@ -462,48 +465,22 @@ pub fn is_word_char(c: char) -> bool {
 /// LSP positions use UTF-16 offsets, but Rust strings are UTF-8.
 /// Clamps to end of line if the offset is beyond the line length.
 pub fn utf16_offset_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
-    let mut utf16_count = 0u32;
-    let mut byte_offset = 0;
-    for ch in line.chars() {
-        if utf16_count >= utf16_offset {
-            return byte_offset;
-        }
-        utf16_count += ch.len_utf16() as u32;
-        byte_offset += ch.len_utf8();
-    }
-    byte_offset
+    crate::core::text::utf16_column_to_byte(line, utf16_offset)
 }
 
-/// Convert an LSP Position to a byte offset in the source text.
-/// Uses direct byte scanning for newlines instead of allocating line iterators.
+/// Convert a UTF-16 request position to a byte offset, clamping each line.
 pub fn position_to_byte(source: &str, position: Position) -> usize {
-    let target_line = position.line as usize;
-    let bytes = source.as_bytes();
-
-    if target_line == 0 {
-        return utf16_offset_to_byte_offset(source, position.character);
-    }
-
-    let mut current_line = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        if b == b'\n' {
-            current_line += 1;
-            if current_line == target_line {
-                let line_start = i + 1;
-                let line_end = bytes[line_start..]
-                    .iter()
-                    .position(|&b| b == b'\n')
-                    .map_or(source.len(), |p| line_start + p);
-                return line_start
-                    + utf16_offset_to_byte_offset(
-                        &source[line_start..line_end],
-                        position.character,
-                    );
-            }
+    let start = if position.line == 0 {
+        0
+    } else {
+        match source.match_indices('\n').nth(position.line as usize - 1) {
+            Some((byte, _)) => byte + 1,
+            None => return source.len(),
         }
-    }
-
-    source.len()
+    };
+    let line = source[start..].split('\n').next().unwrap_or("");
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    start + utf16_offset_to_byte_offset(line, position.character)
 }
 
 /// Find the AST node at the given position.
@@ -588,46 +565,65 @@ fn find_deepest_node(node: Node, byte_offset: usize) -> Option<Node> {
     best_child.or(Some(node))
 }
 
-/// Apply a text edit to a string in-place
-/// Returns the new end position after the edit
+/// Byte offsets and tree-sitter points describing one successfully applied edit.
+#[derive(Debug)]
+pub struct AppliedTextEdit {
+    pub start_byte: usize,
+    pub old_end_byte: usize,
+    pub new_end_byte: usize,
+    pub start_position: Position,
+    pub old_end_position: Position,
+    pub new_end_position: Position,
+}
+
+/// Apply a UTF-16 edit safely. Reversed ranges are rejected without modifying
+/// the source; oversized columns/lines are clamped. Points in the result use
+/// bytes, not UTF-16, and describe the actual clamped edit.
+pub fn apply_text_edit_checked(
+    text: &mut String,
+    start: Position,
+    end: Position,
+    new_text: &str,
+) -> Option<AppliedTextEdit> {
+    use crate::core::text::TextIndex;
+    if (start.line, start.character) > (end.line, end.character) {
+        return None;
+    }
+    let index = TextIndex::new(text);
+    let start_byte = index.utf16_to_byte(start);
+    let old_end_byte = index.utf16_to_byte(end);
+    if old_end_byte < start_byte {
+        return None;
+    }
+    let start_position = index.byte_to_point(start_byte);
+    let old_end_position = index.byte_to_point(old_end_byte);
+    let new_end_byte = start_byte + new_text.len();
+    text.replace_range(start_byte..old_end_byte, new_text);
+    let new_end_position = TextIndex::new(text).byte_to_point(new_end_byte);
+    Some(AppliedTextEdit {
+        start_byte,
+        old_end_byte,
+        new_end_byte,
+        start_position,
+        old_end_position,
+        new_end_position,
+    })
+}
+
+/// Apply a UTF-16 edit and return its new UTF-16 end position. Invalid reversed
+/// ranges leave the document unchanged; use the checked variant to detect them.
 pub fn apply_text_edit(
     text: &mut String,
     start: Position,
     end: Position,
     new_text: &str,
 ) -> Position {
-    let start_byte = position_to_byte(text, start);
-    let end_byte = position_to_byte(text, end);
-
-    // Remove the old text and insert the new text
-    text.replace_range(start_byte..end_byte, new_text);
-
-    // Calculate the new end position
-    calculate_position_after_edit(text, start, new_text)
-}
-
-/// Calculate the position after inserting text at a given position
-fn calculate_position_after_edit(_text: &str, start: Position, inserted_text: &str) -> Position {
-    if inserted_text.is_empty() {
-        return start;
-    }
-
-    let newline_count = inserted_text.matches('\n').count();
-
-    if newline_count == 0 {
-        // Single line insert
-        Position {
-            line: start.line,
-            character: start.character + inserted_text.len() as u32,
-        }
-    } else {
-        // Multi-line insert
-        let last_line = inserted_text.lines().last().unwrap_or("");
-        Position {
-            line: start.line + newline_count as u32,
-            character: last_line.len() as u32,
-        }
-    }
+    use crate::core::text::TextIndex;
+    let end_byte = match apply_text_edit_checked(text, start, end, new_text) {
+        Some(edit) => edit.new_end_byte,
+        None => position_to_byte(text, start),
+    };
+    TextIndex::new(text).byte_to_utf16(end_byte)
 }
 
 /// Extract text from a node by slicing the source (works in both native and WASM)
@@ -635,7 +631,8 @@ pub(crate) fn node_text<'a>(node: &Node, source: &'a str) -> &'a str {
     &source[node.byte_range()]
 }
 
-/// Convert a tree-sitter node to a core Range (works in both native and WASM)
+/// Convert a tree-sitter node to a byte-column core Range (native and WASM).
+/// This is not a UTF-16 client range; convert it at the protocol boundary.
 pub fn node_to_range(node: &Node) -> crate::core::types::Range {
     let start_point = node.start_position();
     let end_point = node.end_position();

@@ -58,37 +58,33 @@ impl DocumentSnapshot {
         }
     }
 
-    fn changed(&self, version: i32, changes: Vec<TextDocumentContentChangeEvent>) -> Self {
+    fn changed(&self, version: i32, changes: Vec<TextDocumentContentChangeEvent>) -> Option<Self> {
         let mut text = (*self.text).clone();
         let mut old_tree = self.tree.clone();
         for change in changes {
             if let Some(range) = change.range {
-                let start_byte = utils::position_to_byte(&text, range.start.into());
-                let old_end_byte = utils::position_to_byte(&text, range.end.into());
-                let new_end = utils::apply_text_edit(
+                let edit = utils::apply_text_edit_checked(
                     &mut text,
                     range.start.into(),
                     range.end.into(),
                     &change.text,
-                );
+                )?;
                 if let Some(tree) = &mut old_tree {
-                    // Coordinate conversion is unchanged here; the byte/UTF-16
-                    // InputEdit discrepancy is tracked separately in #289.
                     tree.edit(&tree_sitter::InputEdit {
-                        start_byte,
-                        old_end_byte,
-                        new_end_byte: start_byte + change.text.len(),
+                        start_byte: edit.start_byte,
+                        old_end_byte: edit.old_end_byte,
+                        new_end_byte: edit.new_end_byte,
                         start_position: tree_sitter::Point {
-                            row: range.start.line as usize,
-                            column: range.start.character as usize,
+                            row: edit.start_position.line as usize,
+                            column: edit.start_position.character as usize,
                         },
                         old_end_position: tree_sitter::Point {
-                            row: range.end.line as usize,
-                            column: range.end.character as usize,
+                            row: edit.old_end_position.line as usize,
+                            column: edit.old_end_position.character as usize,
                         },
                         new_end_position: tree_sitter::Point {
-                            row: new_end.line as usize,
-                            column: new_end.character as usize,
+                            row: edit.new_end_position.line as usize,
+                            column: edit.new_end_position.character as usize,
                         },
                     });
                 }
@@ -97,7 +93,7 @@ impl DocumentSnapshot {
                 old_tree = None;
             }
         }
-        Self::parse(text, version, old_tree.as_ref())
+        Some(Self::parse(text, version, old_tree.as_ref()))
     }
 }
 
@@ -147,8 +143,14 @@ impl DocumentHandle {
                             DocumentEvent::Change { changes, version } => {
                                 if let Some(current) = &snapshot {
                                     if version > current.version {
-                                        snapshot = Some(Arc::new(current.changed(version, changes)));
-                                        updated = true;
+                                        if let Some(changed) = current.changed(version, changes) {
+                                            snapshot = Some(Arc::new(changed));
+                                            updated = true;
+                                        } else {
+                                            client.log_message(MessageType::WARNING, format!(
+                                                "Ignoring didChange with a reversed range for {uri} at version {version}",
+                                            )).await;
+                                        }
                                     } else {
                                         client.log_message(MessageType::WARNING, format!(
                                             "Ignoring stale didChange for {uri}: version {version} <= {}",
@@ -177,6 +179,7 @@ impl DocumentHandle {
                             if let Some(current) = &snapshot {
                                 let mut combined = current.syntax_diagnostics.clone();
                                 combined.extend(current.semantic_diagnostics.clone());
+                                super::positions::diagnostics(&current.text, &uri, &mut combined);
                                 client.publish_diagnostics(uri.clone(), combined, Some(current.version)).await;
                             }
                             validation_due = Some(Instant::now() + Duration::from_millis(DEBOUNCE_DURATION_MS));
@@ -189,11 +192,12 @@ impl DocumentHandle {
                         validation_due = None;
                         if let Some(current) = &snapshot {
                             let wast = diagnostics::validate_wat(&current.text);
-                            let combined = diagnostics::merge_all_diagnostics(
+                            let mut combined = diagnostics::merge_all_diagnostics(
                                 current.syntax_diagnostics.clone(),
                                 current.semantic_diagnostics.clone(),
                                 wast,
                             );
+                            super::positions::diagnostics(&current.text, &uri, &mut combined);
                             client.publish_diagnostics(uri.clone(), combined, Some(current.version)).await;
                         }
                     }
@@ -306,5 +310,78 @@ mod tests {
         let snapshot = document.dispatch(DocumentEvent::Snapshot).await.unwrap();
         assert_eq!(*snapshot.text, "(module (func $ab))");
         assert_eq!(snapshot.version, 2);
+    }
+    #[test]
+    fn unicode_incremental_snapshots_match_fresh_parses() {
+        use crate::core::text::TextIndex;
+        fn geometry(
+            tree: &Tree,
+        ) -> Vec<(String, usize, usize, tree_sitter::Point, tree_sitter::Point)> {
+            fn walk(
+                node: tree_sitter::Node<'_>,
+                out: &mut Vec<(String, usize, usize, tree_sitter::Point, tree_sitter::Point)>,
+            ) {
+                out.push((
+                    node.kind().to_owned(),
+                    node.start_byte(),
+                    node.end_byte(),
+                    node.start_position(),
+                    node.end_position(),
+                ));
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    walk(child, out);
+                }
+            }
+            let mut nodes = Vec::new();
+            walk(tree.root_node(), &mut nodes);
+            nodes
+        }
+        let mut snapshot =
+            DocumentSnapshot::parse("(module (; é漢😀 ;) (func $a))\r\n".into(), 1, None);
+        for (needle, replacement) in [
+            ("😀", "😀x\r\n漢\n"),
+            ("$a", "$long"),
+            ("é", "😀"),
+            ("x\r\n漢\n", "z"),
+            ("\r\n", "\n\n"),
+        ] {
+            let start = snapshot.text.find(needle).unwrap();
+            let end = start + needle.len();
+            let mut expected = (*snapshot.text).clone();
+            expected.replace_range(start..end, replacement);
+            let index = TextIndex::new(&snapshot.text);
+            let change = TextDocumentContentChangeEvent {
+                range: Some(Range::new(
+                    index.byte_to_utf16(start).into(),
+                    index.byte_to_utf16(end).into(),
+                )),
+                range_length: None,
+                text: replacement.into(),
+            };
+            snapshot = snapshot
+                .changed(snapshot.version + 1, vec![change])
+                .unwrap();
+            assert_eq!(*snapshot.text, expected);
+            let fresh = DocumentSnapshot::parse(expected, snapshot.version, None);
+            assert_eq!(
+                geometry(snapshot.tree.as_ref().unwrap()),
+                geometry(fresh.tree.as_ref().unwrap())
+            );
+            assert_eq!(snapshot.syntax_diagnostics, fresh.syntax_diagnostics);
+            assert_eq!(snapshot.semantic_diagnostics, fresh.semantic_diagnostics);
+        }
+    }
+
+    #[test]
+    fn invalid_edit_batch_is_rejected_atomically() {
+        let snapshot = DocumentSnapshot::parse("(module (func $a))".into(), 1, None);
+        let mut reversed = insertion("BAD");
+        reversed.range = Some(Range::new(Position::new(0, 17), Position::new(0, 0)));
+        assert!(snapshot
+            .changed(2, vec![insertion("b"), reversed])
+            .is_none());
+        assert_eq!(*snapshot.text, "(module (func $a))");
+        assert_eq!(snapshot.version, 1);
     }
 }
