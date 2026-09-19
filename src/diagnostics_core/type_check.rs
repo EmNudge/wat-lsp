@@ -55,6 +55,18 @@ pub(super) struct TypeChecker {
 /// Check if two types are compatible for validation purposes.
 /// Unknown matches anything (polymorphic). Otherwise types must match exactly,
 /// with basic reference subtyping.
+///
+/// INTERIM APPROXIMATION — `Unknown` signature matching: `ValueType::Unknown` is
+/// not a real Wasm type. It is a placeholder the type checker uses when it cannot
+/// (yet) infer a concrete type for a value — e.g. the result of an instruction we
+/// don't model precisely, an operand popped from an unreachable/underflowed stack,
+/// or an unresolved reference. Treating `Unknown` as compatible with everything is
+/// deliberately *permissive*: it suppresses false positives on incomplete or
+/// partially-recovered source at the cost of missing some genuine mismatches
+/// wherever an `Unknown` participates. This is a recovery heuristic, not a
+/// complete type-correctness check, and should be replaced with real inference
+/// as the modelled instruction set grows. See also
+/// `types_compatible_with_symbols` below and `semantic.rs::types_compatible`.
 pub(super) fn types_compatible(actual: &ValueType, expected: &ValueType) -> bool {
     if *actual == ValueType::Unknown || *expected == ValueType::Unknown {
         return true;
@@ -133,6 +145,9 @@ pub(super) fn types_compatible_with_symbols(
     symbols: &SymbolTable,
 ) -> bool {
     use ValueType::*;
+    // INTERIM APPROXIMATION — see `types_compatible` above: `Unknown` is a
+    // recovery placeholder, not a real type, and is treated as compatible with
+    // everything to avoid false positives on unresolved/incomplete source.
     if *actual == Unknown || *expected == Unknown {
         return true;
     }

@@ -1,0 +1,4 @@
+{
+  "description": "memory.copy with zero or two memory indices is valid (no diagnostics)",
+  "diagnostics": []
+}

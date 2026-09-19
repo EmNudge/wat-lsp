@@ -1440,6 +1440,13 @@ fn infer_const_instr_result_type(name: &str, full_text: &str) -> Option<ValueTyp
 }
 
 /// Check if a value type matches the declared elem ref type.
+///
+/// INTERIM APPROXIMATION — `Unknown` signature matching (and the trailing
+/// permissive `_ => true` arm): `ValueType::Unknown` is a recovery placeholder
+/// for types the checker could not infer, so it matches anything to avoid false
+/// positives; and ref-type pairs we don't yet model precisely are accepted rather
+/// than flagged. This favors recovery over completeness and should tighten as the
+/// modelled ref-type lattice grows. See `type_check::types_compatible`.
 fn ref_type_matches(actual: &ValueType, expected: &ValueType) -> bool {
     use ValueType::*;
     if actual == expected {

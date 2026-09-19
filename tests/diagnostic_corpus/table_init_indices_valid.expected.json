@@ -1,0 +1,4 @@
+{
+  "description": "table.init with one or two immediates (elem index required, table index optional) is valid",
+  "diagnostics": []
+}

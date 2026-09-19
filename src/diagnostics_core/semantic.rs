@@ -1433,7 +1433,18 @@ fn get_all_branch_depths(node: &Node, source: &str, checker: &mut TypeChecker) -
     result
 }
 
-/// Check if two value types are compatible for br_table target consistency
+/// Check if two value types are compatible (used by `select` operand checking).
+///
+/// INTERIM APPROXIMATION — `Unknown` signature matching: `ValueType::Unknown` is a
+/// recovery placeholder for types the checker could not infer, not a real Wasm
+/// type. Treating it as compatible with everything is deliberately permissive: it
+/// avoids false positives on incomplete/unresolved source at the cost of missing
+/// genuine mismatches wherever an `Unknown` participates. See the fuller note on
+/// `type_check::types_compatible`.
+///
+/// (Note: `br_table` target consistency no longer uses this helper — it was
+/// upgraded to an exact common-subtype check in `br_table_types_consistent`
+/// below, which is a real type-correctness check, not an approximation.)
 fn types_compatible(a: &ValueType, b: &ValueType) -> bool {
     if *a == ValueType::Unknown || *b == ValueType::Unknown {
         return true;
