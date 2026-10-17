@@ -151,6 +151,13 @@ struct LineScan {
     starts_in_block_comment: bool,
     /// Block comment nesting depth at end of line, carried to the next line.
     block_depth_end: usize,
+    /// Block keywords that head a folded form; the bracket already indents the
+    /// line, so this count is subtracted from the line's own indent.
+    folded_heads: usize,
+    /// Whether the last code byte on the line was an opening bracket. A keyword at
+    /// the head of the next line is then a folded head rather than a bracket-free
+    /// block.
+    ends_with_open_bracket: bool,
 }
 
 /// Keywords that open a level in the bracket-free spelling of a block.
@@ -171,44 +178,95 @@ const LINEAR_BLOCK_CLOSERS: [&str; 1] = ["end"];
 /// they start dedents by one and the body that follows re-indents.
 const LINEAR_BLOCK_SWITCHERS: [&str; 4] = ["else", "catch", "catch_all", "delegate"];
 
-/// Count bracket-free block keywords at the start of a line's code.
+/// What the leading run of block keywords on a line contributes.
+#[derive(Debug, Default, Clone, Copy)]
+struct LinearBlocks {
+    /// Levels opened by bracket-free block keywords.
+    opens: usize,
+    /// Levels closed by `end`.
+    closes: usize,
+    /// Levels closed and reopened by a sibling separator (`else`, `catch`).
+    switches: usize,
+    /// Block keywords that head a **folded** form, i.e. preceded by an opening
+    /// bracket. They open a level for their body, but the bracket already supplies
+    /// the line's own indentation, so the line itself must not gain one.
+    folded_heads: usize,
+}
+
+/// Count block keywords at the start of a line's code.
 ///
-/// `webassembly-tools`' default textual output (`wasm-tools print`) spells every
-/// instruction sequence in this bracket-free form, so it is the shape real input
-/// arrives in rather than an edge case.
+/// `bracket_open_above` reports whether an opening bracket was still unclosed when
+/// the line began, which makes the first keyword on the line a folded head.
 ///
-/// Detection looks only at the leading run of words, which keeps operands and
-/// identifiers out of the analysis: `local.get $block` and the text of a `;;`
-/// comment can never be mistaken for a form opener. A word that carries a
-/// trailing `)` (`end)`, `else)`) still matches, because a bracket-free block is
-/// frequently closed flush against the form that contains it.
-fn scan_linear_blocks(code: &str) -> (usize, usize, usize) {
-    let mut opens = 0usize;
-    let mut closes = 0usize;
-    let mut switches = 0usize;
+/// `wasm-tools print` spells every instruction sequence in the bracket-free form,
+/// so recognising it is the common case rather than an edge case. Detection looks
+/// only at the leading run of words, which keeps operands and identifiers out of
+/// the analysis: `local.get $block` and the text of a `;;` comment can never be
+/// mistaken for a form opener. A word carrying a trailing `)` (`end)`, `else)`)
+/// still matches, because a bracket-free block is frequently closed flush against
+/// the form that contains it.
+///
+/// # Folded heads
+///
+/// These three shapes all mean "one block, body indented one level in":
+///
+/// ```text
+/// (block        <- keyword follows `(` on the same line
+///   nop)
+///
+/// (             <- keyword follows a `(` left open by the previous line
+/// block
+///   nop)
+///
+/// block         <- no bracket anywhere near, the bracket-free spelling
+///   nop
+/// end
+/// ```
+///
+/// The first two carry a bracket, so bracket depth already indents the line. They
+/// still open a level, which is why [`LinearBlocks::opens`] is incremented and
+/// [`LinearBlocks::folded_heads`] records that the line must not be indented
+/// again.
+fn scan_linear_blocks(code: &str, bracket_open_above: bool) -> LinearBlocks {
+    let mut result = LinearBlocks::default();
+    // Bracket depth accumulated from words already consumed on this line.
+    let mut depth_from_line = 0usize;
 
     for raw in code.split_ascii_whitespace() {
         let word = raw.trim_end_matches(')');
-
-        if LINEAR_BLOCK_OPENERS.contains(&word) {
-            opens += 1;
-        } else if LINEAR_BLOCK_CLOSERS.contains(&word) {
-            closes += 1;
-        } else if LINEAR_BLOCK_SWITCHERS.contains(&word) {
-            switches += 1;
-        } else {
+        let is_keyword = LINEAR_BLOCK_OPENERS.contains(&word)
+            || LINEAR_BLOCK_CLOSERS.contains(&word)
+            || LINEAR_BLOCK_SWITCHERS.contains(&word);
+        if !is_keyword {
             // The leading run of block keywords has ended.
             break;
         }
 
-        // The word carried a closing bracket, so the form it belongs to also
-        // ended here; nothing later on this line can be a leading block.
+        if LINEAR_BLOCK_OPENERS.contains(&word) {
+            result.opens += 1;
+            if bracket_open_above || depth_from_line > 0 {
+                result.folded_heads += 1;
+            }
+        } else if LINEAR_BLOCK_CLOSERS.contains(&word) {
+            result.closes += 1;
+        } else {
+            result.switches += 1;
+        }
+
+        // A word that lost its closing bracket terminated the form it belonged to,
+        // so nothing after it on this line can be a leading block.
         if word.len() != raw.len() {
             break;
         }
+
+        // Fold in the brackets this word carried so the next iteration knows
+        // whether the following keyword is still inside one.
+        depth_from_line = depth_from_line
+            .saturating_add(raw.matches('(').count())
+            .saturating_sub(raw.matches(')').count());
     }
 
-    (opens, closes, switches)
+    result
 }
 
 /// Scan one line, tracking strings, `;;` line comments, and `(; ... ;)` block
@@ -217,7 +275,11 @@ fn scan_linear_blocks(code: &str) -> (usize, usize, usize) {
 /// WAT block comments nest arbitrarily deep, so depth is counted rather than
 /// tracked as a boolean. Brackets, semicolons, and quotes inside a block comment
 /// or a string literal never affect the counts.
-fn scan_line(line: &str, block_depth_start: usize) -> LineScan {
+fn scan_line(
+    line: &str,
+    block_depth_start: usize,
+    previous_ended_with_open_bracket: bool,
+) -> LineScan {
     let bytes = line.as_bytes();
     let mut block_depth = block_depth_start;
     let starts_in_block_comment = block_depth > 0;
@@ -229,6 +291,8 @@ fn scan_line(line: &str, block_depth_start: usize) -> LineScan {
     // Whether the line has produced an opening bracket or an atom yet. Only
     // closing brackets seen before that point count as "leading".
     let mut seen_code = false;
+    // Whether the most recent code byte was an opening bracket.
+    let mut last_code_was_open = false;
 
     let mut i = 0usize;
     while i < bytes.len() {
@@ -264,6 +328,7 @@ fn scan_line(line: &str, block_depth_start: usize) -> LineScan {
             b'"' => {
                 in_string = true;
                 seen_code = true;
+                last_code_was_open = false;
                 i += 1;
             }
             b'(' => {
@@ -275,6 +340,7 @@ fn scan_line(line: &str, block_depth_start: usize) -> LineScan {
                 }
                 opens += 1;
                 seen_code = true;
+                last_code_was_open = true;
                 i += 1;
             }
             b')' => {
@@ -282,6 +348,7 @@ fn scan_line(line: &str, block_depth_start: usize) -> LineScan {
                 if !seen_code {
                     leading_closes += 1;
                 }
+                last_code_was_open = false;
                 i += 1;
             }
             b';' => {
@@ -290,11 +357,13 @@ fn scan_line(line: &str, block_depth_start: usize) -> LineScan {
                     break;
                 }
                 seen_code = true;
+                last_code_was_open = false;
                 i += 1;
             }
             b' ' | b'\t' | b'\r' => i += 1,
             _ => {
                 seen_code = true;
+                last_code_was_open = false;
                 i += 1;
             }
         }
@@ -307,18 +376,20 @@ fn scan_line(line: &str, block_depth_start: usize) -> LineScan {
         Some(at) => &line[..at],
         None => line,
     };
-    let (block_opens, block_closes, block_switches) = scan_linear_blocks(code);
+    let linear = scan_linear_blocks(code, previous_ended_with_open_bracket);
 
     LineScan {
         line_comment_at,
         opens,
         closes,
         leading_closes,
-        block_opens,
-        block_closes,
-        block_switches,
+        block_opens: linear.opens,
+        block_closes: linear.closes,
+        block_switches: linear.switches,
         starts_in_block_comment,
         block_depth_end: block_depth,
+        folded_heads: linear.folded_heads,
+        ends_with_open_bracket: last_code_was_open,
     }
 }
 
@@ -378,10 +449,13 @@ pub fn format_whitespace(source: &str, options: &FormatOptions) -> String {
     let mut depth: usize = 0;
     let mut block_depth: usize = 0;
     let mut blank_run: usize = 0;
+    // Carried across lines so a folded form wrapped right after its `(` is not
+    // mistaken for the bracket-free spelling.
+    let mut previous_ended_with_open_bracket = false;
 
     for raw_line in source.split('\n') {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-        let scan = scan_line(line, block_depth);
+        let scan = scan_line(line, block_depth, previous_ended_with_open_bracket);
         block_depth = scan.block_depth_end;
 
         // Continuation lines inside a multi-line block comment keep their own
@@ -411,10 +485,14 @@ pub fn format_whitespace(source: &str, options: &FormatOptions) -> String {
         // (`else`, `catch`) between two bodies of the same form. Brackets and
         // `end` are mutually exclusive on one line, so taking the larger of the
         // two counts never double-dedents.
+        // A folded head opens a level for its body, but the bracket that precedes
+        // it already indented this line, so the line itself is pulled back one
+        // level per folded head.
         let dedent_by = scan
             .leading_closes
             .max(scan.block_closes)
-            .saturating_add(scan.block_switches);
+            .saturating_add(scan.block_switches)
+            .saturating_add(scan.folded_heads);
         let indent = unit.repeat(depth.saturating_sub(dedent_by));
 
         // Everything after the original indentation; the indent above replaces it.
@@ -455,11 +533,20 @@ pub fn format_whitespace(source: &str, options: &FormatOptions) -> String {
         };
         lines.push(rendered);
 
+        // A folded head shares its level with the bracket in front of it, which
+        // already incremented `depth`. Counting the keyword as well would push the
+        // body and every following line down one extra level.
+        debug_assert!(
+            scan.folded_heads <= scan.block_opens,
+            "folded heads cannot exceed the levels opened"
+        );
         depth = depth
             .saturating_add(scan.opens)
             .saturating_sub(scan.closes)
-            .saturating_add(scan.block_opens)
+            .saturating_add(scan.block_opens.saturating_sub(scan.folded_heads))
             .saturating_sub(scan.block_closes);
+
+        previous_ended_with_open_bracket = scan.ends_with_open_bracket;
     }
 
     // Trailing blank lines are decided by the final-newline options below, so

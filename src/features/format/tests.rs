@@ -727,3 +727,109 @@ fn folded_spellings_are_not_in_the_opener_table() {
         );
     }
 }
+
+// ============================================================================
+// Folded forms wrapped after an open bracket
+// ============================================================================
+
+/// Leading spaces of the first line whose trimmed form starts with `needle`.
+fn indent_of(formatted: &str, needle: &str) -> usize {
+    formatted
+        .lines()
+        .find(|l| l.trim_start().starts_with(needle))
+        .map(|l| l.len() - l.trim_start().len())
+        .unwrap_or_else(|| panic!("no line starting with {needle:?}:\n{formatted}"))
+}
+
+#[test]
+fn folded_form_wrapped_after_an_open_bracket_indents_like_the_single_line_form() {
+    // `(block` and `(\nblock` are the same folded form. The keyword shares its
+    // level with the bracket, and its body sits one level inside.
+    //
+    // Regression guard: the wrapped shape used to push the keyword and its whole
+    // body down a level, and left the closing brackets over-indented.
+    let wrapped = "(module\n(func\n(\nblock\nnop)\n)\n)\n";
+    let single = "(module\n(func\n(block\nnop)\n)\n)\n";
+
+    let wrapped_formatted = fmt(wrapped);
+    let single_formatted = fmt(single);
+
+    // The keyword aligns with the lone `(` rather than nesting inside it.
+    let lone_bracket = wrapped_formatted
+        .lines()
+        .find(|l| l.trim() == "(")
+        .map(|l| l.len() - l.trim_start().len())
+        .expect("the lone bracket line survives");
+    assert_eq!(
+        indent_of(&wrapped_formatted, "block"),
+        lone_bracket,
+        "the keyword nested inside its own bracket:\n{wrapped_formatted}"
+    );
+
+    // The body is one level inside the keyword, matching the single-line form.
+    assert_eq!(
+        indent_of(&wrapped_formatted, "nop"),
+        indent_of(&single_formatted, "nop"),
+        "the wrapped form's body drifted:\n{wrapped_formatted}"
+    );
+
+    // Closing brackets land at the same levels as the single-line form.
+    let wrapped_closers: Vec<usize> = wrapped_formatted
+        .lines()
+        .filter(|l| l.trim() == ")")
+        .map(|l| l.len() - l.trim_start().len())
+        .collect();
+    let single_closers: Vec<usize> = single_formatted
+        .lines()
+        .filter(|l| l.trim() == ")")
+        .map(|l| l.len() - l.trim_start().len())
+        .collect();
+    assert_eq!(
+        wrapped_closers, single_closers,
+        "closing brackets shifted:\n{wrapped_formatted}"
+    );
+
+    assert_stable(wrapped);
+}
+
+#[test]
+fn bracket_free_block_is_unaffected_by_the_folded_head_rule() {
+    // A keyword with no bracket in front of it is the bracket-free spelling and
+    // still opens a level, so the fix above cannot leak into it.
+    let source = "(module\n(func\nblock\nnop\nend\n)\n)\n";
+    assert_eq!(
+        fmt(source),
+        "(module\n  (func\n    block\n      nop\n    end\n  )\n)\n"
+    );
+    assert_stable(source);
+}
+
+#[test]
+fn wrapped_folded_state_does_not_leak_into_later_lines() {
+    // Once the wrapped form closes, a bracket-free block later in the same file
+    // must open its own level again.
+    let source = "(module\n(func\n(\nblock\nnop)\n)\n(func\nblock\nnop\nend\n)\n)\n";
+    let output = fmt(source);
+    assert!(
+        output.contains("\n    block\n      nop\n    end\n"),
+        "the later bracket-free block lost its level:\n{output}"
+    );
+    assert_stable(source);
+}
+
+#[test]
+fn blank_line_after_an_open_bracket_keeps_the_folded_head_state() {
+    // A blank line does not close a bracket, so the keyword is still a folded head.
+    let wrapped = "(module\n(func\n(\n\nblock\nnop)\n)\n)\n";
+    let output = fmt(wrapped);
+    assert_eq!(
+        indent_of(&output, "block"),
+        output
+            .lines()
+            .find(|l| l.trim() == "(")
+            .map(|l| l.len() - l.trim_start().len())
+            .expect("the lone bracket line survives"),
+        "a blank line changed how the folded form was counted:\n{output}"
+    );
+    assert_stable(wrapped);
+}
