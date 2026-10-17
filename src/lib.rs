@@ -109,6 +109,9 @@ pub use features::signature;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub use features::folding;
 
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub use features::format;
+
 // Diagnostics (native only)
 #[cfg(feature = "native")]
 pub mod diagnostics;

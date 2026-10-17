@@ -29,6 +29,10 @@ pub mod document_symbols;
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod folding;
 
+// Format - whitespace/indentation normalization
+#[cfg(any(feature = "native", feature = "wasm"))]
+pub mod format;
+
 // Hover - provides hover documentation
 #[cfg(any(feature = "native", feature = "wasm"))]
 pub mod hover;

@@ -165,6 +165,10 @@ async fn lifecycle_initialize_shutdown() {
     assert!(caps.get("referencesProvider").is_some());
     assert!(caps.get("renameProvider").is_some());
     assert!(caps.get("foldingRangeProvider").is_some());
+    assert!(
+        caps.get("documentFormattingProvider").is_some(),
+        "documentFormattingProvider must be advertised"
+    );
 
     // Initialized notification
     let notif = Request::build("initialized")
@@ -176,6 +180,115 @@ async fn lifecycle_initialize_shutdown() {
     let req = Request::build("shutdown").id(2).finish();
     let resp = svc.call(req).await.unwrap().unwrap();
     assert!(resp.is_ok());
+}
+
+#[tokio::test]
+async fn formatting_indents_and_is_idempotent() {
+    let (mut svc, _notifs) = create_service();
+    initialize(&mut svc).await;
+
+    let uri = "file:///fmt.wat";
+    open_document(&mut svc, uri, "(module\n(func $f)\n)\n").await;
+
+    let result = send_request(
+        &mut svc,
+        "textDocument/formatting",
+        10,
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }),
+    )
+    .await;
+
+    let edits = result.as_array().expect("formatting must return an array");
+    assert_eq!(edits.len(), 1, "expected one whole-document edit: {result}");
+
+    let edit = &edits[0];
+    assert_eq!(edit["newText"], "(module\n  (func $f)\n)\n");
+    assert_eq!(edit["range"]["start"]["line"], 0);
+    assert_eq!(edit["range"]["start"]["character"], 0);
+}
+
+#[tokio::test]
+async fn formatting_returns_no_edit_for_already_formatted_input() {
+    let (mut svc, _notifs) = create_service();
+    initialize(&mut svc).await;
+
+    let uri = "file:///fmt-clean.wat";
+    open_document(&mut svc, uri, "(module\n  (func $f)\n)\n").await;
+
+    let result = send_request(
+        &mut svc,
+        "textDocument/formatting",
+        11,
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }),
+    )
+    .await;
+
+    let edits = result.as_array().expect("formatting must return an array");
+    assert!(
+        edits.is_empty(),
+        "formatted input must yield no edit, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn formatting_works_on_a_document_that_does_not_parse() {
+    // Formatting must not require a valid syntax tree. A missing closing
+    // bracket is exactly when a user reaches for Format Document.
+    let (mut svc, _notifs) = create_service();
+    initialize(&mut svc).await;
+
+    let uri = "file:///fmt-broken.wat";
+    open_document(&mut svc, uri, "(module\n(func $f\n").await;
+
+    let result = send_request(
+        &mut svc,
+        "textDocument/formatting",
+        12,
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true }
+        }),
+    )
+    .await;
+
+    let edits = result.as_array().expect("formatting must return an array");
+    assert_eq!(edits.len(), 1, "expected a formatting edit: {result}");
+    assert_eq!(
+        edits[0]["newText"], "(module\n    (func $f\n",
+        "tabSize from the request must be honoured"
+    );
+}
+
+#[tokio::test]
+async fn formatting_preserves_block_comments() {
+    let (mut svc, _notifs) = create_service();
+    initialize(&mut svc).await;
+
+    let uri = "file:///fmt-comment.wat";
+    open_document(&mut svc, uri, "(module\n(; keep (; nested ;) ;)\n)\n").await;
+
+    let result = send_request(
+        &mut svc,
+        "textDocument/formatting",
+        13,
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }),
+    )
+    .await;
+
+    let new_text = result[0]["newText"].as_str().unwrap();
+    assert!(
+        new_text.contains("(; keep (; nested ;) ;)"),
+        "block comment was altered: {new_text:?}"
+    );
 }
 
 #[tokio::test]

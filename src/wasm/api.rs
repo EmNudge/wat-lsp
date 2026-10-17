@@ -10,6 +10,7 @@ use crate::core::types::{
     InsertTextFormat, Position, Range,
 };
 use crate::folding::{provide_folding_ranges, FoldingRangeKind};
+use crate::format::{provide_formatting, FormatOptions};
 use crate::hover::provide_hover_core;
 use crate::parser::{parse_document_from_tree, parse_modules_from_tree, ModuleInfo};
 use crate::signature::call_info::{find_function_call, find_function_call_ast, CallType};
@@ -680,7 +681,61 @@ impl WatLSP {
         js_array.into()
     }
 
-    /// Provide code completion items at the given position
+    /// Provide a whole-document formatting edit for the current document.
+    /// Returns an array of edit objects with `range` and `newText`, empty when
+    /// the document is already formatted.
+    ///
+    /// `trimTrailingWhitespace`, `insertFinalNewline`, and `trimFinalNewlines`
+    /// default to `true`, matching the server's behaviour for clients that omit
+    /// them.
+    #[wasm_bindgen(js_name = provideFormatting)]
+    pub fn provide_formatting(
+        &self,
+        tab_size: u32,
+        insert_spaces: bool,
+        trim_trailing_whitespace: Option<bool>,
+        insert_final_newline: Option<bool>,
+        trim_final_newlines: Option<bool>,
+    ) -> JsValue {
+        let options = FormatOptions {
+            tab_size: tab_size as usize,
+            insert_spaces,
+            trim_trailing_whitespace: trim_trailing_whitespace.unwrap_or(true),
+            insert_final_newline: insert_final_newline.unwrap_or(true),
+            trim_final_newlines: trim_final_newlines.unwrap_or(true),
+        };
+        let result = provide_formatting(&self.document, &options);
+
+        let js_array = js_sys::Array::new();
+        for edit in result.edits {
+            let obj = js_sys::Object::new();
+
+            let start = js_sys::Object::new();
+            js_sys::Reflect::set(&start, &"line".into(), &edit.range.start.line.into()).ok();
+            js_sys::Reflect::set(
+                &start,
+                &"character".into(),
+                &edit.range.start.character.into(),
+            )
+            .ok();
+
+            let end = js_sys::Object::new();
+            js_sys::Reflect::set(&end, &"line".into(), &edit.range.end.line.into()).ok();
+            js_sys::Reflect::set(&end, &"character".into(), &edit.range.end.character.into()).ok();
+
+            let range = js_sys::Object::new();
+            js_sys::Reflect::set(&range, &"start".into(), &start).ok();
+            js_sys::Reflect::set(&range, &"end".into(), &end).ok();
+
+            js_sys::Reflect::set(&obj, &"range".into(), &range).ok();
+            js_sys::Reflect::set(&obj, &"newText".into(), &edit.new_text.into()).ok();
+            js_array.push(&obj);
+        }
+
+        js_array.into()
+    }
+
+    /// Provide completion items at the given position
     /// Returns an array of completion item objects
     #[wasm_bindgen(js_name = provideCompletion)]
     pub fn provide_completion(&self, line: u32, col: u32) -> JsValue {

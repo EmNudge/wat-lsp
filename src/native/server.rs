@@ -8,7 +8,8 @@ use super::positions;
 use crate::core::text::TextIndex;
 use crate::parser::ModuleInfo;
 use crate::{
-    completion, definition, document_symbols, folding, hover, references, signature, symbols, utils,
+    completion, definition, document_symbols, folding, format, hover, references, signature,
+    symbols, utils,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -111,6 +112,14 @@ impl Backend {
             snapshot.tree.clone()?,
         ))
     }
+
+    /// Text-only snapshot accessor for features that must work on documents whose
+    /// syntax tree is absent or full of errors, such as formatting.
+    async fn document_text(&self, uri: &str) -> Option<Arc<String>> {
+        let document = self.documents.get(uri)?.clone();
+        let snapshot = document.dispatch(DocumentEvent::Snapshot).await?;
+        Some(snapshot.text.clone())
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -150,6 +159,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -494,5 +504,41 @@ impl LanguageServer for Backend {
         }
 
         Ok(None)
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri.to_string();
+
+        // Formatting intentionally reads only the text, never the symbol table or
+        // the syntax tree. Saving while the document does not parse is routine,
+        // and a formatter that refuses to run until the input is valid is worse
+        // than useless: the fix for a missing bracket often *is* re-indenting.
+        let Some(text) = self.document_text(&uri).await else {
+            return Ok(None);
+        };
+
+        let options = format::FormatOptions {
+            tab_size: params.options.tab_size as usize,
+            insert_spaces: params.options.insert_spaces,
+            // Absent means "use the formatter default", which is on for all
+            // three; see `FormatOptions`.
+            trim_trailing_whitespace: params.options.trim_trailing_whitespace.unwrap_or(true),
+            insert_final_newline: params.options.insert_final_newline.unwrap_or(true),
+            trim_final_newlines: params.options.trim_final_newlines.unwrap_or(true),
+        };
+
+        let result = format::provide_formatting(&text, &options);
+        Ok(Some(
+            result
+                .edits
+                .into_iter()
+                .map(|edit| TextEdit {
+                    // Feature ranges already use UTF-16 columns, the encoding this
+                    // server declares, so no conversion is needed here.
+                    range: edit.range.into(),
+                    new_text: edit.new_text,
+                })
+                .collect(),
+        ))
     }
 }
